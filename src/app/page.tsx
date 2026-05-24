@@ -161,10 +161,11 @@ export default function Home() {
         ctx.fillRect(0, 0, TARGET_W, TARGET_H);
         ctx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
 
+        const ts   = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
         const pngData = canvas.toDataURL("image/png");
         const a = document.createElement("a");
         a.href = pngData;
-        a.download = "ko-smart-highres.png";
+        a.download = `ko-smart-highres-${ts}.png`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -185,7 +186,9 @@ export default function Home() {
       toast.error("SVG 로드 실패 — 네트워크 또는 CORS 문제");
       setIsHighResDownloading(false);
     };
-    img.src = svgUrl;                    // Kroki SVG URL 로드 시작
+    // crossOrigin 선언 후 src 할당 (Safari 포함 모든 브라우저에서 순서 중요)
+    // ?t=... 쿼리로 브라우저 캐시 우회 → 새로운 CORS 요청 강제
+    img.src = `${svgUrl}?t=${Date.now()}`;
   };
 
   const handleCopy = () => {
