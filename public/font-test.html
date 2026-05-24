@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+<link rel="stylesheet" href="/tikzjax/fonts.css">
+<style>
+body { font-size: 24px; font-family: sans-serif; padding: 20px; }
+.test { display: inline-block; border: 1px solid #ccc; margin: 4px; padding: 4px; min-width: 40px; text-align: center; }
+.font-name { font-size: 12px; color: #999; display: block; }
+</style>
+</head>
+<body>
+<h2>Font Glyph Test (cmsy10, cmmi10, cmex10)</h2>
+
+<p>cmsy10 - 'l' (U+006C, should be vertical bar |):</p>
+<span class="test"><span style="font-family: cmsy10;">l</span><span class="font-name">cmsy/l</span></span>
+<span class="test"><span style="font-family: cmsy10;">|</span><span class="font-name">cmsy/|</span></span>
+<span class="test">l<span class="font-name">system/l</span></span>
+<span class="test">|<span class="font-name">system/|</span></span>
+
+<p>cmex10 - 'l' (U+006C) and 'y' (U+0079):</p>
+<span class="test"><span style="font-family: cmex10;">l</span><span class="font-name">cmex/l</span></span>
+<span class="test"><span style="font-family: cmex10;">y</span><span class="font-name">cmex/y</span></span>
+<span class="test"><span style="font-family: cmex10;">|</span><span class="font-name">cmex/|</span></span>
+
+<p>cmmi10 - standard chars:</p>
+<span class="test"><span style="font-family: cmmi10;">x</span><span class="font-name">cmmi/x</span></span>
+<span class="test"><span style="font-family: cmmi10;">y</span><span class="font-name">cmmi/y</span></span>
+<span class="test"><span style="font-family: cmmi10;">α</span><span class="font-name">cmmi/α(03B1)</span></span>
+
+<p>Low-char tests (what shows as ♣?):</p>
+<span class="test" id="t1"><span style="font-family: cmsy10;" id="c1"></span><span class="font-name">cmsy/&#11;</span></span>
+<span class="test" id="t2"><span style="font-family: cmsy10;" id="c2"></span><span class="font-name">cmsy/&#12;</span></span>
+<span class="test" id="t3"><span style="font-family: cmex10;" id="c3"></span><span class="font-name">cmex/&#11;</span></span>
+<span class="test" id="t4"><span style="font-family: cmex10;" id="c4"></span><span class="font-name">cmex/&#12;</span></span>
+
+<script>
+// Set control characters
+document.getElementById('c1').textContent = '\x0B'; // U+000B
+document.getElementById('c2').textContent = '\x0C'; // U+000C
+document.getElementById('c3').textContent = '\x0B';
+document.getElementById('c4').textContent = '\x0C';
+
+// Report what fonts are loaded
+document.fonts.ready.then(function() {
+  var report = document.createElement('p');
+  report.style.fontFamily = 'monospace';
+  report.style.fontSize = '14px';
+  var loaded = [];
+  ['cmmi10','cmsy10','cmex10','cmr10'].forEach(function(f) {
+    if(document.fonts.check('12px '+f)) loaded.push(f+' ✓');
+    else loaded.push(f+' ✗');
+  });
+  report.textContent = 'Font loading: ' + loaded.join(', ');
+  document.body.appendChild(report);
+});
+</script>
+</body>
+</html>

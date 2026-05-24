@@ -1,0 +1,14 @@
+# KO-SMART v5.2 Jinil Edition — Netlify 배포 설정
+
+[build]
+  command   = "npm run build"   # next build → /out 폴더 생성
+  publish   = "out"             # 정적 파일 폴더
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA 라우팅: 모든 경로를 index.html로 fallback
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
