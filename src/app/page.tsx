@@ -441,6 +441,39 @@ export default function Home() {
               </div>
             )}
 
+            {/* ══ SVG 프리뷰: crossOrigin 없음, onLoad/onError로 스피너 종료 ══ */}
+            {svgUrl && (
+              isZoomedMode ? (
+                <div className="w-full h-full overflow-auto" style={{ background: "white" }}>
+                  <div style={{
+                    width: `${scaledW}px`,
+                    height: scaledH !== "auto" ? `${scaledH}px` : "auto",
+                    position: "relative", margin: "0 auto",
+                  }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      key={`${svgUrl}-z`} ref={imgRef} src={svgUrl} alt="TikZ diagram"
+                      style={{ display: "block", width: `${BASE_WIDTH}px`, height: "auto",
+                        transformOrigin: "top left", transform: `scale(${zoomScale})` }}
+                      onLoad={handleImgLoad}
+                      onError={() => { setRenderError("렌더링 실패: TikZ 문법 오류 또는 네트워크 문제"); setIsRendering(false); }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="w-full h-full overflow-hidden flex items-center justify-center p-3" style={{ background: "white" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    key={`${svgUrl}-f`} ref={imgRef} src={svgUrl} alt="TikZ diagram"
+                    style={{ display: "block", maxWidth: "100%", maxHeight: "100%",
+                      objectFit: "contain", width: "auto", height: "auto" }}
+                    onLoad={() => { setIsRendering(false); setRenderError(""); }}
+                    onError={() => { setRenderError("렌더링 실패: TikZ 문법 오류 또는 네트워크 문제"); setIsRendering(false); }}
+                  />
+                </div>
+              )
+            )}
+
           </div>
         </div>
       </div>
