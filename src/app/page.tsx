@@ -237,12 +237,10 @@ export default function Home() {
   };
 
   // ── 줌 계산 ─────────────────────────────────────────────────
-  //  100% → Fit to Container (반응형, overflow 없음)
-  //  101%+ → transform: scale(N) + scaledW×scaledH 레이아웃 예약
-  const zoomScale    = zoomPercent / 100;
-  const isZoomedMode = zoomPercent > 100;
-  const scaledW = BASE_WIDTH * zoomScale;
-  const scaledH = imgRenderedH > 0 ? imgRenderedH * zoomScale : "auto";
+  //  CSS zoom (transform과 달리 레이아웃 확장 O)
+  //  100% → zoom:1.0 — 컨테이너에 답 Fit
+  //  101%+ → zoom:N — 레이아웃이 실제로 확장 → overflow-auto 스크롤 동작
+  const zoomScale = zoomPercent / 100;
 
   // ─────────────────────────────────────────────────────────
   return (
@@ -444,37 +442,54 @@ export default function Home() {
               </div>
             )}
 
-            {/* ══ SVG 프리뷰: crossOrigin 없음, onLoad/onError로 스피너 종료 ══ */}
+            {/* ══ SVG 프리뷰 — 단일 바라보기, CSS zoom으로 레이아웃 확장 ══
+                CSS zoom(1.5) = 레이아웃이 1.5로 실제 확장 → overflow-auto원 스크롤 동작
+                transform: scale(1.5) = 시각 확대만, 레이아웃 불변 → 스크롤 안 됨
+                100% → zoom:1.0, 이미지 컨테이너에 Fit
+                105% → zoom:1.05, 정확히 5%만 확대 (점프 없음)
+            ═════════════════════════════════════════════ */}
             {svgUrl && (
-              isZoomedMode ? (
-                <div className="w-full h-full overflow-auto" style={{ background: "white" }}>
-                  <div style={{
-                    width: `${scaledW}px`,
-                    height: scaledH !== "auto" ? `${scaledH}px` : "auto",
-                    position: "relative", margin: "0 auto",
-                  }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      key={`${svgUrl}-z`} ref={imgRef} src={svgUrl} alt="TikZ diagram"
-                      style={{ display: "block", width: `${BASE_WIDTH}px`, height: "auto",
-                        transformOrigin: "top left", transform: `scale(${zoomScale})` }}
-                      onLoad={handleImgLoad}
-                      onError={() => { setRenderError("렌더링 실패: TikZ 문법 오류 또는 네트워크 문제"); setIsRendering(false); }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="w-full h-full overflow-hidden flex items-center justify-center p-3" style={{ background: "white" }}>
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  overflow: "auto",
+                  background: "white",
+                }}
+              >
+                {/* 자식 div에 zoom 적용 → 이 div의 레이아웃이 zoom배율만큼 확장 */}
+                <div
+                  style={{
+                    zoom: zoomScale,
+                    minWidth: "100%",
+                    minHeight: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    padding: "16px",
+                    boxSizing: "border-box",
+                  }}
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    key={`${svgUrl}-f`} ref={imgRef} src={svgUrl} alt="TikZ diagram"
-                    style={{ display: "block", maxWidth: "100%", maxHeight: "100%",
-                      objectFit: "contain", width: "auto", height: "auto" }}
-                    onLoad={() => { setIsRendering(false); setRenderError(""); }}
-                    onError={() => { setRenderError("렌더링 실패: TikZ 문법 오류 또는 네트워크 문제"); setIsRendering(false); }}
+                    key={svgUrl}
+                    ref={imgRef}
+                    src={svgUrl}
+                    alt="TikZ diagram"
+                    style={{
+                      display: "block",
+                      maxWidth: "100%",
+                      height: "auto",
+                      objectFit: "contain",
+                    }}
+                    onLoad={handleImgLoad}
+                    onError={() => {
+                      setRenderError("렌더링 실패: TikZ 문법 오류 또는 네트워크 문제");
+                      setIsRendering(false);
+                    }}
                   />
                 </div>
-              )
+              </div>
             )}
 
           </div>
