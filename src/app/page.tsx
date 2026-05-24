@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { deflate } from "pako";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,17 +62,18 @@ const KICE_TEMPLATE = `\\documentclass[tikz, border=10pt]{standalone}
 export default function Home() {
   const [rawInput,       setRawInput]       = useState("");
   const [debouncedInput, setDebouncedInput] = useState("");
-  const [svgText,        setSvgText]        = useState(""); // Kroki에서 fetch한 인라인 SVG 텍스트
+  const [svgUrl,         setSvgUrl]         = useState("");  // Kroki SVG GET URL
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderError,    setRenderError]    = useState("");
   const [isDownloading,  setIsDownloading]  = useState(false);
   // zoomPercent: 100 ~ 200 정수 (슬라이더 값)
   // 100 = Fit to Container, 101~ = transform:scale
   const [zoomPercent,    setZoomPercent]    = useState<number>(100);
+  // 로드된 이미지의 실제 렌더 높이 — 즌 모드 레이아웃 공간 예약
+  const [imgRenderedH,   setImgRenderedH]   = useState<number>(0);
   const [selectedNodeIndex, setSelectedNodeIndex] = useState<string | null>(null);
 
-  // previewRef: 인라인 SVG가 주입된 컨테이너 (querySelector 대상)
-  const previewRef = useRef<HTMLDivElement>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   // ── Debounce 800 ms ───────────────────────────────────────
   useEffect(() => {
@@ -80,48 +81,34 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [rawInput]);
 
-  // ── SVG 텍스트 fetch ──────────────────────────────────────
-  //  Kroki에서 SVG를 한 번만 fetch → state에 인라인 SVG 저장
-  //  ✔ 초고화질 다운로드 시 DOM querySelector로 재사용 (재요청 없음)
+  // ── SVG URL 설정 (빠르고 안전한 보디없는 방식) ────────────────────
+  //  CORS 문제 없음: <img> 태그가 브라우저 수준에서 로드
   useEffect(() => {
     if (!debouncedInput.trim()) {
-      setSvgText(""); setRenderError(""); setIsRendering(false); return;
+      setSvgUrl(""); setRenderError(""); setIsRendering(false);
+      setImgRenderedH(0); return;
     }
-    let cancelled = false;
-    setIsRendering(true);
-    setRenderError("");
-    setSvgText("");
-
-    fetch(krokiUrl(debouncedInput, "svg"))
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
-      .then(text => {
-        if (cancelled) return;
-        // 고정 width/height 제거 → CSS로 반응형/줌 제어
-        const prepared = text.replace(
-          /<svg(\b[^>]*)>/,
-          (_, attrs) => {
-            const a = attrs
-              .replace(/\s+style="[^"]*"/, "")
-              .replace(/\s+width="[^"]*"/, "")
-              .replace(/\s+height="[^"]*"/, "");
-            return `<svg${a} style="display:block;max-width:100%;height:auto;">`;
-          }
-        );
-        setSvgText(prepared);
-        setIsRendering(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        console.error("[Kroki SVG fetch]", err);
-        setRenderError("Kroki 서버 렌더링 실패\n\n가능한 원인:\n• TikZ 문법 오류\n• 지원되지 않는 패키지\n• 네트워크 연결 문제\n\n브라우저 콘솔(F12)에서 상세 로그 확인");
-        setIsRendering(false);
-      });
-
-    return () => { cancelled = true; };
+    try {
+      setIsRendering(true);
+      setRenderError("");
+      setImgRenderedH(0);
+      setSvgUrl(krokiUrl(debouncedInput, "svg"));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[Kroki encode error]", err);
+      setRenderError("인코딩 오류: " + msg);
+      setIsRendering(false);
+    }
   }, [debouncedInput]);
+
+  // ── 이미지 로드 완료 핸들러 ─────────────────────────────────
+  const handleImgLoad = useCallback(() => {
+    if (imgRef.current) {
+      setImgRenderedH(imgRef.current.offsetHeight || imgRef.current.height);
+    }
+    setIsRendering(false);
+    setRenderError("");
+  }, []);
 
   // ── PNG 다운로드 (Kroki GET → Blob, Tainted Canvas 없음) ──
   const handleDownloadPng = async () => {
@@ -146,51 +133,26 @@ export default function Home() {
     } finally { setIsDownloading(false); }
   };
 
-  // ── 초고화질 PNG: DOM SVG 클론 → Canvas 4000px ─────────────
-  //  ✔ Kroki 재요청 없음
-  //  ✔ querySelector → cloneNode → XMLSerializer
-  //  ✔ data:image/svg+xml → Canvas → canvas.toDataURL('image/png')
+  // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 4000px ───
+  //  Kroki SVG URL에 crossOrigin=anonymous 설정 → CORS 헤더 허용
+  //  Canvas에 drawImage 후 toDataURL로 PNG 추출 (재요청 없음)
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
   const handleDownloadHighRes = () => {
-    const container = previewRef.current;
-    const svgEl     = container?.querySelector("svg") as SVGElement | null;
-    if (!svgEl) {
+    if (!svgUrl) {
       toast.error("렌더링된 SVG가 없습니다. 코드를 먼저 렌더링하세요.");
       return;
     }
     setIsHighResDownloading(true);
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
-    try {
-      // 1. SVG 복제
-      const clone = svgEl.cloneNode(true) as SVGElement;
+    const img = new Image();
+    img.crossOrigin = "anonymous";       // Kroki CORS 헤더 허용 요청
+    img.onload = () => {
+      try {
+        const TARGET_W = 4000;
+        const ratio    = img.naturalHeight / (img.naturalWidth || 1);
+        const TARGET_H = Math.round(TARGET_W * ratio) || Math.round(TARGET_W * 0.8);
 
-      // 2. 원본 크기 추출 (viewBox 우선, fallback: clientWidth)
-      const vb = svgEl.getAttribute("viewBox");
-      let origW = svgEl.clientWidth  || 800;
-      let origH = svgEl.clientHeight || 600;
-      if (vb) {
-        const p = vb.trim().split(/[\s,]+/);
-        if (p.length >= 4) {
-          origW = parseFloat(p[2]) || origW;
-          origH = parseFloat(p[3]) || origH;
-        }
-      }
-
-      // 3. 4000px 기준으로 너비/높이 갱신
-      const TARGET_W = 4000;
-      const TARGET_H = Math.round(origH * TARGET_W / origW);
-      clone.setAttribute("width",  String(TARGET_W));
-      clone.setAttribute("height", String(TARGET_H));
-      clone.style.cssText = ""; // 반응형 style 제거
-
-      // 4. SVG 텍스트 → data URL
-      const svgStr = new XMLSerializer().serializeToString(clone);
-      const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
-
-      // 5. Image 로드 → Canvas 렌더링 → PNG 다운로드
-      const img    = new Image();
-      img.onload = () => {
         const canvas = document.createElement("canvas");
         canvas.width  = TARGET_W;
         canvas.height = TARGET_H;
@@ -208,23 +170,22 @@ export default function Home() {
         document.body.removeChild(a);
 
         toast.dismiss(toastId);
-        toast.success("✅ 초고화질 PNG(4000px)가 저장되었습니다!");
-        setIsHighResDownloading(false);
-      };
-      img.onerror = () => {
+        toast.success("✅ 초고화질 PNG가 저장되었습니다!");
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[High-res canvas]", err);
         toast.dismiss(toastId);
-        toast.error("SVG → 이미지 변환 실패");
+        toast.error("고화질 저장 실패: " + msg);
+      } finally {
         setIsHighResDownloading(false);
-      };
-      img.src = dataUrl;
-
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[High-res PNG]", err);
+      }
+    };
+    img.onerror = () => {
       toast.dismiss(toastId);
-      toast.error("고화질 저장 실패: " + msg);
+      toast.error("SVG 로드 실패 — 네트워크 또는 CORS 문제");
       setIsHighResDownloading(false);
-    }
+    };
+    img.src = svgUrl;                    // Kroki SVG URL 로드 시작
   };
 
   const handleCopy = () => {
@@ -272,11 +233,13 @@ export default function Home() {
     setRawInput(rawInput.slice(0, node.index) + updatedFull + rawInput.slice(node.index + node.full.length));
   };
 
-  // ── 반응형 줌 계산 ──────────────────────────────────────
-  //  zoomPercent === 100 → Fit to Container
-  //  zoomPercent  > 100 → CSS zoom: N (layout 있음, overflow-auto)
+  // ── 줌 계산 ─────────────────────────────────────────────────
+  //  100% → Fit to Container (반응형, overflow 없음)
+  //  101%+ → transform: scale(N) + scaledW×scaledH 레이아웃 예약
   const zoomScale    = zoomPercent / 100;
   const isZoomedMode = zoomPercent > 100;
+  const scaledW = BASE_WIDTH * zoomScale;
+  const scaledH = imgRenderedH > 0 ? imgRenderedH * zoomScale : "auto";
 
   // ─────────────────────────────────────────────────────────
   return (
@@ -466,7 +429,7 @@ export default function Home() {
             )}
 
             {/* 빈 상태 */}
-            {!svgText && !isRendering && !renderError && (
+            {!svgUrl && !isRendering && !renderError && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -476,45 +439,6 @@ export default function Home() {
                   <p className="text-[11px] text-zinc-600 mt-1">by 고진일 팀장 · KO-SMART v5.2</p>
                 </div>
               </div>
-            )}
-
-            {/* ══ 인라인 SVG 렌더링 ════════════════════════════
-                [100%] Fit: overflow-hidden + flex center
-                        SVG에 max-width:100%;height:auto; 이미 적용
-                [101%+] CSS zoom: N (레이아웃 확장) + overflow-auto
-                         querySelector로 SVG 접근 가능 → 초고화질 저장
-            ═══════════════════════════════════════════════ */}
-            {svgText && (
-              isZoomedMode ? (
-                /* ── 확대 모드: CSS zoom + overflow-auto ── */
-                <div
-                  className="w-full h-full overflow-auto"
-                  style={{ background: "white" }}
-                >
-                  <div
-                    ref={previewRef}
-                    dangerouslySetInnerHTML={{ __html: svgText }}
-                    style={{
-                      padding: "16px",
-                      display: "inline-block",
-                      lineHeight: 0,
-                      zoom: zoomScale,
-                    }}
-                  />
-                </div>
-              ) : (
-                /* ── 100% 핏 모드: 컨테이너에 압도록 Fit ── */
-                <div
-                  className="w-full h-full overflow-hidden flex items-center justify-center p-3"
-                  style={{ background: "white" }}
-                >
-                  <div
-                    ref={previewRef}
-                    dangerouslySetInnerHTML={{ __html: svgText }}
-                    style={{ maxWidth: "100%", maxHeight: "100%", lineHeight: 0 }}
-                  />
-                </div>
-              )
             )}
 
           </div>
