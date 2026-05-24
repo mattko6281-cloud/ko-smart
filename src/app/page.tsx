@@ -42,6 +42,25 @@ const BASE_WIDTH = 720; // SVG 기준 너비 (px)
 const ZOOM_LEVELS  = [1.0,   1.73,  2.0  ] as const;
 const ZOOM_LABELS  = ["100%","173%","200%"] as const;
 
+// ─────────────────────────────────────────────────────────────
+//  평가원 표준 템플릿 (클릭 한 번으로 로드)
+// ─────────────────────────────────────────────────────────────
+const KICE_TEMPLATE = `\\documentclass[tikz, border=10pt]{standalone}
+\\usetikzlibrary{arrows.meta}
+
+\\begin{document}
+\\begin{tikzpicture}[>={Stealth[length=7pt, width=3.8pt]}, x=0.8cm, y=0.8cm]
+
+    % Axes
+    \\draw[->] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, font=\\rm, inner sep=1.5pt, xshift=2pt] {$x$};
+    \\draw[->] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, font=\\rm, inner sep=1.5pt, yshift=1pt] {$y$};
+
+    % Origin
+    \\node [below left, inner sep=2pt, transform shape, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
+
+\\end{tikzpicture}
+\\end{document}`;
+
 export default function Home() {
   const [rawInput,       setRawInput]       = useState("");
   const [debouncedInput, setDebouncedInput] = useState("");
@@ -117,6 +136,14 @@ export default function Home() {
   const handleCopy = () => {
     navigator.clipboard.writeText(rawInput);
     toast.success("클립보드에 복사되었습니다.");
+  };
+
+  // ── 평가원 표준 템플릿 로드 ────────────────────────────────
+  const handleLoadTemplate = () => {
+    setRawInput(KICE_TEMPLATE);
+    // debounce를 거치지 않고 즉시 렌더링 트리거
+    setDebouncedInput(KICE_TEMPLATE);
+    toast.success("✅ 평가원 표준 템플릿이 로드되었습니다!");
   };
 
   // ── 노드 스캔 (\node, node, \coordinate 모두) ───────────
@@ -220,9 +247,22 @@ export default function Home() {
 
         {/* ── LEFT: Code Editor ─────────────────────────────── */}
         <div className="w-[44%] shrink-0 flex flex-col border-r border-white/[0.05] bg-[#0c1018]">
-          <div className="px-4 py-2 border-b border-white/[0.05] flex items-center gap-2 bg-zinc-900/30">
-            <History className="w-3 h-3 text-blue-400/70" />
-            <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400/70">Raw TikZ Code</span>
+          <div className="px-4 py-2 border-b border-white/[0.05] flex items-center justify-between bg-zinc-900/30">
+            <div className="flex items-center gap-2">
+              <History className="w-3 h-3 text-blue-400/70" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400/70">Raw TikZ Code</span>
+            </div>
+            {/* 평가원 표준 템플릿 로드 버튼 */}
+            <button
+              onClick={handleLoadTemplate}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150 bg-blue-950/60 hover:bg-blue-900/70 border border-blue-800/40 hover:border-blue-600/60 text-blue-300 hover:text-blue-200 shadow-sm shadow-blue-900/20 group"
+              title="평가원 표준 축 TikZ 코드를 입력창에 로드합니다"
+            >
+              <svg className="w-3 h-3 text-blue-400 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+              평가원 기본 축 로드
+            </button>
           </div>
           <Textarea
             value={rawInput}
