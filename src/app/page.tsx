@@ -178,11 +178,10 @@ export default function Home() {
     setRawInput(rawInput.slice(0, node.index) + updatedFull + rawInput.slice(node.index + node.full.length));
   };
 
-  // ── Smart Viewport Scaling 계산 ──────────────────────────
-  //  img 자체는 width=BASE_WIDTH, height=auto
-  //  transform: scale(zoomScale) → 시각적 확대 (layout 무영향)
-  //  wrapper div → width=BASE_WIDTH*zoom, height=imgRenderedH*zoom
-  //  → 스크롤 가능한 레이아웃 공간 예약
+  // ── 반응형 줌 계산 ──────────────────────────────────────
+  //  100% → Fit to Container (반응형, overflow 없음)
+  //  173% / 200% → Smart Viewport Scaling (transform + overflow-auto)
+  const isZoomedMode = zoomScale > 1.0;
   const scaledW = BASE_WIDTH * zoomScale;
   const scaledH = imgRenderedH > 0 ? imgRenderedH * zoomScale : "auto";
 
@@ -373,51 +372,82 @@ export default function Home() {
               </div>
             )}
 
-            {/* ══ Smart Viewport Scaling ══════════════════════
-                SVG를 BASE_WIDTH(720px) 기준으로 렌더링 후
-                transform: scale(zoomScale)로 시각적 확대.
-                wrapper div가 scaledW × scaledH 공간을 예약하여
-                overflow-auto 스크롤이 자연스럽게 동작.
+            {/* ══ 반응형 줌 렌더링 ═══════════════════════════
+                [100%]  Fit to Container
+                        → maxWidth:100%, maxHeight:100%, objectFit:contain
+                        → 화면 밖으로 삐져나가지 않음, 스크롤 없음
+
+                [173%/200%]  Smart Viewport Scaling
+                        → img: width=BASE_WIDTH + transform:scale(N)
+                        → wrapper: scaledW × scaledH 공간 예약
+                        → overflow-auto 스크롤로 탐색
             ═══════════════════════════════════════════════ */}
             {svgUrl && (
-              <div
-                className="w-full h-full overflow-auto"
-                style={{ background: "white" }}
-              >
-                {/* 레이아웃 공간 예약 컨테이너 */}
+              isZoomedMode ? (
+                /* ── 확대 모드: transform scale + overflow-auto ── */
                 <div
-                  style={{
-                    width: `${scaledW}px`,
-                    height: scaledH !== "auto" ? `${scaledH}px` : "auto",
-                    position: "relative",
-                    margin: "0 auto",     // 수평 중앙 정렬
-                    padding: "0",
-                  }}
+                  className="w-full h-full overflow-auto"
+                  style={{ background: "white" }}
+                >
+                  <div
+                    style={{
+                      width: `${scaledW}px`,
+                      height: scaledH !== "auto" ? `${scaledH}px` : "auto",
+                      position: "relative",
+                      margin: "0 auto",
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      key={`${svgUrl}-zoomed`}
+                      ref={imgRef}
+                      src={svgUrl}
+                      alt="TikZ diagram"
+                      style={{
+                        display: "block",
+                        width: `${BASE_WIDTH}px`,
+                        height: "auto",
+                        transformOrigin: "top left",
+                        transform: `scale(${zoomScale})`,
+                      }}
+                      onLoad={handleImgLoad}
+                      onError={() => {
+                        console.error("[Kroki SVG] load failed");
+                        setRenderError("Kroki 서버 렌더링 실패\n\n가능한 원인:\n• TikZ 문법 오류\n• 지원되지 않는 패키지\n• 네트워크 연결 문제\n\n브라우저 콘솔(F12)에서 상세 로그 확인");
+                        setIsRendering(false);
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                /* ── 100% 반응형 핏: Fit to Container, 스크롤 없음 ── */
+                <div
+                  className="w-full h-full overflow-hidden flex items-center justify-center p-3"
+                  style={{ background: "white" }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    key={svgUrl}
+                    key={`${svgUrl}-fit`}
                     ref={imgRef}
                     src={svgUrl}
                     alt="TikZ diagram"
                     style={{
                       display: "block",
-                      width: `${BASE_WIDTH}px`,   // 기준 너비 고정
+                      maxWidth: "100%",
+                      maxHeight: "100%",
+                      objectFit: "contain",
+                      width: "auto",
                       height: "auto",
-                      transformOrigin: "top left", // 좌상단 기준 확대
-                      transform: `scale(${zoomScale})`,
                     }}
-                    onLoad={handleImgLoad}
+                    onLoad={() => { setIsRendering(false); setRenderError(""); }}
                     onError={() => {
-                      console.error("[Kroki SVG] load failed:", svgUrl.slice(0, 80) + "…");
-                      setRenderError(
-                        "Kroki 서버 렌더링 실패\n\n가능한 원인:\n• TikZ 문법 오류\n• 지원되지 않는 패키지\n• 네트워크 연결 문제\n\n브라우저 콘솔(F12)에서 상세 로그 확인"
-                      );
+                      console.error("[Kroki SVG] load failed");
+                      setRenderError("Kroki 서버 렌더링 실패\n\n가능한 원인:\n• TikZ 문법 오류\n• 지원되지 않는 패키지\n• 네트워크 연결 문제\n\n브라우저 콘솔(F12)에서 상세 로그 확인");
                       setIsRendering(false);
                     }}
                   />
                 </div>
-              </div>
+              )
             )}
           </div>
         </div>
