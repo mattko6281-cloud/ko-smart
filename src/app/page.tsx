@@ -39,8 +39,6 @@ function krokiUrl(source: string, format: "svg" | "png") {
 //  wrapper div가 BASE_WIDTH*zoom × imgHeight*zoom으로 예약
 // ─────────────────────────────────────────────────────────────
 const BASE_WIDTH = 720; // SVG 기준 너비 (px)
-const ZOOM_LEVELS  = [1.0,   1.73,  2.0  ] as const;
-const ZOOM_LABELS  = ["100%","173%","200%"] as const;
 
 // ─────────────────────────────────────────────────────────────
 //  평가원 표준 템플릿 (클릭 한 번으로 로드)
@@ -68,7 +66,9 @@ export default function Home() {
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderError,    setRenderError]    = useState("");
   const [isDownloading,  setIsDownloading]  = useState(false);
-  const [zoomScale,      setZoomScale]      = useState<number>(1.0);
+  // zoomPercent: 100 ~ 200 정수 (슬라이더 값)
+  // 100 = Fit to Container, 101~ = transform:scale
+  const [zoomPercent,    setZoomPercent]    = useState<number>(100);
   // 로드된 이미지의 실제 렌더 높이 — 레이아웃 공간 예약에 사용
   const [imgRenderedH,   setImgRenderedH]   = useState<number>(0);
   const [selectedNodeIndex, setSelectedNodeIndex] = useState<string | null>(null);
@@ -125,12 +125,102 @@ export default function Home() {
       document.body.appendChild(a); a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(objUrl);
-      toast.success("고화질 PNG 저장 완료!");
+      toast.success("PNG 저장 완료!");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Kroki PNG error]", err);
       toast.error("PNG 저장 실패: " + msg);
     } finally { setIsDownloading(false); }
+  };
+
+  // ── 초고화질 PNG (SVG → Canvas 4000px) ────────────────────
+  //  1. Kroki에서 SVG 텍스트 fetch
+  //  2. Blob URL 생성 (same-origin → canvas 오염 없음)
+  //  3. SVG viewBox 파싱 → 4000px 기준 비율 계산
+  //  4. SVG width/height를 4000px으로 수정 후 재로드
+  //  5. Canvas에 그려 PNG로 다운로드
+  const [isHighResDownloading, setIsHighResDownloading] = useState(false);
+  const handleDownloadHighRes = async () => {
+    if (!debouncedInput.trim()) { toast.error("다운로드할 코드가 없습니다."); return; }
+    setIsHighResDownloading(true);
+    const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
+    try {
+      // 1. SVG 텍스트 가져오기
+      const svgFetchUrl = krokiUrl(debouncedInput, "svg");
+      const res = await fetch(svgFetchUrl);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const svgText = await res.text();
+
+      // 2. SVG 파싱 & viewBox에서 원본 비율 추출
+      const parser = new DOMParser();
+      const svgDoc = parser.parseFromString(svgText, "image/svg+xml");
+      const svgEl  = svgDoc.querySelector("svg");
+      const TARGET_W = 4000;
+      let nativeW = 1000, nativeH = 800;
+      if (svgEl) {
+        const vb = svgEl.getAttribute("viewBox");
+        if (vb) {
+          const parts = vb.trim().split(/[\s,]+/);
+          if (parts.length >= 4) {
+            nativeW = parseFloat(parts[2]) || nativeW;
+            nativeH = parseFloat(parts[3]) || nativeH;
+          }
+        } else {
+          nativeW = parseFloat(svgEl.getAttribute("width")  || String(nativeW));
+          nativeH = parseFloat(svgEl.getAttribute("height") || String(nativeH));
+        }
+        // SVG 요소에 4000px 명시 → 브라우저가 이 크기로 래스터화
+        const TARGET_H = Math.round(nativeH * (TARGET_W / nativeW));
+        svgEl.setAttribute("width",  String(TARGET_W));
+        svgEl.setAttribute("height", String(TARGET_H));
+      }
+
+      // 3. 수정된 SVG → Blob URL
+      const modSvg    = new XMLSerializer().serializeToString(svgDoc);
+      const svgBlob   = new Blob([modSvg], { type: "image/svg+xml" });
+      const blobUrl   = URL.createObjectURL(svgBlob);
+
+      // 4. Image 로드 (same-origin Blob URL)
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload  = () => resolve();
+        img.onerror = () => reject(new Error("SVG 이미지 로드 실패"));
+        img.src = blobUrl;
+      });
+
+      const W = img.naturalWidth  || TARGET_W;
+      const H = img.naturalHeight || Math.round(nativeH * (TARGET_W / nativeW));
+
+      // 5. Canvas에 그리기
+      const canvas = document.createElement("canvas");
+      canvas.width  = W;
+      canvas.height = H;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(img, 0, 0, W, H);
+      URL.revokeObjectURL(blobUrl);
+
+      // 6. PNG Blob → 다운로드
+      canvas.toBlob((pngBlob) => {
+        if (!pngBlob) { toast.dismiss(toastId); toast.error("Canvas 변환 실패"); return; }
+        const objUrl = URL.createObjectURL(pngBlob);
+        const a = document.createElement("a");
+        a.href = objUrl; a.download = "ko-smart-highres.png";
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objUrl);
+        toast.dismiss(toastId);
+        toast.success("✅ 초고화질 PNG가 저장되었습니다!");
+        setIsHighResDownloading(false);
+      }, "image/png");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("[High-res PNG]", err);
+      toast.dismiss(toastId);
+      toast.error("고화질 저장 실패: " + msg);
+      setIsHighResDownloading(false);
+    }
   };
 
   const handleCopy = () => {
@@ -179,9 +269,10 @@ export default function Home() {
   };
 
   // ── 반응형 줌 계산 ──────────────────────────────────────
-  //  100% → Fit to Container (반응형, overflow 없음)
-  //  173% / 200% → Smart Viewport Scaling (transform + overflow-auto)
-  const isZoomedMode = zoomScale > 1.0;
+  //  zoomPercent === 100 → Fit to Container
+  //  zoomPercent  > 100 → Smart Viewport Scaling
+  const zoomScale    = zoomPercent / 100;
+  const isZoomedMode = zoomPercent > 100;
   const scaledW = BASE_WIDTH * zoomScale;
   const scaledH = imgRenderedH > 0 ? imgRenderedH * zoomScale : "auto";
 
@@ -287,25 +378,24 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* ── Dynamic Zoom Buttons ── */}
-              <div className="flex items-center gap-px bg-zinc-900 border border-zinc-800 rounded-lg p-0.5">
-                <ZoomIn className="w-3 h-3 text-zinc-600 mx-1.5" />
-                {ZOOM_LEVELS.map((level, i) => (
-                  <button
-                    key={level}
-                    onClick={() => setZoomScale(level)}
-                    className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all duration-150 ${
-                      zoomScale === level
-                        ? "bg-blue-600 text-white shadow shadow-blue-500/30"
-                        : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800"
-                    }`}
-                  >
-                    {ZOOM_LABELS[i]}
-                  </button>
-                ))}
+              {/* ── 줌 슬라이더 ── */}
+              <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
+                <ZoomIn className="w-3 h-3 text-zinc-500 shrink-0" />
+                <input
+                  type="range"
+                  min={100}
+                  max={200}
+                  step={5}
+                  value={zoomPercent}
+                  onChange={(e) => setZoomPercent(parseInt(e.target.value))}
+                  className="w-24 h-1 accent-blue-500 cursor-pointer"
+                />
+                <span className="text-[11px] font-bold text-blue-300 w-9 text-right shrink-0">
+                  {zoomPercent}%
+                </span>
               </div>
 
-              {/* ── Lead Developer 배지 (프리뷰 툴바) ── */}
+              {/* ── Lead Developer 배지 ── */}
               <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-blue-950/60 to-zinc-900/50 border border-blue-800/30">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src="/ko.png" alt="고진일 팀장"
@@ -325,7 +415,21 @@ export default function Home() {
                 {isDownloading
                   ? <Loader2 className="w-3 h-3 animate-spin" />
                   : <Download className="w-3 h-3" />}
-                PNG 저장
+                PNG
+              </Button>
+
+              {/* ── 초고화질 PNG (4000px) ── */}
+              <Button
+                id="btn-download-highres"
+                onClick={handleDownloadHighRes}
+                disabled={isHighResDownloading || !debouncedInput.trim()}
+                size="sm"
+                className="h-8 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-[11px] font-bold gap-1.5 px-3 shadow shadow-amber-500/30 disabled:opacity-40 border-0"
+              >
+                {isHighResDownloading
+                  ? <Loader2 className="w-3 h-3 animate-spin" />
+                  : <Download className="w-3 h-3" />}
+                초고화질 (4000px)
               </Button>
             </div>
           </div>
