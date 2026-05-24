@@ -205,7 +205,12 @@ export default function Home() {
               <span className="text-[10px] font-bold text-blue-400/70 bg-blue-950/40 border border-blue-800/30 rounded px-1.5 py-0.5">v5.2</span>
               <span className="text-[9px] font-semibold text-amber-400/80 bg-amber-950/30 border border-amber-800/30 rounded px-1.5 py-0.5 tracking-tight">Jinil Edition</span>
             </div>
-            <span className="text-[9px] text-zinc-600 mt-0.5 tracking-wider">인피니트 수학연구소 · Cloud TeX Engine</span>
+            <span
+              className="text-[9px] text-slate-500 mt-0.5 tracking-wide cursor-default select-none hover:text-slate-400 transition-colors duration-200"
+              title="평가원 최적화 수학 자동화 렌더링 툴"
+            >
+              KICE-Optimized Standard Math Automation &amp; Rendering Tool
+            </span>
           </div>
         </div>
 
