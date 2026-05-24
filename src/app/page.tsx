@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { deflate } from "pako";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -62,18 +62,17 @@ const KICE_TEMPLATE = `\\documentclass[tikz, border=10pt]{standalone}
 export default function Home() {
   const [rawInput,       setRawInput]       = useState("");
   const [debouncedInput, setDebouncedInput] = useState("");
-  const [svgUrl,         setSvgUrl]         = useState("");
+  const [svgText,        setSvgText]        = useState(""); // Kroki에서 fetch한 인라인 SVG 텍스트
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderError,    setRenderError]    = useState("");
   const [isDownloading,  setIsDownloading]  = useState(false);
   // zoomPercent: 100 ~ 200 정수 (슬라이더 값)
   // 100 = Fit to Container, 101~ = transform:scale
   const [zoomPercent,    setZoomPercent]    = useState<number>(100);
-  // 로드된 이미지의 실제 렌더 높이 — 레이아웃 공간 예약에 사용
-  const [imgRenderedH,   setImgRenderedH]   = useState<number>(0);
   const [selectedNodeIndex, setSelectedNodeIndex] = useState<string | null>(null);
 
-  const imgRef = useRef<HTMLImageElement>(null);
+  // previewRef: 인라인 SVG가 주입된 컨테이너 (querySelector 대상)
+  const previewRef = useRef<HTMLDivElement>(null);
 
   // ── Debounce 800 ms ───────────────────────────────────────
   useEffect(() => {
@@ -81,34 +80,48 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [rawInput]);
 
-  // ── SVG URL 갱신 ─────────────────────────────────────────
+  // ── SVG 텍스트 fetch ──────────────────────────────────────
+  //  Kroki에서 SVG를 한 번만 fetch → state에 인라인 SVG 저장
+  //  ✔ 초고화질 다운로드 시 DOM querySelector로 재사용 (재요청 없음)
   useEffect(() => {
     if (!debouncedInput.trim()) {
-      setSvgUrl(""); setRenderError(""); setIsRendering(false);
-      setImgRenderedH(0); return;
+      setSvgText(""); setRenderError(""); setIsRendering(false); return;
     }
-    try {
-      setIsRendering(true);
-      setRenderError("");
-      setImgRenderedH(0);
-      setSvgUrl(krokiUrl(debouncedInput, "svg"));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("[Kroki encode error]", err);
-      setRenderError("인코딩 오류: " + msg);
-      setIsRendering(false);
-    }
-  }, [debouncedInput]);
-
-  // ── 이미지 로드 완료 핸들러 ───────────────────────────────
-  const handleImgLoad = useCallback(() => {
-    if (imgRef.current) {
-      // width:BASE_WIDTH px 상태에서의 실제 렌더 높이 기록
-      setImgRenderedH(imgRef.current.offsetHeight || imgRef.current.height);
-    }
-    setIsRendering(false);
+    let cancelled = false;
+    setIsRendering(true);
     setRenderError("");
-  }, []);
+    setSvgText("");
+
+    fetch(krokiUrl(debouncedInput, "svg"))
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.text();
+      })
+      .then(text => {
+        if (cancelled) return;
+        // 고정 width/height 제거 → CSS로 반응형/줌 제어
+        const prepared = text.replace(
+          /<svg(\b[^>]*)>/,
+          (_, attrs) => {
+            const a = attrs
+              .replace(/\s+style="[^"]*"/, "")
+              .replace(/\s+width="[^"]*"/, "")
+              .replace(/\s+height="[^"]*"/, "");
+            return `<svg${a} style="display:block;max-width:100%;height:auto;">`;
+          }
+        );
+        setSvgText(prepared);
+        setIsRendering(false);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error("[Kroki SVG fetch]", err);
+        setRenderError("Kroki 서버 렌더링 실패\n\n가능한 원인:\n• TikZ 문법 오류\n• 지원되지 않는 패키지\n• 네트워크 연결 문제\n\n브라우저 콘솔(F12)에서 상세 로그 확인");
+        setIsRendering(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [debouncedInput]);
 
   // ── PNG 다운로드 (Kroki GET → Blob, Tainted Canvas 없음) ──
   const handleDownloadPng = async () => {
@@ -133,87 +146,78 @@ export default function Home() {
     } finally { setIsDownloading(false); }
   };
 
-  // ── 초고화질 PNG (SVG → Canvas 4000px) ────────────────────
-  //  1. Kroki에서 SVG 텍스트 fetch
-  //  2. Blob URL 생성 (same-origin → canvas 오염 없음)
-  //  3. SVG viewBox 파싱 → 4000px 기준 비율 계산
-  //  4. SVG width/height를 4000px으로 수정 후 재로드
-  //  5. Canvas에 그려 PNG로 다운로드
+  // ── 초고화질 PNG: DOM SVG 클론 → Canvas 4000px ─────────────
+  //  ✔ Kroki 재요청 없음
+  //  ✔ querySelector → cloneNode → XMLSerializer
+  //  ✔ data:image/svg+xml → Canvas → canvas.toDataURL('image/png')
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
-  const handleDownloadHighRes = async () => {
-    if (!debouncedInput.trim()) { toast.error("다운로드할 코드가 없습니다."); return; }
+  const handleDownloadHighRes = () => {
+    const container = previewRef.current;
+    const svgEl     = container?.querySelector("svg") as SVGElement | null;
+    if (!svgEl) {
+      toast.error("렌더링된 SVG가 없습니다. 코드를 먼저 렌더링하세요.");
+      return;
+    }
     setIsHighResDownloading(true);
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
-    try {
-      // 1. SVG 텍스트 가져오기
-      const svgFetchUrl = krokiUrl(debouncedInput, "svg");
-      const res = await fetch(svgFetchUrl);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const svgText = await res.text();
 
-      // 2. SVG 파싱 & viewBox에서 원본 비율 추출
-      const parser = new DOMParser();
-      const svgDoc = parser.parseFromString(svgText, "image/svg+xml");
-      const svgEl  = svgDoc.querySelector("svg");
-      const TARGET_W = 4000;
-      let nativeW = 1000, nativeH = 800;
-      if (svgEl) {
-        const vb = svgEl.getAttribute("viewBox");
-        if (vb) {
-          const parts = vb.trim().split(/[\s,]+/);
-          if (parts.length >= 4) {
-            nativeW = parseFloat(parts[2]) || nativeW;
-            nativeH = parseFloat(parts[3]) || nativeH;
-          }
-        } else {
-          nativeW = parseFloat(svgEl.getAttribute("width")  || String(nativeW));
-          nativeH = parseFloat(svgEl.getAttribute("height") || String(nativeH));
+    try {
+      // 1. SVG 복제
+      const clone = svgEl.cloneNode(true) as SVGElement;
+
+      // 2. 원본 크기 추출 (viewBox 우선, fallback: clientWidth)
+      const vb = svgEl.getAttribute("viewBox");
+      let origW = svgEl.clientWidth  || 800;
+      let origH = svgEl.clientHeight || 600;
+      if (vb) {
+        const p = vb.trim().split(/[\s,]+/);
+        if (p.length >= 4) {
+          origW = parseFloat(p[2]) || origW;
+          origH = parseFloat(p[3]) || origH;
         }
-        // SVG 요소에 4000px 명시 → 브라우저가 이 크기로 래스터화
-        const TARGET_H = Math.round(nativeH * (TARGET_W / nativeW));
-        svgEl.setAttribute("width",  String(TARGET_W));
-        svgEl.setAttribute("height", String(TARGET_H));
       }
 
-      // 3. 수정된 SVG → Blob URL
-      const modSvg    = new XMLSerializer().serializeToString(svgDoc);
-      const svgBlob   = new Blob([modSvg], { type: "image/svg+xml" });
-      const blobUrl   = URL.createObjectURL(svgBlob);
+      // 3. 4000px 기준으로 너비/높이 갱신
+      const TARGET_W = 4000;
+      const TARGET_H = Math.round(origH * TARGET_W / origW);
+      clone.setAttribute("width",  String(TARGET_W));
+      clone.setAttribute("height", String(TARGET_H));
+      clone.style.cssText = ""; // 반응형 style 제거
 
-      // 4. Image 로드 (same-origin Blob URL)
-      const img = new Image();
-      await new Promise<void>((resolve, reject) => {
-        img.onload  = () => resolve();
-        img.onerror = () => reject(new Error("SVG 이미지 로드 실패"));
-        img.src = blobUrl;
-      });
+      // 4. SVG 텍스트 → data URL
+      const svgStr = new XMLSerializer().serializeToString(clone);
+      const dataUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr);
 
-      const W = img.naturalWidth  || TARGET_W;
-      const H = img.naturalHeight || Math.round(nativeH * (TARGET_W / nativeW));
+      // 5. Image 로드 → Canvas 렌더링 → PNG 다운로드
+      const img    = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width  = TARGET_W;
+        canvas.height = TARGET_H;
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = "white";
+        ctx.fillRect(0, 0, TARGET_W, TARGET_H);
+        ctx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
 
-      // 5. Canvas에 그리기
-      const canvas = document.createElement("canvas");
-      canvas.width  = W;
-      canvas.height = H;
-      const ctx = canvas.getContext("2d")!;
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, W, H);
-      ctx.drawImage(img, 0, 0, W, H);
-      URL.revokeObjectURL(blobUrl);
-
-      // 6. PNG Blob → 다운로드
-      canvas.toBlob((pngBlob) => {
-        if (!pngBlob) { toast.dismiss(toastId); toast.error("Canvas 변환 실패"); return; }
-        const objUrl = URL.createObjectURL(pngBlob);
+        const pngData = canvas.toDataURL("image/png");
         const a = document.createElement("a");
-        a.href = objUrl; a.download = "ko-smart-highres.png";
-        document.body.appendChild(a); a.click();
+        a.href = pngData;
+        a.download = "ko-smart-highres.png";
+        document.body.appendChild(a);
+        a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(objUrl);
+
         toast.dismiss(toastId);
-        toast.success("✅ 초고화질 PNG가 저장되었습니다!");
+        toast.success("✅ 초고화질 PNG(4000px)가 저장되었습니다!");
         setIsHighResDownloading(false);
-      }, "image/png");
+      };
+      img.onerror = () => {
+        toast.dismiss(toastId);
+        toast.error("SVG → 이미지 변환 실패");
+        setIsHighResDownloading(false);
+      };
+      img.src = dataUrl;
+
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[High-res PNG]", err);
@@ -270,11 +274,9 @@ export default function Home() {
 
   // ── 반응형 줌 계산 ──────────────────────────────────────
   //  zoomPercent === 100 → Fit to Container
-  //  zoomPercent  > 100 → Smart Viewport Scaling
+  //  zoomPercent  > 100 → CSS zoom: N (layout 있음, overflow-auto)
   const zoomScale    = zoomPercent / 100;
   const isZoomedMode = zoomPercent > 100;
-  const scaledW = BASE_WIDTH * zoomScale;
-  const scaledH = imgRenderedH > 0 ? imgRenderedH * zoomScale : "auto";
 
   // ─────────────────────────────────────────────────────────
   return (
@@ -464,7 +466,7 @@ export default function Home() {
             )}
 
             {/* 빈 상태 */}
-            {!svgUrl && !isRendering && !renderError && (
+            {!svgText && !isRendering && !renderError && (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -476,83 +478,45 @@ export default function Home() {
               </div>
             )}
 
-            {/* ══ 반응형 줌 렌더링 ═══════════════════════════
-                [100%]  Fit to Container
-                        → maxWidth:100%, maxHeight:100%, objectFit:contain
-                        → 화면 밖으로 삐져나가지 않음, 스크롤 없음
-
-                [173%/200%]  Smart Viewport Scaling
-                        → img: width=BASE_WIDTH + transform:scale(N)
-                        → wrapper: scaledW × scaledH 공간 예약
-                        → overflow-auto 스크롤로 탐색
+            {/* ══ 인라인 SVG 렌더링 ════════════════════════════
+                [100%] Fit: overflow-hidden + flex center
+                        SVG에 max-width:100%;height:auto; 이미 적용
+                [101%+] CSS zoom: N (레이아웃 확장) + overflow-auto
+                         querySelector로 SVG 접근 가능 → 초고화질 저장
             ═══════════════════════════════════════════════ */}
-            {svgUrl && (
+            {svgText && (
               isZoomedMode ? (
-                /* ── 확대 모드: transform scale + overflow-auto ── */
+                /* ── 확대 모드: CSS zoom + overflow-auto ── */
                 <div
                   className="w-full h-full overflow-auto"
                   style={{ background: "white" }}
                 >
                   <div
+                    ref={previewRef}
+                    dangerouslySetInnerHTML={{ __html: svgText }}
                     style={{
-                      width: `${scaledW}px`,
-                      height: scaledH !== "auto" ? `${scaledH}px` : "auto",
-                      position: "relative",
-                      margin: "0 auto",
+                      padding: "16px",
+                      display: "inline-block",
+                      lineHeight: 0,
+                      zoom: zoomScale,
                     }}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      key={`${svgUrl}-zoomed`}
-                      ref={imgRef}
-                      src={svgUrl}
-                      alt="TikZ diagram"
-                      style={{
-                        display: "block",
-                        width: `${BASE_WIDTH}px`,
-                        height: "auto",
-                        transformOrigin: "top left",
-                        transform: `scale(${zoomScale})`,
-                      }}
-                      onLoad={handleImgLoad}
-                      onError={() => {
-                        console.error("[Kroki SVG] load failed");
-                        setRenderError("Kroki 서버 렌더링 실패\n\n가능한 원인:\n• TikZ 문법 오류\n• 지원되지 않는 패키지\n• 네트워크 연결 문제\n\n브라우저 콘솔(F12)에서 상세 로그 확인");
-                        setIsRendering(false);
-                      }}
-                    />
-                  </div>
+                  />
                 </div>
               ) : (
-                /* ── 100% 반응형 핏: Fit to Container, 스크롤 없음 ── */
+                /* ── 100% 핏 모드: 컨테이너에 압도록 Fit ── */
                 <div
                   className="w-full h-full overflow-hidden flex items-center justify-center p-3"
                   style={{ background: "white" }}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    key={`${svgUrl}-fit`}
-                    ref={imgRef}
-                    src={svgUrl}
-                    alt="TikZ diagram"
-                    style={{
-                      display: "block",
-                      maxWidth: "100%",
-                      maxHeight: "100%",
-                      objectFit: "contain",
-                      width: "auto",
-                      height: "auto",
-                    }}
-                    onLoad={() => { setIsRendering(false); setRenderError(""); }}
-                    onError={() => {
-                      console.error("[Kroki SVG] load failed");
-                      setRenderError("Kroki 서버 렌더링 실패\n\n가능한 원인:\n• TikZ 문법 오류\n• 지원되지 않는 패키지\n• 네트워크 연결 문제\n\n브라우저 콘솔(F12)에서 상세 로그 확인");
-                      setIsRendering(false);
-                    }}
+                  <div
+                    ref={previewRef}
+                    dangerouslySetInnerHTML={{ __html: svgText }}
+                    style={{ maxWidth: "100%", maxHeight: "100%", lineHeight: 0 }}
                   />
                 </div>
               )
             )}
+
           </div>
         </div>
       </div>
