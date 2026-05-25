@@ -9,6 +9,7 @@ import {
   Copy, History, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
+  RotateCcw, BookOpen, X, ClipboardCopy,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem,
@@ -34,11 +35,8 @@ function krokiUrl(source: string, format: "svg" | "png") {
 
 // ─────────────────────────────────────────────────────────────
 //  줌 설정
-//  BASE_WIDTH: SVG가 렌더링되는 고정 기준 너비(px)
-//  transform: scale(zoomScale)으로 시각적 확대 — 레이아웃 공간은
-//  wrapper div가 BASE_WIDTH*zoom × imgHeight*zoom으로 예약
 // ─────────────────────────────────────────────────────────────
-const BASE_WIDTH = 720; // SVG 기준 너비 (px)
+const BASE_WIDTH = 720;
 
 // ─────────────────────────────────────────────────────────────
 //  평가원 표준 템플릿 (클릭 한 번으로 로드)
@@ -59,6 +57,52 @@ const KICE_TEMPLATE = `\\documentclass[tikz, border=10pt]{standalone}
 \\end{tikzpicture}
 \\end{document}`;
 
+// ─────────────────────────────────────────────────────────────
+//  KICE 프롬프트 가이드 원문
+// ─────────────────────────────────────────────────────────────
+const KICE_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일]
+
+앞으로 모든 TikZ 수학 그래프 코드를 생성할 때는 웹 렌더링 환경(TikZJax)의 한계를 고려하여 아래의 규칙을 예외 없이 엄격하게 적용하세요.
+
+1. [웹 렌더링 호환 및 언어 규칙 - 절대 규칙]
+- 한글 원천 차단: \\usepackage{kotex} 패키지는 절대 선언하지 않습니다. 코드 내부의 모든 % 주석은 반드시 영어로만 작성하며, 노드(Node)나 텍스트 출력 부분에 한글을 절대 포함하지 않습니다. (모든 라벨은 수식, 기호, 영어로만 구성)
+- 기본 환경: \\documentclass[tikz, border=10pt]{standalone} 및 \\usetikzlibrary{arrows.meta}만을 기본으로 포함합니다.
+
+2. [전역 환경 및 1:1 비율 고정]
+- 전역 화살표 및 스케일: 기하학적 왜곡을 막기 위해 x축과 y축의 스케일을 동일하게 설정하며, 대문자 Stealth 화살표 크기를 전역으로 지정합니다.
+- 필수 적용 옵션: \\begin{tikzpicture}[>={Stealth[length=7pt, width=3.8pt]}, x=0.8cm, y=0.8cm]
+
+3. [축(Axis) 렌더링 및 고정 뼈대]
+- 축을 그릴 때는 기본 제공되는 [-stealth]를 절대 사용하지 않으며, 반드시 [->] 또는 [-Stealth]를 사용하여 전역 화살표 설정이 적용되도록 합니다.
+- 축의 양 끝 라벨(x, y)은 비율 조절 없이 font=\\rm으로만 지정하고, 겹침 방지를 위한 shift 값을 반드시 포함합니다.
+- x축 고정 뼈대: \\draw[->] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, font=\\rm, inner sep=1.5pt, xshift=2pt] {$x$};
+- y축 고정 뼈대: \\draw[->] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, font=\\rm, inner sep=1.5pt, yshift=1pt] {$y$};
+
+4. [마이크로 타이포그래피: 폰트 및 라벨 스타일링]
+- 배경색 투명도 유지: 텍스트가 선을 가리더라도 모든 텍스트 및 수식 노드에 fill=white 옵션을 절대 사용하지 않습니다. 모든 배경은 투명하게 둡니다.
+- 대문자 점(Point) 라벨 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 일반 폰트 대신, 폰트 사이즈업과 비율 조절(transform shape, xscale=0.9, font=\\large)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다.
+- 원점 노드 예시: \\node [below left, inner sep=2pt, transform shape, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
+- 일반 대문자 노드 예시: \\node [right, transform shape, xscale=0.9, font=\\large, xshift=2pt] at (3,2) {$\\rm P$};
+- 소문자 및 수식 폰트: 그래프 내부의 소문자 텍스트 및 수식(함수식 등), 각도(^\\circ) 등은 비율 조절 옵션을 빼고 font=\\rm을 기본으로 수식 모드($...$) 안에 작성합니다.
+
+5. [점(Point) 및 교점 렌더링]
+- 타원형 에러 방지: \\fill circle 명령어는 절대 금지합니다. 모든 렌더링 포인트는 반드시 \\node[circle, fill=black, inner sep=1.2pt] at (좌표) {}; 형태로 작성합니다.
+- 노이즈 최소화: 불필요한 교점/접점의 검은 점 마커는 생략합니다.
+
+6. [곡선 렌더링]
+- 곡선은 임의의 점을 잇지 않고 수학 함수식 \\draw plot (\\x, {수식})을 사용하며 samples=150 이상을 적용합니다. (\\addplot 사용 금지)
+
+7. [기하학적 기호 및 보조선 표시]
+- 직각 기호: 수직(직각) 기호는 삼각형 바깥으로 튀어나가지 않도록 scope의 rotate 각도를 조절하여 반드시 도형 안쪽으로 그려지도록 세팅합니다.
+- 길이 표시: 변 바깥쪽에 길이를 표시할 때는 직선 대신 부드럽게 휘어지는 점선(활시위 모양)을 사용합니다. (예: \\draw[dashed] (A) to[bend right=25] node[midway] {$12$} (B); -> 주의: fill=white 사용 안 함)
+- 각도 및 이등분: 각도를 나타내는 선은 arc나 clip을 이용해 둥글게 그리고, 이등분 표시는 둥근 선 위에 점(node[circle])이나 짧은 평행선 두 개를 추가해 명확히 표기합니다.
+- 길이 같음 기호(Tick marks) 방향 절대 주의: 변의 길이가 같음을 표시하는 짧은 선분(빗금)을 그릴 때는, 반드시 해당 변(선분)과 수직(직교)이 되도록 rotate 각도를 정확히 계산하여 설정합니다. 변과 평행하거나 비스듬하게 그리는 실수를 절대 금지합니다.`;
+
+// ─────────────────────────────────────────────────────────────
+//  LocalStorage 키
+// ─────────────────────────────────────────────────────────────
+const LS_KEY = "kosmart_saved_code";
+
 export default function Home() {
   const [rawInput,       setRawInput]       = useState("");
   const [debouncedInput, setDebouncedInput] = useState("");
@@ -66,14 +110,43 @@ export default function Home() {
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderError,    setRenderError]    = useState("");
   const [isDownloading,  setIsDownloading]  = useState(false);
-  // zoomPercent: 100 ~ 200 정수 (슬라이더 값)
-  // 100 = Fit to Container, 101~ = transform:scale
   const [zoomPercent,    setZoomPercent]    = useState<number>(100);
-  // 로드된 이미지의 실제 렌더 높이 — 즌 모드 레이아웃 공간 예약
   const [imgRenderedH,   setImgRenderedH]   = useState<number>(0);
   const [selectedNodeIndex, setSelectedNodeIndex] = useState<string | null>(null);
 
+  // KICE 프롬프트 모달
+  const [isKiceModalOpen, setIsKiceModalOpen] = useState(false);
+  const [isCopied,        setIsCopied]        = useState(false);
+
   const imgRef = useRef<HTMLImageElement>(null);
+
+  // ── 마운트 시 LocalStorage에서 저장된 코드 복원 ──────────
+  useEffect(() => {
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved && saved.trim()) {
+      setRawInput(saved);
+      setDebouncedInput(saved);
+    } else {
+      // 저장된 코드가 없으면 기본 축 코드 렌더링
+      setRawInput(KICE_TEMPLATE);
+      setDebouncedInput(KICE_TEMPLATE);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── 코드 변경 시 LocalStorage에 즉시 Auto-Save ───────────
+  const handleRawInputChange = useCallback((value: string) => {
+    setRawInput(value);
+    localStorage.setItem(LS_KEY, value);
+  }, []);
+
+  // ── 초기화: LocalStorage 비우고 기본 코드로 리셋 ──────────
+  const handleResetCode = () => {
+    localStorage.removeItem(LS_KEY);
+    setRawInput(KICE_TEMPLATE);
+    setDebouncedInput(KICE_TEMPLATE);
+    toast.success("✅ 기본 코드로 초기화되었습니다.");
+  };
 
   // ── Debounce 800 ms ───────────────────────────────────────
   useEffect(() => {
@@ -134,8 +207,6 @@ export default function Home() {
   };
 
   // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 4000px ───
-  //  Kroki SVG URL에 crossOrigin=anonymous 설정 → CORS 헤더 허용
-  //  Canvas에 drawImage 후 toDataURL로 PNG 추출 (재요청 없음)
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
   const handleDownloadHighRes = () => {
     if (!svgUrl) {
@@ -146,7 +217,7 @@ export default function Home() {
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
     const img = new Image();
-    img.crossOrigin = "anonymous";       // Kroki CORS 헤더 허용 요청
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
         const TARGET_W = 4000;
@@ -186,8 +257,6 @@ export default function Home() {
       toast.error("SVG 로드 실패 — 네트워크 또는 CORS 문제");
       setIsHighResDownloading(false);
     };
-    // crossOrigin 선언 후 src 할당 (Safari 포함 모든 브라우저에서 순서 중요)
-    // ?t=... 쿼리로 브라우저 캐시 우회 → 새로운 CORS 요청 강제
     img.src = `${svgUrl}?t=${Date.now()}`;
   };
 
@@ -198,13 +267,24 @@ export default function Home() {
 
   // ── 평가원 표준 템플릿 로드 ────────────────────────────────
   const handleLoadTemplate = () => {
-    setRawInput(KICE_TEMPLATE);
-    // debounce를 거치지 않고 즉시 렌더링 트리거
+    handleRawInputChange(KICE_TEMPLATE);
     setDebouncedInput(KICE_TEMPLATE);
     toast.success("✅ 평가원 표준 템플릿이 로드되었습니다!");
   };
 
-  // ── 노드 스캔 (\node, node, \coordinate 모두) ───────────
+  // ── KICE 프롬프트 가이드 복사 ─────────────────────────────
+  const handleCopyKicePrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(KICE_PROMPT_GUIDE);
+      setIsCopied(true);
+      toast.success("✅ 프롬프트가 복사되었습니다!");
+      setTimeout(() => setIsCopied(false), 2500);
+    } catch {
+      toast.error("복사에 실패했습니다. 직접 선택 후 복사해 주세요.");
+    }
+  };
+
+  // ── 노드 스캔 (\\node, node, \\coordinate 모두) ───────────
   const scanNodes = () => {
     const matches: { full: string; options: string; content: string; index: number }[] = [];
     const re = /(?:\\node|node|\\coordinate)\s*(?:\[([^\]]*)\])?\s*(?:\(([^)]*)\))?\s*(?:at\s*(\([^)]*\)))?\s*\{([^}]*)\}/g;
@@ -214,6 +294,16 @@ export default function Home() {
     return matches;
   };
   const nodes = scanNodes();
+
+  // ── 선택된 노드의 표시 텍스트 계산 ─────────────────────────
+  const getSelectedNodeLabel = () => {
+    if (selectedNodeIndex === null) return undefined;
+    const idx = parseInt(selectedNodeIndex);
+    const node = nodes[idx];
+    if (!node) return undefined;
+    const content = node.content || "(empty)";
+    return `${idx + 1}. ${content}`;
+  };
 
   const handleShift = (axis: "x" | "y", direction: number) => {
     if (selectedNodeIndex === null) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
@@ -233,14 +323,16 @@ export default function Home() {
           `[${opts}]`)
       : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
 
-    setRawInput(rawInput.slice(0, node.index) + updatedFull + rawInput.slice(node.index + node.full.length));
+    const newCode = rawInput.slice(0, node.index) + updatedFull + rawInput.slice(node.index + node.full.length);
+    handleRawInputChange(newCode);
   };
 
   // ── 줌 계산 ─────────────────────────────────────────────────
-  //  CSS zoom (transform과 달리 레이아웃 확장 O)
-  //  100% → zoom:1.0 — 컨테이너에 답 Fit
-  //  101%+ → zoom:N — 레이아웃이 실제로 확장 → overflow-auto 스크롤 동작
   const zoomScale = zoomPercent / 100;
+
+  // BASE_WIDTH suppression — used only for reference
+  void BASE_WIDTH;
+  void imgRenderedH;
 
   // ─────────────────────────────────────────────────────────
   return (
@@ -279,6 +371,20 @@ export default function Home() {
           <span className="text-[10px] font-bold text-blue-300/80 tracking-wider">Kroki · TeXLive</span>
         </div>
 
+        {/* ── KICE 프롬프트 가이드 버튼 (헤더 중앙 우측) ── */}
+        <button
+          id="btn-kice-prompt-guide"
+          onClick={() => setIsKiceModalOpen(true)}
+          className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150
+            bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500
+            text-white shadow-md shadow-emerald-900/40 border border-emerald-500/30 hover:border-emerald-400/50
+            hover:scale-[1.03] active:scale-100 group"
+          title="KICE TikZ 스타일 가이드 프롬프트 열기"
+        >
+          <BookOpen className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+          KICE 프롬프트 가이드
+        </button>
+
         {/* 헤더 우측: 개발자 프로필 + 복사 */}
         <div className="ml-auto flex items-center gap-3">
           <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-950/50 to-zinc-900/60 border border-blue-800/30 shadow shadow-blue-900/20">
@@ -313,21 +419,35 @@ export default function Home() {
               <History className="w-3 h-3 text-blue-400/70" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400/70">Raw TikZ Code</span>
             </div>
-            {/* 평가원 표준 템플릿 로드 버튼 */}
-            <button
-              onClick={handleLoadTemplate}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150 bg-blue-950/60 hover:bg-blue-900/70 border border-blue-800/40 hover:border-blue-600/60 text-blue-300 hover:text-blue-200 shadow-sm shadow-blue-900/20 group"
-              title="평가원 표준 축 TikZ 코드를 입력창에 로드합니다"
-            >
-              <svg className="w-3 h-3 text-blue-400 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-              </svg>
-              평가원 기본 축 로드
-            </button>
+            <div className="flex items-center gap-2">
+              {/* 초기화 버튼 */}
+              <button
+                id="btn-reset-code"
+                onClick={handleResetCode}
+                className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150
+                  bg-zinc-800/60 hover:bg-red-950/50 border border-zinc-700/40 hover:border-red-800/50
+                  text-zinc-500 hover:text-red-300 group"
+                title="LocalStorage를 비우고 기본 코드로 초기화합니다"
+              >
+                <RotateCcw className="w-2.5 h-2.5 group-hover:rotate-[-180deg] transition-transform duration-300" />
+                초기화
+              </button>
+              {/* 평가원 표준 템플릿 로드 버튼 */}
+              <button
+                onClick={handleLoadTemplate}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150 bg-blue-950/60 hover:bg-blue-900/70 border border-blue-800/40 hover:border-blue-600/60 text-blue-300 hover:text-blue-200 shadow-sm shadow-blue-900/20 group"
+                title="평가원 표준 축 TikZ 코드를 입력창에 로드합니다"
+              >
+                <svg className="w-3 h-3 text-blue-400 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                평가원 기본 축 로드
+              </button>
+            </div>
           </div>
           <Textarea
             value={rawInput}
-            onChange={(e) => setRawInput(e.target.value)}
+            onChange={(e) => handleRawInputChange(e.target.value)}
             className="flex-1 bg-transparent border-0 focus-visible:ring-0 resize-none font-mono text-[12.5px] p-5 text-zinc-300 leading-relaxed placeholder:text-zinc-700"
             placeholder={"\\documentclass[tikz]{standalone}\n\\begin{document}\n\\begin{tikzpicture}\n  % ...\n\\end{tikzpicture}\n\\end{document}"}
           />
@@ -359,15 +479,6 @@ export default function Home() {
                 <span className="text-[11px] font-bold text-blue-300 w-9 text-right shrink-0">
                   {zoomPercent}%
                 </span>
-              </div>
-
-              {/* ── Lead Developer 배지 ── */}
-              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-blue-950/60 to-zinc-900/50 border border-blue-800/30">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/ko.png" alt="고진일 팀장"
-                  className="w-6 h-6 rounded-full object-cover border border-blue-400/40"
-                />
-                <span className="text-[10px] font-bold text-blue-300/80 whitespace-nowrap">고진일 팀장</span>
               </div>
 
               {/* ── PNG 저장 ── */}
@@ -442,12 +553,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* ══ SVG 프리뷰 — 단일 바라보기, CSS zoom으로 레이아웃 확장 ══
-                CSS zoom(1.5) = 레이아웃이 1.5로 실제 확장 → overflow-auto원 스크롤 동작
-                transform: scale(1.5) = 시각 확대만, 레이아웃 불변 → 스크롤 안 됨
-                100% → zoom:1.0, 이미지 컨테이너에 Fit
-                105% → zoom:1.05, 정확히 5%만 확대 (점프 없음)
-            ═════════════════════════════════════════════ */}
             {svgUrl && (
               <div
                 style={{
@@ -457,7 +562,6 @@ export default function Home() {
                   background: "white",
                 }}
               >
-                {/* 자식 div에 zoom 적용 → 이 div의 레이아웃이 zoom배율만큼 확장 */}
                 <div
                   style={{
                     zoom: zoomScale,
@@ -499,14 +603,21 @@ export default function Home() {
       {/* ══════════════════════════════════════════════════════
           FOOTER — 항상 고정 (shrink-0)
       ══════════════════════════════════════════════════════ */}
-      <footer className="shrink-0 border-t border-white/[0.05] bg-[#0a0d12] px-5 py-0 flex items-center gap-5 z-20 shadow-[0_-6px_24px_rgba(0,0,0,0.4)]" style={{ height: "80px" }}>
+      <footer className="shrink-0 border-t border-white/[0.05] bg-[#0a0d12] px-5 py-0 flex items-center gap-5 z-20 shadow-[0_-6px_24px_rgba(0,0,0,0.4)]" style={{ height: "88px" }}>
 
-        {/* 팀 배너 */}
+        {/* 팀 배너 — object-fit: contain으로 얼굴이 잘리지 않게 */}
         <div className="flex items-center gap-3 shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/team.png" alt="Infinite Math Lab Team"
-            className="h-11 w-20 object-cover rounded-lg border border-zinc-800/60 opacity-85"
+            className="rounded-lg border border-zinc-800/60 opacity-85"
+            style={{
+              height: "72px",
+              width: "auto",
+              maxWidth: "140px",
+              objectFit: "contain",
+              objectPosition: "center",
+            }}
           />
           <div className="leading-none">
             <div className="text-[9px] text-zinc-600 font-medium tracking-wider">Powered by</div>
@@ -517,12 +628,19 @@ export default function Home() {
 
         <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
 
-        {/* 노드 선택 */}
+        {/* 노드 선택 — 선택된 노드의 실제 텍스트 표시 */}
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1">Node</span>
-          <Select value={selectedNodeIndex ?? ""} onValueChange={setSelectedNodeIndex}>
-            <SelectTrigger className="w-[190px] h-8 bg-zinc-900 border-zinc-800 text-[11px] font-medium text-zinc-300">
-              <SelectValue placeholder={nodes.length > 0 ? "노드 선택..." : "노드 없음"} />
+          <Select
+            value={selectedNodeIndex ?? ""}
+            onValueChange={setSelectedNodeIndex}
+          >
+            <SelectTrigger className="w-[210px] h-8 bg-zinc-900 border-zinc-800 text-[11px] font-medium text-zinc-300">
+              {/* 선택된 노드의 실제 텍스트를 직접 렌더링하여 인덱스 노출 버그 방지 */}
+              {selectedNodeIndex !== null && nodes[parseInt(selectedNodeIndex)]
+                ? <span className="truncate">{getSelectedNodeLabel()}</span>
+                : <SelectValue placeholder={nodes.length > 0 ? "노드 선택..." : "노드 없음"} />
+              }
             </SelectTrigger>
             <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
               {nodes.map((n, i) => (
@@ -582,6 +700,72 @@ export default function Home() {
           <div className="text-[8px] text-zinc-700 mt-0.5">Cloud TeX · Kroki API · GET Mode</div>
         </div>
       </footer>
+
+      {/* ══════════════════════════════════════════════════════
+          KICE 프롬프트 가이드 모달
+      ══════════════════════════════════════════════════════ */}
+      {isKiceModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setIsKiceModalOpen(false); }}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[82vh] flex flex-col rounded-2xl border border-emerald-800/30 shadow-2xl shadow-emerald-900/30"
+            style={{ background: "linear-gradient(145deg, #0d1f1a 0%, #0a1612 50%, #0d1117 100%)" }}
+          >
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-emerald-900/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-600 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-900/40">
+                  <BookOpen className="w-4 h-4 text-white" />
+                </div>
+                <div className="leading-none">
+                  <div className="text-[13px] font-black text-white tracking-tight">KICE 프롬프트 가이드</div>
+                  <div className="text-[10px] text-emerald-400/70 mt-0.5 font-medium">TikZ 수학 그래프 렌더링 엄격한 스타일 가이드</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsKiceModalOpen(false)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
+                title="닫기"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 가이드 텍스트 스크롤 영역 */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 min-h-0">
+              <pre
+                className="text-[11.5px] text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap break-words select-all"
+                style={{ fontFamily: "'Fira Code', 'Consolas', 'Courier New', monospace" }}
+              >
+                {KICE_PROMPT_GUIDE}
+              </pre>
+            </div>
+
+            {/* 모달 하단 — 복사 버튼 */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-emerald-900/30 shrink-0 bg-black/20">
+              <span className="text-[10px] text-zinc-600">
+                전체 선택 후 복사하거나 아래 버튼을 클릭하세요
+              </span>
+              <button
+                id="btn-copy-kice-prompt"
+                onClick={handleCopyKicePrompt}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-bold tracking-tight transition-all duration-200
+                  ${isCopied
+                    ? "bg-emerald-600/30 border border-emerald-500/50 text-emerald-300 scale-95"
+                    : "bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border border-emerald-500/30 text-white shadow-md shadow-emerald-900/40 hover:scale-[1.03] active:scale-100"
+                  }`}
+              >
+                <ClipboardCopy className="w-4 h-4" />
+                {isCopied ? "✅ 복사 완료!" : "원클릭 복사하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </main>
   );
 }
