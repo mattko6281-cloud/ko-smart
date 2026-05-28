@@ -341,8 +341,9 @@ export default function Home() {
     }
   };
 
-  // ── 노드 스캔 — \node ... ; を セミコロンまで robust にパース ──
-  //  중첩 중괄호({$\frac{1}{2}$}), 복잡한 좌표(at ({2+sqrt(2)}, 0)) 대응
+  // ── 노드 스캔 — 세미콜론 전 마지막 {...} 블록을 라벨로 추출 ──────────────
+  //  at ({ln(23)/ln(2)}) 체 좌표 중괄호를 라벨로 오인하는 버그 해결:
+  //  stmt 내에서 세미콜론 직전까지 스캔하여 마지막 가장 바깥 depth-0 진입점 == 라벨 시작
   const scanNodes = () => {
     const matches: { full: string; options: string; content: string; index: number }[] = [];
 
@@ -352,37 +353,39 @@ export default function Home() {
 
     while ((startMatch = startRe.exec(rawInput)) !== null) {
       const startIdx = startMatch.index;
-      // 세미콜론까지 슬라이스 (최대 1000자)
-      const slice = rawInput.slice(startIdx, startIdx + 1000);
+      // 세미콜론까지 슬라이스 (최대 1200자)
+      const slice = rawInput.slice(startIdx, startIdx + 1200);
       const semiIdx = slice.indexOf(";");
       if (semiIdx === -1) continue;
-      const stmt = slice.slice(0, semiIdx + 1); // \node ... ;
+      const stmt = slice.slice(0, semiIdx); // 세미콜론 미포함 (마지막 {...} 탐색용)
 
       // options: [] 블록 (탐욕적이지 않게)
       const optMatch = stmt.match(/^(?:\\node|\\coordinate|node)\s*\[([^\]]*)\]/);
       const options = optMatch ? optMatch[1] : "";
 
-      // content: 중첩 중괄호를 depth 카운팅으로 캡처
-      const braceOpen = stmt.indexOf("{");
-      if (braceOpen === -1) continue;
+      // ▶ 라벨 = stmt 내에서 마지막 depth-0 진입점의 {...}
+      //   세미콜론 앞까지 스캔하면서 가장 나중에 나오는
+      //   대치되는 } 를 찾고, 거기서 역방향 depth-0 지점을 추적
+      let labelStart = -1;
+      let labelEnd   = -1;
       let depth = 0;
-      let contentStart = -1;
-      let contentEnd = -1;
-      for (let i = braceOpen; i < stmt.length; i++) {
-        if (stmt[i] === "{" && stmt[i - 1] !== "\\") {
+      for (let i = 0; i < stmt.length; i++) {
+        const ch = stmt[i];
+        const prev = i > 0 ? stmt[i - 1] : "";
+        if (ch === "{" && prev !== "\\") {
+          if (depth === 0) labelStart = i + 1; // 후보 시작점 갱신 (매번 새로 덮어쓀)
           depth++;
-          if (depth === 1) contentStart = i + 1;
-        } else if (stmt[i] === "}" && stmt[i - 1] !== "\\") {
+        } else if (ch === "}" && prev !== "\\") {
           depth--;
-          if (depth === 0) { contentEnd = i; break; }
+          if (depth === 0) labelEnd = i; // 후보 종료점 갱신 (매번 갱신 → 결국 마지막 측이 남음)
         }
       }
-      if (contentStart === -1 || contentEnd === -1) continue;
-      const content = stmt.slice(contentStart, contentEnd);
-      const full = stmt.slice(0, contentEnd + 1);
+      if (labelStart === -1 || labelEnd === -1) continue;
+      const content = stmt.slice(labelStart, labelEnd);
+      // full = stmt 시작~라벨 닫히는 } 까지 (+1 인덱스, 세미콜론 제외)
+      const full = stmt.slice(0, labelEnd + 1);
 
       matches.push({ full, options, content, index: startIdx });
-      // 다음 탐색 시작점을 full 끝으로 이동 (중복 방지)
       startRe.lastIndex = startIdx + full.length;
     }
     return matches;
@@ -447,6 +450,51 @@ export default function Home() {
     const hitNew = newInner.match(existRe);
     const displayVal = hitNew ? hitNew[1] : (delta > 0 ? "1.1" : "0.9");
     toast.success(`✅ 전체 폰트 스케일: ${displayVal}`);
+  };
+
+  // ── 글로벌 선 두께(Line Width) 조절 ──────────────────────────
+  //  \begin{tikzpicture}[...] 내부의 line width=Npt 를 upsert
+  //  개별 \draw 내부 line width 는 건드리지 않고 개요 옵션만 수정
+  const handleGlobalLineWidth = (delta: number) => {
+    const beginIdx = rawInput.indexOf("\\begin{tikzpicture}");
+    if (beginIdx === -1) { toast.error("\\begin{tikzpicture} 를 찾을 수 없습니다."); return; }
+
+    const bracketStart = rawInput.indexOf("[", beginIdx);
+    if (bracketStart === -1) { toast.error("tikzpicture 옵션 [ 를 찾을 수 없습니다."); return; }
+
+    let depth = 0;
+    let bracketEnd = -1;
+    for (let i = bracketStart; i < rawInput.length; i++) {
+      if (rawInput[i] === "[") depth++;
+      else if (rawInput[i] === "]") { depth--; if (depth === 0) { bracketEnd = i; break; } }
+    }
+    if (bracketEnd === -1) { toast.error("tikzpicture 옵션 ] 를 찾을 수 없습니다."); return; }
+
+    const inner = rawInput.slice(bracketStart + 1, bracketEnd);
+
+    // line width=Npt 패턴 (글로벌 옵션에만 해당; \draw 내부 패턴은 누락하지 않음)
+    const existRe = /(?<![a-zA-Z])line\s+width\s*=\s*([0-9.]+)pt/;
+    const hit = inner.match(existRe);
+
+    let newInner: string;
+    if (hit) {
+      const cur = parseFloat(hit[1]);
+      const next = Math.max(0.1, Math.round((cur + delta) * 10) / 10);
+      newInner = inner.replace(existRe, `line width=${next}pt`);
+    } else {
+      const initVal = delta > 0 ? 0.6 : 0.4;
+      newInner = inner.trimEnd() + `, line width=${initVal}pt`;
+    }
+
+    const newCode =
+      rawInput.slice(0, bracketStart + 1) +
+      newInner +
+      rawInput.slice(bracketEnd);
+    handleRawInputChange(newCode);
+
+    const hitNew = newInner.match(existRe);
+    const displayVal = hitNew ? hitNew[1] : (delta > 0 ? "0.6" : "0.4");
+    toast.success(`✅ 전체 선 두께: ${displayVal}pt`);
   };
 
   // ── 개별 노드 폰트 스케일 조절 (A+ / A-) ──────────────────
@@ -668,6 +716,25 @@ export default function Home() {
                   onClick={() => handleGlobalFontScale(0.1)}
                   className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
                   title="전체 노드 폰트 크기 증가"
+                >+</button>
+              </div>
+
+              {/* ── 전체 선 두께 컨트롤 ── */}
+              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
+                <svg className="w-3 h-3 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" d="M3 12h18" />
+                  <path strokeLinecap="round" strokeWidth={1} d="M3 7h18M3 17h18" />
+                </svg>
+                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">선두께</span>
+                <button
+                  onClick={() => handleGlobalLineWidth(-0.1)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="전체 선 두께 감소 (-0.1pt)"
+                >−</button>
+                <button
+                  onClick={() => handleGlobalLineWidth(0.1)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="전체 선 두께 증가 (+0.1pt)"
                 >+</button>
               </div>
 
