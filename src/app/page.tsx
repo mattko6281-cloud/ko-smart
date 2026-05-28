@@ -9,7 +9,7 @@ import {
   Copy, History, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
-  RotateCcw, BookOpen, X, ClipboardCopy, Type,
+  RotateCcw, BookOpen, X, ClipboardCopy, Type, HelpCircle,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem,
@@ -162,6 +162,25 @@ export default function Home() {
   // 메타수학 프롬프트 모달
   const [isMetaModalOpen, setIsMetaModalOpen] = useState(false);
   const [isMetaCopied,    setIsMetaCopied]    = useState(false);
+
+  // 사용 설명서 모달 + 온보딩 상태
+  const [isHelpOpen,    setIsHelpOpen]    = useState(false);
+  const [hasSeenHelp,   setHasSeenHelp]   = useState(true); // 불마켜있음 시작, 마운트에서 정정
+
+  // 마운트 시 hasSeenHelp 종류 확인
+  useEffect(() => {
+    const seen = localStorage.getItem("kosmart_seen_help");
+    if (!seen) setHasSeenHelp(false);
+  }, []);
+
+  // 사용 설명서 열기 핸들러
+  const handleOpenHelp = () => {
+    setIsHelpOpen(true);
+    if (!hasSeenHelp) {
+      localStorage.setItem("kosmart_seen_help", "1");
+      setHasSeenHelp(true);
+    }
+  };
 
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -452,49 +471,59 @@ export default function Home() {
     toast.success(`✅ 전체 폰트 스케일: ${displayVal}`);
   };
 
-  // ── 글로벌 선 두께(Line Width) 조절 ──────────────────────────
-  //  \begin{tikzpicture}[...] 내부의 line width=Npt 를 upsert
-  //  개별 \draw 내부 line width 는 건드리지 않고 개요 옵션만 수정
-  const handleGlobalLineWidth = (delta: number) => {
-    const beginIdx = rawInput.indexOf("\\begin{tikzpicture}");
-    if (beginIdx === -1) { toast.error("\\begin{tikzpicture} 를 찾을 수 없습니다."); return; }
+  // ── Named Style 기준 두께 (pt) ─────────────────────────────
+  const NAMED_WIDTHS: Record<string, number> = {
+    "ultra thin":  0.1,
+    "very thin":   0.2,
+    thin:          0.4,
+    semithick:     0.6,
+    thick:         0.8,
+    "very thick":  1.2,
+    "ultra thick": 1.6,
+  };
+  // 정렬: 긴 이름 먼저 매칭 (very thick > thick 등 오인 방지)
+  const NAMED_KEYS = Object.keys(NAMED_WIDTHS).sort((a, b) => b.length - a.length);
 
-    const bracketStart = rawInput.indexOf("[", beginIdx);
-    if (bracketStart === -1) { toast.error("tikzpicture 옵션 [ 를 찾을 수 없습니다."); return; }
+  // ── 배율 상태 ─────────────────────────────────────────────
+  const [thicknessScale, setThicknessScale] = useState<number>(1.0);
 
-    let depth = 0;
-    let bracketEnd = -1;
-    for (let i = bracketStart; i < rawInput.length; i++) {
-      if (rawInput[i] === "[") depth++;
-      else if (rawInput[i] === "]") { depth--; if (depth === 0) { bracketEnd = i; break; } }
+  // ── 상대적 선 두께 스케일러 (Relative Thickness Scaler) ────
+  //  ratio: 1.1 = +10% / 0.9 = -10% (클릭 1번에 정확히 배율 곱셈)
+  //  1) Named Style → base pt × newScale 으로 치환 (원점 기반)
+  //  2) line width=Xpt → X × ratio 고정 곱셈
+  //  → 원본 선 간 비율이 스케일업 후에도 영구 유지
+  const handleGlobalLineWidth = (ratio: number) => {
+    if (!rawInput.trim()) { toast.error("코드가 비어 있습니다."); return; }
+
+    const newScale = Math.max(0.01, Math.round(thicknessScale * ratio * 1000) / 1000);
+    let result = rawInput;
+
+    // ── Step 1: Named Style → base × newScale (원점 기반 누적 안전) ──
+    for (const name of NAMED_KEYS) {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+      const namedRe = new RegExp(`(?<![\\w-])(${escaped})(?![\\w-])`, "g");
+      const basePt  = NAMED_WIDTHS[name];
+      const newPt   = Math.max(0.1, Math.round(basePt * newScale * 100) / 100);
+      result = result.replace(namedRe, (_match, _p1, offset) => {
+        const lineStart = result.lastIndexOf("\n", offset) + 1;
+        if (result.slice(lineStart, offset).includes("%")) return _match; // 주석 줄 스킵
+        return `line width=${newPt}pt`;
+      });
     }
-    if (bracketEnd === -1) { toast.error("tikzpicture 옵션 ] 를 찾을 수 없습니다."); return; }
 
-    const inner = rawInput.slice(bracketStart + 1, bracketEnd);
+    // ── Step 2: 기존 line width=Xpt → X × ratio 직접 곱셈 ──────
+    const lwRe = /(?<![a-zA-Z])line\s+width\s*=\s*([0-9.]+)pt/g;
+    result = result.replace(lwRe, (_match, val, offset) => {
+      const lineStart = result.lastIndexOf("\n", offset) + 1;
+      if (result.slice(lineStart, offset).includes("%")) return _match; // 주석 줄 스킵
+      const cur  = parseFloat(val);
+      const next = Math.max(0.1, Math.round(cur * ratio * 100) / 100);
+      return `line width=${next}pt`;
+    });
 
-    // line width=Npt 패턴 (글로벌 옵션에만 해당; \draw 내부 패턴은 누락하지 않음)
-    const existRe = /(?<![a-zA-Z])line\s+width\s*=\s*([0-9.]+)pt/;
-    const hit = inner.match(existRe);
-
-    let newInner: string;
-    if (hit) {
-      const cur = parseFloat(hit[1]);
-      const next = Math.max(0.1, Math.round((cur + delta) * 10) / 10);
-      newInner = inner.replace(existRe, `line width=${next}pt`);
-    } else {
-      const initVal = delta > 0 ? 0.6 : 0.4;
-      newInner = inner.trimEnd() + `, line width=${initVal}pt`;
-    }
-
-    const newCode =
-      rawInput.slice(0, bracketStart + 1) +
-      newInner +
-      rawInput.slice(bracketEnd);
-    handleRawInputChange(newCode);
-
-    const hitNew = newInner.match(existRe);
-    const displayVal = hitNew ? hitNew[1] : (delta > 0 ? "0.6" : "0.4");
-    toast.success(`✅ 전체 선 두께: ${displayVal}pt`);
+    handleRawInputChange(result);
+    setThicknessScale(newScale);
+    toast.success(`✅ 선 두께 배율: ×${newScale.toFixed(2)}`);
   };
 
   // ── 개별 노드 폰트 스케일 조절 (A+ / A-) ──────────────────
@@ -622,6 +651,26 @@ export default function Home() {
             <BookOpen className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
             메타수학 프롬프트 가이드
           </button>
+
+          {/* 사용 설명서 버튼 — 미방문 시 pulse 글로우 */}
+          <button
+            id="btn-help"
+            onClick={handleOpenHelp}
+            className={[
+              "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150",
+              "hover:scale-[1.03] active:scale-100 group",
+              hasSeenHelp
+                ? "bg-zinc-800/80 hover:bg-zinc-700/80 border border-zinc-700/50 hover:border-zinc-500/60 text-zinc-400 hover:text-white shadow-sm"
+                : "bg-zinc-800/90 hover:bg-zinc-700/90 border border-amber-500/60 hover:border-amber-400/80 text-amber-300 hover:text-amber-200 shadow-md shadow-amber-900/30 animate-pulse",
+            ].join(" ")}
+            title="KO-SMART 사용 설명서 열기"
+          >
+            <HelpCircle className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+            사용 설명서
+            {!hasSeenHelp && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 shadow shadow-amber-400/60" />
+            )}
+          </button>
         </div>
 
         {/* 헤더 우측: 개발자 프로필 + 복사 */}
@@ -727,12 +776,12 @@ export default function Home() {
                 </svg>
                 <span className="text-[10px] font-bold text-zinc-500 tracking-wide">선두께</span>
                 <button
-                  onClick={() => handleGlobalLineWidth(-0.1)}
+                  onClick={() => handleGlobalLineWidth(0.9)}
                   className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
                   title="전체 선 두께 감소 (-0.1pt)"
                 >−</button>
                 <button
-                  onClick={() => handleGlobalLineWidth(0.1)}
+                  onClick={() => handleGlobalLineWidth(1.1)}
                   className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
                   title="전체 선 두께 증가 (+0.1pt)"
                 >+</button>
@@ -1118,6 +1167,182 @@ export default function Home() {
               >
                 <ClipboardCopy className="w-4 h-4" />
                 {isMetaCopied ? "✅ 복사 완료!" : "원클릭 복사하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          사용 설명서 모달
+      ══════════════════════════════════════════════════════ */}
+      {isHelpOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.80)", backdropFilter: "blur(8px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setIsHelpOpen(false); }}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[88vh] flex flex-col rounded-2xl border border-zinc-700/40 shadow-2xl shadow-black/60"
+            style={{ background: "linear-gradient(145deg, #13161e 0%, #0e1117 60%, #0d1117 100%)" }}
+          >
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800/60 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-zinc-600 to-zinc-700 flex items-center justify-center shadow-md">
+                  <HelpCircle className="w-4 h-4 text-white" />
+                </div>
+                <div className="leading-none">
+                  <div className="text-[14px] font-black text-white tracking-tight">🚀 KO-SMART 사용 설명서</div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5 font-medium">v5.2 · Jinil Edition · 완벽 활용 가이드</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsHelpOpen(false)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
+                title="닫기"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 컨텐츠 스크롤 영역 */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 min-h-0 space-y-5 text-[12.5px] text-zinc-300 leading-relaxed">
+
+              {/* 인트로 */}
+              <p className="text-zinc-400 text-[12px]">
+                KICE 표준 수학 그래프 렌더링 툴에 오신 것을 환영합니다. 아래 버튼들의 정확한 용도를 확인하세요.
+              </p>
+
+              <hr className="border-zinc-800" />
+
+              {/* 섹션 1 */}
+              <div>
+                <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
+                  <span className="text-base">🎯</span> 1. 개별 노드 정밀 제어
+                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">좌측 하단 패널</span>
+                </h4>
+                <ul className="space-y-2.5 pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 inline-block bg-zinc-800 border border-zinc-700 text-zinc-300 text-[10px] font-bold px-2 py-0.5 rounded font-mono">노드 선택…</span>
+                    <span><strong className="text-zinc-200">(드롭다운)</strong> 위치나 크기를 바꾸고 싶은 특정 글자/수식을 목록에서 선택합니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2 flex-wrap gap-y-1">
+                    <span className="shrink-0 mt-0.5 flex gap-1">
+                      {["▲","▼","◀","▶"].map(c => (
+                        <kbd key={c} className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded shadow-sm">{c}</kbd>
+                      ))}
+                    </span>
+                    <span><strong className="text-zinc-200">(JOYSTICK)</strong> 선택된 노드를 1pt 단위로 상하좌우 미세 이동시킵니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1">
+                      <kbd className="inline-flex items-center justify-center px-2 h-6 bg-violet-900/60 border border-violet-700/60 text-violet-300 text-[11px] font-black rounded shadow-sm">A＋</kbd>
+                      <kbd className="inline-flex items-center justify-center px-2 h-6 bg-violet-900/60 border border-violet-700/60 text-violet-300 text-[11px] font-black rounded shadow-sm">A－</kbd>
+                    </span>
+                    <span><strong className="text-zinc-200">(NODE FONT)</strong> <strong className="text-violet-300">선택된 특정 노드 하나</strong>의 글자 크기만 개별적으로 키우거나 줄입니다.</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* 섹션 2 */}
+              <div>
+                <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
+                  <span className="text-base">🌍</span> 2. 전체 스케일 제어
+                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">우측 툴바</span>
+                </h4>
+                <ul className="space-y-2.5 pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-violet-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        T 전체폰트
+                      </span>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">−</kbd>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">+</kbd>
+                    </span>
+                    <span>그래프 안의 <strong className="text-zinc-200">모든 글자와 수식 크기</strong>를 한 번에 일괄 조절합니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-cyan-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        ≡ 선두께
+                      </span>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">−</kbd>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">+</kbd>
+                    </span>
+                    <span>얇은 보조선과 굵은 메인 그래프의 <strong className="text-zinc-200">시각적 비율을 완벽하게 유지</strong>하면서 전체 두께를 조절합니다.</span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* 섹션 3 */}
+              <div>
+                <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
+                  <span className="text-base">💾</span> 3. 저장 및 프롬프트 가이드
+                </h4>
+                <ul className="space-y-2.5 pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 bg-zinc-800/60 border border-zinc-700/50 text-zinc-400 text-[10px] font-bold px-2 py-0.5 rounded">💾 Auto-Save</span>
+                    <span>실수로 새로고침해도 마지막 코드가 브라우저에 안전하게 남아 <strong className="text-zinc-200">자동 복구</strong>됩니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#2563eb"}}>메타수학 프롬프트 가이드</span>
+                    <span>AI에게 코드를 뽑아낼 때 지시할 엄격한 스타일 가이드를 클립보드에 <strong className="text-zinc-200">원클릭 복사</strong>합니다.</span>
+                  </li>
+                </ul>
+              </div>
+
+              <hr className="border-zinc-800" />
+
+              {/* 섹션 4 — 필독 */}
+              <div className="rounded-xl border border-red-900/40 bg-red-950/20 px-4 py-3">
+                <h4 className="text-[13px] font-black text-red-400 mb-2.5 flex items-center gap-2">
+                  🚨 [필독] 돋보기(Zoom)와 고화질 다운로드의 차이
+                </h4>
+                <ul className="space-y-2.5 pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <kbd className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[10px] font-bold px-2 py-0.5 rounded">🔍 100%~200%</kbd>
+                    </span>
+                    <span>
+                      <strong className="text-zinc-200">(슬라이더)</strong> 모니터상에서 내 눈에만 크게 보이도록 확대/축소합니다.<br />
+                      <strong className="text-red-400">실제 이미지 저장 크기와는 전혀 무관합니다!</strong>
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#2563eb"}}>📥 PNG</span>
+                    <span>일반적인 웹 해상도(기본 크기)로 이미지를 다운로드합니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#f97316"}}>📥 초고화질 (4000px)</span>
+                    <span>화면 확대 배율과 상관없이, <strong className="text-amber-300">무조건 출판/인쇄(한글 HWP)용 초고화질 대형 사이즈</strong>로 강제 렌더링하여 저장합니다. 한글 문서에 넣을 땐 <strong className="text-amber-300">반드시 이 주황색 버튼</strong>을 누르세요!</span>
+                  </li>
+                </ul>
+              </div>
+
+            </div>
+
+            {/* 모달 하단 — 크레딧 + 닫기 */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800/60 shrink-0 bg-black/30">
+              {/* 개발자 크레딧 */}
+              <div className="flex items-center gap-2.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/ko.png" alt="고진일 팀장"
+                  className="w-8 h-8 rounded-full object-cover border-2 border-blue-400/40 shadow-md shadow-blue-500/20"
+                />
+                <div className="leading-none">
+                  <div className="text-[9px] text-blue-400/60 font-semibold tracking-wider uppercase">인피니트 수학연구소</div>
+                  <div className="text-[11px] font-bold text-white">고진일 팀장</div>
+                  <div className="text-[9px] text-zinc-600 font-medium">Designed &amp; Built by Jinil Ko</div>
+                </div>
+              </div>
+              {/* 닫기 버튼 */}
+              <button
+                onClick={() => setIsHelpOpen(false)}
+                className="px-4 py-2 rounded-lg text-[12px] font-bold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white transition-all"
+              >
+                닫기
               </button>
             </div>
           </div>
