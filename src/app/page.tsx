@@ -9,7 +9,7 @@ import {
   Copy, History, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
-  RotateCcw, BookOpen, X, ClipboardCopy,
+  RotateCcw, BookOpen, X, ClipboardCopy, Type,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem,
@@ -99,6 +99,47 @@ const KICE_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 - 길이 같음 기호(Tick marks) 방향 절대 주의: 변의 길이가 같음을 표시하는 짧은 선분(빗금)을 그릴 때는, 반드시 해당 변(선분)과 수직(직교)이 되도록 rotate 각도를 정확히 계산하여 설정합니다. 변과 평행하거나 비스듬하게 그리는 실수를 절대 금지합니다.`;
 
 // ─────────────────────────────────────────────────────────────
+//  메타수학용 프롬프트 가이드 원문
+// ─────────────────────────────────────────────────────────────
+const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일]
+
+앞으로 모든 TikZ 수학 그래프 코드를 생성할 때는 웹 렌더링 환경(TikZJax)의 한계를 고려하여 아래의 규칙을 예외 없이 엄격하게 적용하세요.
+
+1. [웹 렌더링 호환 및 언어 규칙 - 절대 규칙]
+- 한글 원천 차단: \\usepackage{kotex} 패키지는 절대 선언하지 않습니다. 코드 내부의 모든 % 주석은 반드시 영어로만 작성하며, 노드(Node)나 텍스트 출력 부분에 한글을 절대 포함하지 않습니다. (모든 라벨은 수식, 기호, 영어로만 구성)
+- 기본 환경: \\documentclass[tikz, border=10pt]{standalone} 및 \\usetikzlibrary{arrows.meta}만을 기본으로 포함합니다.
+
+2. [전역 환경 및 1:1 비율 고정]
+- 전역 화살표 및 스케일: 기하학적 왜곡을 막기 위해 x축과 y축의 스케일을 동일하게 설정하며, 대문자 Stealth 화살표 크기를 전역으로 지정합니다.
+- 필수 적용 옵션: \\begin{tikzpicture}[>={Stealth[length=11.2pt, width=6.08pt]}, x=0.8cm, y=0.8cm]
+
+3. [축(Axis) 렌더링 및 고정 뼈대]
+- 축을 그릴 때는 기본 제공되는 [-stealth]를 절대 사용하지 않으며, 반드시 [->] 또는 [-Stealth]를 사용하여 전역 화살표 설정이 적용되도록 합니다.
+- 축의 양 끝 라벨(x, y)은 비율 조절 없이 font=\\rm으로만 지정하고, 겹침 방지를 위한 shift 값을 반드시 포함합니다.
+- x축 고정 뼈대: \\draw[->, line width=0.48pt] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, scale=1.6, font=\\rm, inner sep=1.5pt, xshift=-3pt] {$x$};
+- y축 고정 뼈대: \\draw[->, line width=0.48pt] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, scale=1.6, font=\\rm, inner sep=1.5pt, yshift=1pt] {$y$};
+
+4. [마이크로 타이포그래피: 폰트 및 라벨 스타일링]
+- 배경색 투명도 유지: 텍스트가 선을 가리더라도 모든 텍스트 및 수식 노드에 fill=white 옵션을 절대 사용하지 않습니다. 모든 배경은 투명하게 둡니다.
+- 대문자 점(Point) 라벨 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 일반 폰트 대신, 폰트 사이즈업과 비율 조절(transform shape, scale=1.6, xscale=0.9, font=\\large)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다.
+- 원점 노드 예시: \\node [below left, inner sep=2pt, transform shape, scale=1.6, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
+- 일반 대문자 노드 예시: \\node [right, transform shape, scale=1.6, xscale=0.9, font=\\large, xshift=2pt] at (3,2) {$\\rm P$};
+- 소문자 및 수식 폰트: 그래프 내부의 소문자 텍스트 및 수식(함수식 등), 각도(^\\circ) 등은 비율 조절 옵션을 빼고 scale=1.6, font=\\rm을 기본으로 수식 모드($...$) 안에 작성합니다.
+
+5. [점(Point) 및 교점 렌더링]
+- 타원형 에러 방지: \\fill circle 명령어는 절대 금지합니다. 모든 렌더링 포인트는 반드시 \\node[circle, fill=black, inner sep=1.2pt] at (좌표) {}; 형태로 작성합니다.
+- 노이즈 최소화: 불필요한 교점/접점의 검은 점 마커는 생략합니다.
+
+6. [곡선 렌더링]
+- 곡선은 임의의 점을 잇지 않고 수학 함수식 \\draw[line width=0.48pt] plot (\\x, {수식})을 사용하며 samples=150 이상을 적용합니다. (\\addplot 사용 금지)
+
+7. [기하학적 기호 및 보조선 표시]
+- 직각 기호: 수직(직각) 기호는 삼각형 바깥으로 튀어나가지 않도록 scope의 rotate 각도를 조절하여 반드시 도형 안쪽으로 그려지도록 세팅합니다.
+- 길이 표시: 변 바깥쪽에 길이를 표시할 때는 직선 대신 부드럽게 휘어지는 점선(활시위 모양)을 사용합니다. (예: \\draw[dashed] (A) to[bend right=25] node[midway, scale=1.6] {$12$} (B); -> 주의: fill=white 사용 안 함)
+- 각도 및 이등분: 각도를 나타내는 선은 arc나 clip을 이용해 둥글게 그리고, 이등분 표시는 둥근 선 위에 점(node[circle])이나 짧은 평행선 두 개를 추가해 명확히 표기합니다.
+- 길이 같음 기호(Tick marks) 방향 절대 주의: 변의 길이가 같음을 표시하는 짧은 선분(빗금)을 그릴 때는, 반드시 해당 변(선분)과 수직(직교)이 되도록 rotate 각도를 정확히 계산하여 설정합니다. 변과 평행하거나 비스듬하게 그리는 실수를 절대 금지합니다.`;
+
+// ─────────────────────────────────────────────────────────────
 //  LocalStorage 키
 // ─────────────────────────────────────────────────────────────
 const LS_KEY = "kosmart_saved_code";
@@ -117,6 +158,10 @@ export default function Home() {
   // KICE 프롬프트 모달
   const [isKiceModalOpen, setIsKiceModalOpen] = useState(false);
   const [isCopied,        setIsCopied]        = useState(false);
+
+  // 메타수학 프롬프트 모달
+  const [isMetaModalOpen, setIsMetaModalOpen] = useState(false);
+  const [isMetaCopied,    setIsMetaCopied]    = useState(false);
 
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -284,13 +329,62 @@ export default function Home() {
     }
   };
 
-  // ── 노드 스캔 (\\node, node, \\coordinate 모두) ───────────
+  // ── 메타수학 프롬프트 가이드 복사 ────────────────────────────
+  const handleCopyMetaPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(META_PROMPT_GUIDE);
+      setIsMetaCopied(true);
+      toast.success("✅ 메타수학 프롬프트가 복사되었습니다!");
+      setTimeout(() => setIsMetaCopied(false), 2500);
+    } catch {
+      toast.error("복사에 실패했습니다. 직접 선택 후 복사해 주세요.");
+    }
+  };
+
+  // ── 노드 스캔 — \node ... ; を セミコロンまで robust にパース ──
+  //  중첩 중괄호({$\frac{1}{2}$}), 복잡한 좌표(at ({2+sqrt(2)}, 0)) 대응
   const scanNodes = () => {
     const matches: { full: string; options: string; content: string; index: number }[] = [];
-    const re = /(?:\\node|node|\\coordinate)\s*(?:\[([^\]]*)\])?\s*(?:\(([^)]*)\))?\s*(?:at\s*(\([^)]*\)))?\s*\{([^}]*)\}/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(rawInput)) !== null)
-      matches.push({ full: m[0], options: m[1] ?? "", content: m[4] ?? "", index: m.index });
+
+    // \node / node / \coordinate 위치를 먼저 탐색
+    const startRe = /(?:(?:\\node|\\coordinate)(?![a-zA-Z])|(?<![\\a-zA-Z])node(?![a-zA-Z]))/g;
+    let startMatch: RegExpExecArray | null;
+
+    while ((startMatch = startRe.exec(rawInput)) !== null) {
+      const startIdx = startMatch.index;
+      // 세미콜론까지 슬라이스 (최대 1000자)
+      const slice = rawInput.slice(startIdx, startIdx + 1000);
+      const semiIdx = slice.indexOf(";");
+      if (semiIdx === -1) continue;
+      const stmt = slice.slice(0, semiIdx + 1); // \node ... ;
+
+      // options: [] 블록 (탐욕적이지 않게)
+      const optMatch = stmt.match(/^(?:\\node|\\coordinate|node)\s*\[([^\]]*)\]/);
+      const options = optMatch ? optMatch[1] : "";
+
+      // content: 중첩 중괄호를 depth 카운팅으로 캡처
+      const braceOpen = stmt.indexOf("{");
+      if (braceOpen === -1) continue;
+      let depth = 0;
+      let contentStart = -1;
+      let contentEnd = -1;
+      for (let i = braceOpen; i < stmt.length; i++) {
+        if (stmt[i] === "{" && stmt[i - 1] !== "\\") {
+          depth++;
+          if (depth === 1) contentStart = i + 1;
+        } else if (stmt[i] === "}" && stmt[i - 1] !== "\\") {
+          depth--;
+          if (depth === 0) { contentEnd = i; break; }
+        }
+      }
+      if (contentStart === -1 || contentEnd === -1) continue;
+      const content = stmt.slice(contentStart, contentEnd);
+      const full = stmt.slice(0, contentEnd + 1);
+
+      matches.push({ full, options, content, index: startIdx });
+      // 다음 탐색 시작점을 full 끝으로 이동 (중복 방지)
+      startRe.lastIndex = startIdx + full.length;
+    }
     return matches;
   };
   const nodes = scanNodes();
@@ -303,6 +397,86 @@ export default function Home() {
     if (!node) return undefined;
     const content = node.content || "(empty)";
     return `${idx + 1}. ${content}`;
+  };
+
+  // ── 글로벌 폰트 스케일 조절 ──────────────────────────────
+  //  \begin{tikzpicture}[...] 내부의 every node/.style={scale=N} 을 upsert
+  const handleGlobalFontScale = (delta: number) => {
+    // \begin{tikzpicture}[ ... ] 블록 전체를 depth 카운팅으로 추출
+    const beginIdx = rawInput.indexOf("\\begin{tikzpicture}");
+    if (beginIdx === -1) { toast.error("\\begin{tikzpicture} 를 찾을 수 없습니다."); return; }
+
+    // [ 위치 탐색
+    const bracketStart = rawInput.indexOf("[", beginIdx);
+    if (bracketStart === -1) { toast.error("tikzpicture 옵션 [ 를 찾을 수 없습니다."); return; }
+
+    // depth 카운팅으로 대응되는 ] 찾기
+    let depth = 0;
+    let bracketEnd = -1;
+    for (let i = bracketStart; i < rawInput.length; i++) {
+      if (rawInput[i] === "[") depth++;
+      else if (rawInput[i] === "]") { depth--; if (depth === 0) { bracketEnd = i; break; } }
+    }
+    if (bracketEnd === -1) { toast.error("tikzpicture 옵션 ] 를 찾을 수 없습니다."); return; }
+
+    const inner = rawInput.slice(bracketStart + 1, bracketEnd); // [...] 내부
+
+    // every node/.style={scale=숫자} 패턴 파싱
+    const existRe = /every\s+node\s*\/\.style\s*=\s*\{\s*scale\s*=\s*([0-9.]+)\s*\}/;
+    const hit = inner.match(existRe);
+
+    let newInner: string;
+    if (hit) {
+      // 이미 존재 → 숫자 업데이트
+      const cur = parseFloat(hit[1]);
+      const next = Math.max(0.3, Math.round((cur + delta) * 10) / 10);
+      newInner = inner.replace(existRe, `every node/.style={scale=${next}}`);
+    } else {
+      // 없음 → 삽입
+      const initVal = delta > 0 ? 1.1 : 0.9;
+      newInner = inner.trimEnd() + `, every node/.style={scale=${initVal}}`;
+    }
+
+    const newCode =
+      rawInput.slice(0, bracketStart + 1) +
+      newInner +
+      rawInput.slice(bracketEnd);
+    handleRawInputChange(newCode);
+
+    // 현재 적용 값 읽어 토스트로 안내
+    const hitNew = newInner.match(existRe);
+    const displayVal = hitNew ? hitNew[1] : (delta > 0 ? "1.1" : "0.9");
+    toast.success(`✅ 전체 폰트 스케일: ${displayVal}`);
+  };
+
+  // ── 개별 노드 폰트 스케일 조절 (A+ / A-) ──────────────────
+  //  선택된 노드의 [...] 옵션 내부 scale=N 을 0.1 단위 upsert
+  const handleNodeFontScale = (delta: number) => {
+    if (selectedNodeIndex === null) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
+    const node = nodes[parseInt(selectedNodeIndex)];
+    if (!node) return;
+
+    let opts = node.options;
+    const scaleRe = /(?<![a-zA-Z])scale\s*=\s*([0-9.]+)/;
+    const hit = opts.match(scaleRe);
+
+    if (hit) {
+      const cur = parseFloat(hit[1]);
+      const next = Math.max(0.5, Math.round((cur + delta) * 10) / 10);
+      opts = opts.replace(scaleRe, `scale=${next}`);
+    } else {
+      const initVal = delta > 0 ? 1.1 : 0.9;
+      opts = (opts.trim() ? opts + ", " : "") + `scale=${initVal}`;
+    }
+
+    const updatedFull = node.options
+      ? node.full.replace(
+          new RegExp(`\\[${node.options.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`),
+          `[${opts}]`)
+      : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
+
+    const newCode = rawInput.slice(0, node.index) + updatedFull + rawInput.slice(node.index + node.full.length);
+    handleRawInputChange(newCode);
   };
 
   const handleShift = (axis: "x" | "y", direction: number) => {
@@ -371,19 +545,36 @@ export default function Home() {
           <span className="text-[10px] font-bold text-blue-300/80 tracking-wider">Kroki · TeXLive</span>
         </div>
 
-        {/* ── KICE 프롬프트 가이드 버튼 (헤더 중앙 우측) ── */}
-        <button
-          id="btn-kice-prompt-guide"
-          onClick={() => setIsKiceModalOpen(true)}
-          className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150
-            bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500
-            text-white shadow-md shadow-emerald-900/40 border border-emerald-500/30 hover:border-emerald-400/50
-            hover:scale-[1.03] active:scale-100 group"
-          title="KICE TikZ 스타일 가이드 프롬프트 열기"
-        >
-          <BookOpen className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
-          KICE 프롬프트 가이드
-        </button>
+        {/* ── 프롬프트 가이드 버튼 그룹 ── */}
+        <div className="flex items-center gap-2">
+          {/* KICE 가이드 버튼 */}
+          <button
+            id="btn-kice-prompt-guide"
+            onClick={() => setIsKiceModalOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150
+              bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500
+              text-white shadow-md shadow-emerald-900/40 border border-emerald-500/30 hover:border-emerald-400/50
+              hover:scale-[1.03] active:scale-100 group"
+            title="KICE TikZ 스타일 가이드 프롬프트 열기"
+          >
+            <BookOpen className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+            KICE 프롬프트 가이드
+          </button>
+
+          {/* 메타수학 가이드 버튼 */}
+          <button
+            id="btn-meta-prompt-guide"
+            onClick={() => setIsMetaModalOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150
+              bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500
+              text-white shadow-md shadow-blue-900/40 border border-blue-500/30 hover:border-blue-400/50
+              hover:scale-[1.03] active:scale-100 group"
+            title="메타수학용 TikZ 스타일 가이드 프롬프트 열기"
+          >
+            <BookOpen className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+            메타수학 프롬프트 가이드
+          </button>
+        </div>
 
         {/* 헤더 우측: 개발자 프로필 + 복사 */}
         <div className="ml-auto flex items-center gap-3">
@@ -464,6 +655,22 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-2">
+              {/* ── 전체 폰트 스케일 컨트롤 ── */}
+              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
+                <Type className="w-3 h-3 text-violet-400 shrink-0" />
+                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">전체폰트</span>
+                <button
+                  onClick={() => handleGlobalFontScale(-0.1)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="전체 노드 폰트 크기 감소"
+                >−</button>
+                <button
+                  onClick={() => handleGlobalFontScale(0.1)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="전체 노드 폰트 크기 증가"
+                >+</button>
+              </div>
+
               {/* ── 줌 슬라이더 ── */}
               <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
                 <ZoomIn className="w-3 h-3 text-zinc-500 shrink-0" />
@@ -654,37 +861,56 @@ export default function Home() {
 
         <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
 
-        {/* 조이스틱 */}
-        <div className="flex flex-col items-center shrink-0">
-          <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-            <MousePointer2 className="w-2.5 h-2.5" /> Joystick
-          </span>
-          <div className="flex items-center gap-1">
-            {[
-              { icon: ChevronLeft,  action: () => handleShift("x", -1) },
-            ].concat([]).map(() => null)}
-            <Button variant="outline" size="icon"
-              className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
-              onClick={() => handleShift("x", -1)}>
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </Button>
-            <div className="flex flex-col gap-1">
+        {/* 조이스틱 + 개별 노드 폰트 스케일 */}
+        <div className="flex items-center gap-3 shrink-0">
+          {/* 조이스틱 방향키 */}
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <MousePointer2 className="w-2.5 h-2.5" /> Joystick
+            </span>
+            <div className="flex items-center gap-1">
               <Button variant="outline" size="icon"
                 className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
-                onClick={() => handleShift("y", 1)}>
-                <ChevronUp className="w-3.5 h-3.5" />
+                onClick={() => handleShift("x", -1)}>
+                <ChevronLeft className="w-3.5 h-3.5" />
               </Button>
+              <div className="flex flex-col gap-1">
+                <Button variant="outline" size="icon"
+                  className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
+                  onClick={() => handleShift("y", 1)}>
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="outline" size="icon"
+                  className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
+                  onClick={() => handleShift("y", -1)}>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
+              </div>
               <Button variant="outline" size="icon"
                 className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
-                onClick={() => handleShift("y", -1)}>
-                <ChevronDown className="w-3.5 h-3.5" />
+                onClick={() => handleShift("x", 1)}>
+                <ChevronRight className="w-3.5 h-3.5" />
               </Button>
             </div>
-            <Button variant="outline" size="icon"
-              className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
-              onClick={() => handleShift("x", 1)}>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </Button>
+          </div>
+
+          {/* 개별 노드 폰트 스케일 A+ / A- */}
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+              <Type className="w-2.5 h-2.5" /> Node Font
+            </span>
+            <div className="flex flex-col gap-1">
+              <button
+                onClick={() => handleNodeFontScale(0.1)}
+                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-400 text-[11px] font-black transition-all"
+                title="선택된 노드 폰트 크기 증가 (+0.1)"
+              >A＋</button>
+              <button
+                onClick={() => handleNodeFontScale(-0.1)}
+                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-400 text-[11px] font-black transition-all"
+                title="선택된 노드 폰트 크기 감소 (-0.1, 최소 0.5)"
+              >A－</button>
+            </div>
           </div>
         </div>
 
@@ -760,6 +986,71 @@ export default function Home() {
               >
                 <ClipboardCopy className="w-4 h-4" />
                 {isCopied ? "✅ 복사 완료!" : "원클릭 복사하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          메타수학 프롬프트 가이드 모달
+      ══════════════════════════════════════════════════════ */}
+      {isMetaModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setIsMetaModalOpen(false); }}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[82vh] flex flex-col rounded-2xl border border-blue-800/30 shadow-2xl shadow-blue-900/30"
+            style={{ background: "linear-gradient(145deg, #0d1525 0%, #0a1020 50%, #0d1117 100%)" }}
+          >
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-blue-900/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center shadow-md shadow-blue-900/40">
+                  <BookOpen className="w-4 h-4 text-white" />
+                </div>
+                <div className="leading-none">
+                  <div className="text-[13px] font-black text-white tracking-tight">메타수학 프롬프트 가이드</div>
+                  <div className="text-[10px] text-blue-400/70 mt-0.5 font-medium">TikZ 수학 그래프 렌더링 엄격한 스타일 가이드</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsMetaModalOpen(false)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
+                title="닫기"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 가이드 텍스트 스크롤 영역 */}
+            <div className="flex-1 overflow-y-auto px-6 py-5 min-h-0">
+              <pre
+                className="text-[11.5px] text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap break-words select-all"
+                style={{ fontFamily: "'Fira Code', 'Consolas', 'Courier New', monospace" }}
+              >
+                {META_PROMPT_GUIDE}
+              </pre>
+            </div>
+
+            {/* 모달 하단 — 복사 버튼 */}
+            <div className="flex items-center justify-between px-6 py-4 border-t border-blue-900/30 shrink-0 bg-black/20">
+              <span className="text-[10px] text-zinc-600">
+                전체 선택 후 복사하거나 아래 버튼을 클릭하세요
+              </span>
+              <button
+                id="btn-copy-meta-prompt"
+                onClick={handleCopyMetaPrompt}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-bold tracking-tight transition-all duration-200
+                  ${isMetaCopied
+                    ? "bg-blue-600/30 border border-blue-500/50 text-blue-300 scale-95"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 border border-blue-500/30 text-white shadow-md shadow-blue-900/40 hover:scale-[1.03] active:scale-100"
+                  }`}
+              >
+                <ClipboardCopy className="w-4 h-4" />
+                {isMetaCopied ? "✅ 복사 완료!" : "원클릭 복사하기"}
               </button>
             </div>
           </div>
