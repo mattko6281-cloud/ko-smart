@@ -689,7 +689,7 @@ export default function Home() {
               <h2 className="text-lg font-black text-white mb-1">접속 제한 영역</h2>
               <p className="text-[12px] text-zinc-500 leading-relaxed">
                 이 서비스는 인피니트 수학연구소 팀원에게만<br />
-                공개되어 있습니다. 퀴 계정으로 로그인 후 접속하세요.
+                공개되어 있습니다. 허가된 구글 계정으로 로그인 후 접속하세요.
               </p>
             </div>
 
