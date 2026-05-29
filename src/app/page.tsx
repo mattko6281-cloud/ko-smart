@@ -795,93 +795,14 @@ export default function Home() {
         {/* ── RIGHT: Live Preview ───────────────────────────── */}
         <div className="flex-1 flex flex-col p-4 min-h-0 overflow-hidden bg-[#0d1117]">
 
-          {/* Preview Toolbar — 2-Tier 반응형 */}
-          <div className="flex flex-col gap-1.5 mb-3 shrink-0">
+          {/* Preview Toolbar — 심플 단일 줄 */}
+          <div className="flex items-center justify-between mb-3 shrink-0">
+            <div className="flex items-center gap-2">
+              <Eye className="w-3.5 h-3.5 text-zinc-600" />
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Live Preview</span>
+            </div>
 
-            {/* ── Row 1: 레이블 + 에디팅 컨트롤 그룹 ── */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-2 mr-1">
-                <Eye className="w-3.5 h-3.5 text-zinc-600" />
-                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Live Preview</span>
-              </div>
-
-              {/* 그룹 구분선 */}
-              <div className="h-5 w-px bg-zinc-800" />
-
-              {/* ── 전체 폰트 스케일 ── */}
-              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
-                <Type className="w-3 h-3 text-violet-400 shrink-0" />
-                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">폰트</span>
-                <button
-                  onClick={() => handleGlobalFontScale(-0.1)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="전체 노드 폰트 크기 감소"
-                >−</button>
-                <button
-                  onClick={() => handleGlobalFontScale(0.1)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="전체 노드 폰트 크기 증가"
-                >+</button>
-              </div>
-
-              {/* ── 전체 선 두께 ── */}
-              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
-                <svg className="w-3 h-3 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" d="M3 12h18" />
-                  <path strokeLinecap="round" strokeWidth={1} d="M3 7h18M3 17h18" />
-                </svg>
-                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">선두께</span>
-                <button
-                  onClick={() => handleGlobalLineWidth(0.9)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="선 두께 10% 감소 (배율 적용)"
-                >−</button>
-                <button
-                  onClick={() => handleGlobalLineWidth(1.1)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="선 두께 10% 증가 (배율 적용)"
-                >+</button>
-              </div>
-
-              {/* ── X (가로) 스케일 ── */}
-              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
-                <svg className="w-3 h-3 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4" />
-                </svg>
-                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">가로</span>
-                <button
-                  onClick={() => handleCanvasScale("x", 0.9)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="가로 비율 10% 감소 (x=Ncm 배율 적용)"
-                >−</button>
-                <button
-                  onClick={() => handleCanvasScale("x", 1.1)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="가로 비율 10% 증가 (x=Ncm 배율 적용)"
-                >+</button>
-              </div>
-
-              {/* ── Y (세로) 스케일 ── */}
-              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
-                <svg className="w-3 h-3 text-rose-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4" />
-                </svg>
-                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">세로</span>
-                <button
-                  onClick={() => handleCanvasScale("y", 0.9)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="세로 비율 10% 감소 (y=Ncm 배율 적용)"
-                >−</button>
-                <button
-                  onClick={() => handleCanvasScale("y", 1.1)}
-                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="세로 비율 10% 증가 (y=Ncm 배율 적용)"
-                >+</button>
-              </div>
-
-              {/* 그룹 구분선 */}
-              <div className="h-5 w-px bg-zinc-800" />
-
+            <div className="flex items-center gap-2">
               {/* ── 줌 슬라이더 ── */}
               <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
                 <ZoomIn className="w-3 h-3 text-zinc-500 shrink-0" />
@@ -892,7 +813,7 @@ export default function Home() {
                   step={5}
                   value={zoomPercent}
                   onChange={(e) => setZoomPercent(parseInt(e.target.value))}
-                  className="w-20 h-1 accent-blue-500 cursor-pointer"
+                  className="w-24 h-1 accent-blue-500 cursor-pointer"
                 />
                 <span className="text-[11px] font-bold text-blue-300 w-9 text-right shrink-0">
                   {zoomPercent}%
@@ -924,7 +845,7 @@ export default function Home() {
                 {isHighResDownloading
                   ? <Loader2 className="w-3 h-3 animate-spin" />
                   : <Download className="w-3 h-3" />}
-                초고화질
+                초고화질 (4000px)
               </Button>
             </div>
           </div>
@@ -1122,6 +1043,87 @@ export default function Home() {
                 title="선택된 노드 폰트 크기 10% 증감"
               >A－</button>
             </div>
+          </div>
+        </div>
+
+        <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
+
+        {/* ── GLOBAL CONTROLS ── */}
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5">Global Controls</span>
+          <div className="grid grid-cols-2 gap-1">
+
+            {/* 전체 폰트 */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <Type className="w-2.5 h-2.5 text-violet-400 shrink-0" />
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">폰트</span>
+              <button
+                onClick={() => handleGlobalFontScale(-0.1)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="전체 노드 폰트 크기 감소"
+              >−</button>
+              <button
+                onClick={() => handleGlobalFontScale(0.1)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="전체 노드 폰트 크기 증가"
+              >+</button>
+            </div>
+
+            {/* 선두께 */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <svg className="w-2.5 h-2.5 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" d="M3 12h18" />
+                <path strokeLinecap="round" strokeWidth={1} d="M3 7h18M3 17h18" />
+              </svg>
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">두께</span>
+              <button
+                onClick={() => handleGlobalLineWidth(0.9)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="선 두께 10% 감소 (배율 적용)"
+              >−</button>
+              <button
+                onClick={() => handleGlobalLineWidth(1.1)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="선 두께 10% 증가 (배율 적용)"
+              >+</button>
+            </div>
+
+            {/* 가로 (X) */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <svg className="w-2.5 h-2.5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4" />
+              </svg>
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">가로</span>
+              <button
+                onClick={() => handleCanvasScale("x", 0.9)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="가로 비율 10% 감소 (x=Ncm 배율 적용)"
+              >−</button>
+              <button
+                onClick={() => handleCanvasScale("x", 1.1)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="가로 비율 10% 증가 (x=Ncm 배율 적용)"
+              >+</button>
+            </div>
+
+            {/* 세로 (Y) */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <svg className="w-2.5 h-2.5 text-rose-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4" />
+              </svg>
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">세로</span>
+              <button
+                onClick={() => handleCanvasScale("y", 0.9)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="세로 비율 10% 감소 (y=Ncm 배율 적용)"
+              >−</button>
+              <button
+                onClick={() => handleCanvasScale("y", 1.1)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="세로 비율 10% 증가 (y=Ncm 배율 적용)"
+              >+</button>
+            </div>
+
           </div>
         </div>
 
@@ -1344,7 +1346,7 @@ export default function Home() {
               <div>
                 <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
                   <span className="text-base">🌍</span> 2. 전체 스케일 제어
-                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">우측 툴바</span>
+                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">우측 하단 패널</span>
                 </h4>
                 <ul className="space-y-2.5 pl-1">
                   <li className="flex items-start gap-2">
@@ -1366,6 +1368,26 @@ export default function Home() {
                       <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">+</kbd>
                     </span>
                     <span>얇은 보조선과 굵은 메인 그래프의 <strong className="text-zinc-200">시각적 비율을 완벽하게 유지</strong>하면서 전체 두께를 조절합니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        ↔ 가로너비
+                      </span>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">−</kbd>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">+</kbd>
+                    </span>
+                    <span>그래프의 <strong className="text-zinc-200">가로(x축) 비율</strong>만 독립적으로 늘리거나 줄입니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-rose-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        ↕ 세로높이
+                      </span>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">−</kbd>
+                      <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">+</kbd>
+                    </span>
+                    <span>그래프의 <strong className="text-zinc-200">세로(y축) 비율</strong>만 독립적으로 늘리거나 줄입니다. <span className="text-zinc-500">(함수의 뾰족한 정도를 튜닝할 때 유용합니다.)</span></span>
                   </li>
                 </ul>
               </div>
