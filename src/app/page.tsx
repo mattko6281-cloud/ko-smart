@@ -581,6 +581,54 @@ export default function Home() {
     handleRawInputChange(newCode);
   };
 
+  // ── X/Y 캔버스 비율 스케일러 ───────────────────────────────
+  //  \begin{tikzpicture}[...] 내부의 x=Ncm / y=Ncm 을 배율로 upsert
+  const handleCanvasScale = (axis: "x" | "y", ratio: number) => {
+    if (!rawInput.trim()) { toast.error("코드가 비어 있습니다."); return; }
+
+    const beginIdx = rawInput.indexOf("\\begin{tikzpicture}");
+    if (beginIdx === -1) { toast.error("\\begin{tikzpicture} 를 찾을 수 없습니다."); return; }
+
+    const bracketStart = rawInput.indexOf("[", beginIdx);
+    if (bracketStart === -1) { toast.error("tikzpicture 옵션 [ 를 찾을 수 없습니다."); return; }
+
+    // depth 카운팅으로 대응 ] 탐색
+    let depth = 0;
+    let bracketEnd = -1;
+    for (let i = bracketStart; i < rawInput.length; i++) {
+      if (rawInput[i] === "[") depth++;
+      else if (rawInput[i] === "]") { depth--; if (depth === 0) { bracketEnd = i; break; } }
+    }
+    if (bracketEnd === -1) { toast.error("tikzpicture 옵션 ] 를 찾을 수 없습니다."); return; }
+
+    const inner = rawInput.slice(bracketStart + 1, bracketEnd);
+
+    // x=Ncm 또는 y=Ncm 패턴 (단어 경계 주의: xy= 같은 케이스 제외)
+    const axisRe = new RegExp(`(?<![a-wyzA-WYZ])${axis}\\s*=\\s*([0-9.]+)cm`);
+    const hit = inner.match(axisRe);
+
+    let newInner: string;
+    if (hit) {
+      const cur = parseFloat(hit[1]);
+      const next = Math.max(0.1, Math.round(cur * ratio * 100) / 100);
+      newInner = inner.replace(axisRe, `${axis}=${next}cm`);
+      const label = axis === "x" ? "가로 비율" : "세로 비율";
+      toast.success(`✅ ${label}: ${next}cm`);
+    } else {
+      // 없을 경우 주입
+      const initVal = ratio > 1 ? 1.1 : 0.9;
+      newInner = inner.trimEnd() + `, ${axis}=${initVal}cm`;
+      const label = axis === "x" ? "가로 비율" : "세로 비율";
+      toast.success(`✅ ${label} 추가: ${initVal}cm`);
+    }
+
+    const newCode =
+      rawInput.slice(0, bracketStart + 1) +
+      newInner +
+      rawInput.slice(bracketEnd);
+    handleRawInputChange(newCode);
+  };
+
   // ── 줌 계산 ─────────────────────────────────────────────────
   const zoomScale = zoomPercent / 100;
 
@@ -747,18 +795,23 @@ export default function Home() {
         {/* ── RIGHT: Live Preview ───────────────────────────── */}
         <div className="flex-1 flex flex-col p-4 min-h-0 overflow-hidden bg-[#0d1117]">
 
-          {/* Preview Toolbar */}
-          <div className="flex items-center justify-between mb-3 shrink-0">
-            <div className="flex items-center gap-2">
-              <Eye className="w-3.5 h-3.5 text-zinc-600" />
-              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Live Preview</span>
-            </div>
+          {/* Preview Toolbar — 2-Tier 반응형 */}
+          <div className="flex flex-col gap-1.5 mb-3 shrink-0">
 
-            <div className="flex items-center gap-2">
-              {/* ── 전체 폰트 스케일 컨트롤 ── */}
+            {/* ── Row 1: 레이블 + 에디팅 컨트롤 그룹 ── */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2 mr-1">
+                <Eye className="w-3.5 h-3.5 text-zinc-600" />
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Live Preview</span>
+              </div>
+
+              {/* 그룹 구분선 */}
+              <div className="h-5 w-px bg-zinc-800" />
+
+              {/* ── 전체 폰트 스케일 ── */}
               <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
                 <Type className="w-3 h-3 text-violet-400 shrink-0" />
-                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">전체폰트</span>
+                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">폰트</span>
                 <button
                   onClick={() => handleGlobalFontScale(-0.1)}
                   className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
@@ -771,7 +824,7 @@ export default function Home() {
                 >+</button>
               </div>
 
-              {/* ── 전체 선 두께 컨트롤 ── */}
+              {/* ── 전체 선 두께 ── */}
               <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
                 <svg className="w-3 h-3 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" d="M3 12h18" />
@@ -790,6 +843,45 @@ export default function Home() {
                 >+</button>
               </div>
 
+              {/* ── X (가로) 스케일 ── */}
+              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
+                <svg className="w-3 h-3 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4" />
+                </svg>
+                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">가로</span>
+                <button
+                  onClick={() => handleCanvasScale("x", 0.9)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="가로 비율 10% 감소 (x=Ncm 배율 적용)"
+                >−</button>
+                <button
+                  onClick={() => handleCanvasScale("x", 1.1)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="가로 비율 10% 증가 (x=Ncm 배율 적용)"
+                >+</button>
+              </div>
+
+              {/* ── Y (세로) 스케일 ── */}
+              <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 rounded-lg px-2.5 py-1.5">
+                <svg className="w-3 h-3 text-rose-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4" />
+                </svg>
+                <span className="text-[10px] font-bold text-zinc-500 tracking-wide">세로</span>
+                <button
+                  onClick={() => handleCanvasScale("y", 0.9)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="세로 비율 10% 감소 (y=Ncm 배율 적용)"
+                >−</button>
+                <button
+                  onClick={() => handleCanvasScale("y", 1.1)}
+                  className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="세로 비율 10% 증가 (y=Ncm 배율 적용)"
+                >+</button>
+              </div>
+
+              {/* 그룹 구분선 */}
+              <div className="h-5 w-px bg-zinc-800" />
+
               {/* ── 줌 슬라이더 ── */}
               <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5">
                 <ZoomIn className="w-3 h-3 text-zinc-500 shrink-0" />
@@ -800,7 +892,7 @@ export default function Home() {
                   step={5}
                   value={zoomPercent}
                   onChange={(e) => setZoomPercent(parseInt(e.target.value))}
-                  className="w-24 h-1 accent-blue-500 cursor-pointer"
+                  className="w-20 h-1 accent-blue-500 cursor-pointer"
                 />
                 <span className="text-[11px] font-bold text-blue-300 w-9 text-right shrink-0">
                   {zoomPercent}%
@@ -832,7 +924,7 @@ export default function Home() {
                 {isHighResDownloading
                   ? <Loader2 className="w-3 h-3 animate-spin" />
                   : <Download className="w-3 h-3" />}
-                초고화질 (4000px)
+                초고화질
               </Button>
             </div>
           </div>
