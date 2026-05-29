@@ -42,16 +42,19 @@ const BASE_WIDTH = 720;
 //  평가원 표준 템플릿 (클릭 한 번으로 로드)
 // ─────────────────────────────────────────────────────────────
 const KICE_TEMPLATE = `\\documentclass[tikz, border=10pt]{standalone}
+% KICE Standard Style Guide Applied (English comments only, no Kotex)
 \\usetikzlibrary{arrows.meta}
 
 \\begin{document}
-\\begin{tikzpicture}[>={Stealth[length=7pt, width=3.8pt]}, x=0.8cm, y=0.8cm]
+\\begin{tikzpicture}[>={Stealth[length=11.2pt, width=6.08pt]}, x=1.3cm, y=1.3cm, line width=0.48pt, every node/.style={scale=1.6, font=\\rm}]
 
-    % Axes
-    \\draw[->] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, font=\\rm, inner sep=1.5pt, xshift=2pt] {$x$};
-    \\draw[->] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, font=\\rm, inner sep=1.5pt, yshift=1pt] {$y$};
+    % Axes Construction
+    % x-axis
+    \\draw[->] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, xshift=2pt] {$x$};
+    % y-axis
+    \\draw[->] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, yshift=1pt] {$y$};
 
-    % Origin
+    % Origin Node (Special large font, inherited scale=1.6 from global)
     \\node [below left, inner sep=2pt, transform shape, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
 
 \\end{tikzpicture}
@@ -101,7 +104,7 @@ const KICE_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 // ─────────────────────────────────────────────────────────────
 //  메타수학용 프롬프트 가이드 원문
 // ─────────────────────────────────────────────────────────────
-const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일]
+const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일 v2.0 - 1.6배율 최적화]
 
 앞으로 모든 TikZ 수학 그래프 코드를 생성할 때는 웹 렌더링 환경(TikZJax)의 한계를 고려하여 아래의 규칙을 예외 없이 엄격하게 적용하세요.
 
@@ -109,35 +112,35 @@ const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 - 한글 원천 차단: \\usepackage{kotex} 패키지는 절대 선언하지 않습니다. 코드 내부의 모든 % 주석은 반드시 영어로만 작성하며, 노드(Node)나 텍스트 출력 부분에 한글을 절대 포함하지 않습니다. (모든 라벨은 수식, 기호, 영어로만 구성)
 - 기본 환경: \\documentclass[tikz, border=10pt]{standalone} 및 \\usetikzlibrary{arrows.meta}만을 기본으로 포함합니다.
 
-2. [전역 환경 및 1:1 비율 고정]
-- 전역 화살표 및 스케일: 기하학적 왜곡을 막기 위해 x축과 y축의 스케일을 동일하게 설정하며, 대문자 Stealth 화살표 크기를 전역으로 지정합니다.
-- 필수 적용 옵션: \\begin{tikzpicture}[>={Stealth[length=11.2pt, width=6.08pt]}, x=0.8cm, y=0.8cm]
+2. [전역 환경 및 1.6배율 최적화 고정]
+- 전역 폰트/화살표 및 스케일: 글자 크기(1.6배)와 기하학적 비율을 맞추기 위해 x축과 y축의 1단위 스케일을 1.3cm 수준으로 넉넉하게 설정합니다. 폰트와 화살표 크기, 기본 선 두께는 전역(Global)으로 한 번만 설정하여 중복 적용(가분수 현상)을 원천 차단합니다.
+- 필수 적용 옵션: \\begin{tikzpicture}[>={Stealth[length=11.2pt, width=6.08pt]}, x=1.3cm, y=1.3cm, line width=0.48pt, every node/.style={scale=1.6, font=\\rm}]
 
 3. [축(Axis) 렌더링 및 고정 뼈대]
 - 축을 그릴 때는 기본 제공되는 [-stealth]를 절대 사용하지 않으며, 반드시 [->] 또는 [-Stealth]를 사용하여 전역 화살표 설정이 적용되도록 합니다.
-- 축의 양 끝 라벨(x, y)은 비율 조절 없이 font=\\rm으로만 지정하고, 겹침 방지를 위한 shift 값을 반드시 포함합니다.
-- x축 고정 뼈대: \\draw[->, line width=0.48pt] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, scale=1.6, font=\\rm, inner sep=1.5pt, xshift=-3pt] {$x$};
-- y축 고정 뼈대: \\draw[->, line width=0.48pt] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, scale=1.6, font=\\rm, inner sep=1.5pt, yshift=1pt] {$y$};
+- 축의 양 끝 라벨(x, y)은 겹침 방지를 위한 shift 값을 반드시 포함합니다. (전역 설정이 있으므로 node 안에 별도의 scale이나 font 옵션은 넣지 않습니다.)
+- x축 고정 뼈대: \\draw[->] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, xshift=2pt] {$x$};
+- y축 고정 뼈대: \\draw[->] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, yshift=1pt] {$y$};
 
 4. [마이크로 타이포그래피: 폰트 및 라벨 스타일링]
 - 배경색 투명도 유지: 텍스트가 선을 가리더라도 모든 텍스트 및 수식 노드에 fill=white 옵션을 절대 사용하지 않습니다. 모든 배경은 투명하게 둡니다.
-- 대문자 점(Point) 라벨 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 일반 폰트 대신, 폰트 사이즈업과 비율 조절(transform shape, scale=1.6, xscale=0.9, font=\\large)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다.
-- 원점 노드 예시: \\node [below left, inner sep=2pt, transform shape, scale=1.6, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
-- 일반 대문자 노드 예시: \\node [right, transform shape, scale=1.6, xscale=0.9, font=\\large, xshift=2pt] at (3,2) {$\\rm P$};
-- 소문자 및 수식 폰트: 그래프 내부의 소문자 텍스트 및 수식(함수식 등), 각도(^\\circ) 등은 비율 조절 옵션을 빼고 scale=1.6, font=\\rm을 기본으로 수식 모드($...$) 안에 작성합니다.
+- 일반 텍스트 간소화: scale=1.6, font=\\rm은 전역 설정되었으므로, 개별 노드에는 위치 옵션(above, right 등)과 shift만 작성하여 코드를 간결하게 유지합니다.
+- 대문자 점(Point) 라벨 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 특수 조작(transform shape, xscale=0.9, font=\\large)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다. (scale=1.6은 전역에서 상속받음)
+- 원점 노드 예시: \\node [below left, inner sep=2pt, transform shape, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
 
 5. [점(Point) 및 교점 렌더링]
 - 타원형 에러 방지: \\fill circle 명령어는 절대 금지합니다. 모든 렌더링 포인트는 반드시 \\node[circle, fill=black, inner sep=1.2pt] at (좌표) {}; 형태로 작성합니다.
-- 노이즈 최소화: 불필요한 교점/접점의 검은 점 마커는 생략합니다.
+- 평가원 표준 마커: 중요한 수학적 교점 및 경계점에는 반드시 위 검은 점 마커를 추가하여 명확히 표시합니다.
 
-6. [곡선 렌더링]
-- 곡선은 임의의 점을 잇지 않고 수학 함수식 \\draw[line width=0.48pt] plot (\\x, {수식})을 사용하며 samples=150 이상을 적용합니다. (\\addplot 사용 금지)
+6. [곡선 및 주요 도형 렌더링]
+- 메인 함수 곡선과 굵은 실선은 두께를 1.2배 키운 line width=0.96pt를 적용합니다. (보조선과 지시선은 전역 설정인 0.48pt를 따름)
+- 곡선은 임의의 점을 잇지 않고 수학 함수식 \\draw[line width=0.96pt] plot (\\x, {수식})을 사용하며 samples=150 이상을 적용합니다. (\\addplot 사용 금지)
 
 7. [기하학적 기호 및 보조선 표시]
 - 직각 기호: 수직(직각) 기호는 삼각형 바깥으로 튀어나가지 않도록 scope의 rotate 각도를 조절하여 반드시 도형 안쪽으로 그려지도록 세팅합니다.
-- 길이 표시: 변 바깥쪽에 길이를 표시할 때는 직선 대신 부드럽게 휘어지는 점선(활시위 모양)을 사용합니다. (예: \\draw[dashed] (A) to[bend right=25] node[midway, scale=1.6] {$12$} (B); -> 주의: fill=white 사용 안 함)
-- 각도 및 이등분: 각도를 나타내는 선은 arc나 clip을 이용해 둥글게 그리고, 이등분 표시는 둥근 선 위에 점(node[circle])이나 짧은 평행선 두 개를 추가해 명확히 표기합니다.
-- 길이 같음 기호(Tick marks) 방향 절대 주의: 변의 길이가 같음을 표시하는 짧은 선분(빗금)을 그릴 때는, 반드시 해당 변(선분)과 수직(직교)이 되도록 rotate 각도를 정확히 계산하여 설정합니다. 변과 평행하거나 비스듬하게 그리는 실수를 절대 금지합니다.`;
+- 길이 표시: 변 바깥쪽에 길이를 표시할 때는 직선 대신 부드럽게 휘어지는 점선(활시위 모양)을 사용합니다. (예: \\draw[dashed] (A) to[bend right=25] node[midway] {$12$} (B);)
+- bend 옵션 주의: 가로세로 축의 비율(x, y 스케일)이 크게 다를 경우 to[bend...] 사용 시 렌더링 버그가 발생하므로, 비대칭 스케일에서는 반드시 베지어 곡선(.. controls (x,y) ..)을 대신 사용합니다.
+- 길이 같음 기호(Tick marks): 짧은 선분(빗금)을 그릴 때는 해당 변과 완벽히 수직(직교)이 되도록 rotate 각도를 정확히 계산하여 설정합니다.`;
 
 // ─────────────────────────────────────────────────────────────
 //  LocalStorage 키
@@ -204,12 +207,12 @@ export default function Home() {
     localStorage.setItem(LS_KEY, value);
   }, []);
 
-  // ── 초기화: LocalStorage 비우고 기본 코드로 리셋 ──────────
+  // ── 초기화: 에디터를 빈 상태로 비움 (평가원 기본 축 로드는 별도 버튼) ──────────
   const handleResetCode = () => {
     localStorage.removeItem(LS_KEY);
-    setRawInput(KICE_TEMPLATE);
-    setDebouncedInput(KICE_TEMPLATE);
-    toast.success("✅ 기본 코드로 초기화되었습니다.");
+    setRawInput("");
+    setDebouncedInput("");
+    toast.success("✅ 에디터가 초기화되었습니다.");
   };
 
   // ── Debounce 800 ms ───────────────────────────────────────
@@ -715,7 +718,7 @@ export default function Home() {
                 className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150
                   bg-zinc-800/60 hover:bg-red-950/50 border border-zinc-700/40 hover:border-red-800/50
                   text-zinc-500 hover:text-red-300 group"
-                title="LocalStorage를 비우고 기본 코드로 초기화합니다"
+                title="에디터를 완전히 비웁니다 (빈 상태로 초기화)"
               >
                 <RotateCcw className="w-2.5 h-2.5 group-hover:rotate-[-180deg] transition-transform duration-300" />
                 초기화
@@ -778,12 +781,12 @@ export default function Home() {
                 <button
                   onClick={() => handleGlobalLineWidth(0.9)}
                   className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="전체 선 두께 감소 (-0.1pt)"
+                  title="선 두께 10% 감소 (배율 적용)"
                 >−</button>
                 <button
                   onClick={() => handleGlobalLineWidth(1.1)}
                   className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[13px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="전체 선 두께 증가 (+0.1pt)"
+                  title="선 두께 10% 증가 (배율 적용)"
                 >+</button>
               </div>
 
@@ -1019,12 +1022,12 @@ export default function Home() {
               <button
                 onClick={() => handleNodeFontScale(0.1)}
                 className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-400 text-[11px] font-black transition-all"
-                title="선택된 노드 폰트 크기 증가 (+0.1)"
+                title="선택된 노드 폰트 크기 10% 증감"
               >A＋</button>
               <button
                 onClick={() => handleNodeFontScale(-0.1)}
                 className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-400 text-[11px] font-black transition-all"
-                title="선택된 노드 폰트 크기 감소 (-0.1, 최소 0.5)"
+                title="선택된 노드 폰트 크기 10% 증감"
               >A－</button>
             </div>
           </div>
