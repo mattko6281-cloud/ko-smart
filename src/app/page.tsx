@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { useSession, signIn as nextAuthSignIn } from "next-auth/react";
+import { logUserAction } from "@/actions/logger";
 
 // ─────────────────────────────────────────────────────────────
 //  Kroki GET URL — zlib deflate + base64url (CORS-free)
@@ -177,6 +178,12 @@ export default function Home() {
     if (!seen) setHasSeenHelp(false);
   }, []);
 
+  // ── 에디터 진입 로그 (authenticated 상태에서 마운트될 때 1회) ──
+  useEffect(() => {
+    logUserAction("USAGE_ENTER");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 사용 설명서 열기 핸들러
   const handleOpenHelp = () => {
     setIsHelpOpen(true);
@@ -281,6 +288,8 @@ export default function Home() {
       toast.error("렌더링된 SVG가 없습니다. 코드를 먼저 렌더링하세요.");
       return;
     }
+    // 다운로드 액션 서버 로그
+    logUserAction("EXPORT_DOWNLOAD");
     setIsHighResDownloading(true);
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
