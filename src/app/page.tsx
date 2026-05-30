@@ -1310,81 +1310,73 @@ export default function Home() {
 
         <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
 
-        {/* ── 축 길이 조절 (Axis Length) ── */}
+        {/* \ucd95 \uae38\uc774 \uc870\uc808 (Axis Length) */}
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5">Axis Length</span>
-          <div className="grid grid-cols-2 gap-1">
+          <div className="flex flex-col gap-1">
 
-            {/* X축 좌측 (음의 방향) */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
-              <svg className="w-2.5 h-2.5 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5M9 8l-4 4 4 4" />
-              </svg>
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">X←</span>
-              <button
-                onClick={() => handleAxisLength("x", "left", 0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="X축 좌측(음의 방향) 길이 +0.5 (더 늘리기)"
-              >+</button>
-              <button
-                onClick={() => handleAxisLength("x", "left", -0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="X축 좌측(음의 방향) 길이 -0.5 (줄이기)"
-              >−</button>
+            {/* X\ucd95 (\uac00\ub85c) */}
+            <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
+              <span className="text-[9px] font-bold text-amber-400/80 w-[46px] shrink-0">X\ucd95 \uac00\ub85c</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-zinc-500">\uc88c\uce21</span>
+                <button
+                  onClick={() => handleAxisLength("x", "left", -0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="X\ucd95 \uc88c\uce21 \uae38\uc774 -0.5"
+                >&minus;</button>
+                <button
+                  onClick={() => handleAxisLength("x", "left", 0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="X\ucd95 \uc88c\uce21 \uae38\uc774 +0.5"
+                >+</button>
+              </div>
+              <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-zinc-500">\uc6b0\uce21</span>
+                <button
+                  onClick={() => handleAxisLength("x", "right", -0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="X\ucd95 \uc6b0\uce21 \uae38\uc774 -0.5"
+                >&minus;</button>
+                <button
+                  onClick={() => handleAxisLength("x", "right", 0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="X\ucd95 \uc6b0\uce21 \uae38\uc774 +0.5"
+                >+</button>
+              </div>
             </div>
 
-            {/* X축 우측 (양의 방향) */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
-              <svg className="w-2.5 h-2.5 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M15 8l4 4-4 4" />
-              </svg>
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">X→</span>
-              <button
-                onClick={() => handleAxisLength("x", "right", 0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="X축 우측(양의 방향) 길이 +0.5"
-              >+</button>
-              <button
-                onClick={() => handleAxisLength("x", "right", -0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="X축 우측(양의 방향) 길이 -0.5"
-              >−</button>
-            </div>
-
-            {/* Y축 하단 (음의 방향) */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
-              <svg className="w-2.5 h-2.5 text-sky-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M8 15l4 4 4-4" />
-              </svg>
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">Y↓</span>
-              <button
-                onClick={() => handleAxisLength("y", "bottom", -0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="Y축 하단(음의 방향) 길이 +0.5 (더 늘리기)"
-              >+</button>
-              <button
-                onClick={() => handleAxisLength("y", "bottom", 0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="Y축 하단(음의 방향) 길이 -0.5 (줄이기)"
-              >−</button>
-            </div>
-
-            {/* Y축 상단 (양의 방향) */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
-              <svg className="w-2.5 h-2.5 text-sky-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5M8 9l4-4 4 4" />
-              </svg>
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">Y↑</span>
-              <button
-                onClick={() => handleAxisLength("y", "top", 0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="Y축 상단(양의 방향) 길이 +0.5"
-              >+</button>
-              <button
-                onClick={() => handleAxisLength("y", "top", -0.5)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                title="Y축 상단(양의 방향) 길이 -0.5"
-              >−</button>
+            {/* Y\ucd95 (\uc138\ub85c) */}
+            <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
+              <span className="text-[9px] font-bold text-sky-400/80 w-[46px] shrink-0">Y\ucd95 \uc138\ub85c</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-zinc-500">\ud558\ub2e8</span>
+                <button
+                  onClick={() => handleAxisLength("y", "bottom", 0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="Y\ucd95 \ud558\ub2e8 \uae38\uc774 -0.5"
+                >&minus;</button>
+                <button
+                  onClick={() => handleAxisLength("y", "bottom", -0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="Y\ucd95 \ud558\ub2e8 \uae38\uc774 +0.5"
+                >+</button>
+              </div>
+              <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] text-zinc-500">\uc0c1\ub2e8</span>
+                <button
+                  onClick={() => handleAxisLength("y", "top", -0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="Y\ucd95 \uc0c1\ub2e8 \uae38\uc774 -0.5"
+                >&minus;</button>
+                <button
+                  onClick={() => handleAxisLength("y", "top", 0.5)}
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  title="Y\ucd95 \uc0c1\ub2e8 \uae38\uc774 +0.5"
+                >+</button>
+              </div>
             </div>
 
           </div>
