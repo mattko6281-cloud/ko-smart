@@ -648,6 +648,66 @@ export default function Home() {
     handleRawInputChange(newCode);
   };
 
+  // ── 축(Axis) 길이 개별 조절 ────────────────────────────────
+  //  axis: 'x' | 'y',  end: 'left'|'right' (x축) / 'bottom'|'top' (y축)
+  //  delta: +0.5 = 늘리기, -0.5 = 줄이기
+  //  패턴: X축 \draw[->] (num1, 0) -- (num2, 0)
+  //         Y축 \draw[->] (0, num3) -- (0, num4)
+  const handleAxisLength = (axis: "x" | "y", end: "left" | "right" | "bottom" | "top", delta: number) => {
+    if (!rawInput.trim()) { toast.error("코드가 비어 있습니다."); return; }
+
+    let updated: string;
+
+    if (axis === "x") {
+      // X축: \draw[->] (num1, 0) -- (num2, 0)  (공백 허용)
+      // new RegExp 사용: 정규식 리터럴의 > 가 JSX 종결 태그로 오인되는 문제 방지
+      const xRe = new RegExp(
+        String.raw`(\\draw\s*\[-?>?\]\s*\()\s*(-?[0-9]+(?:\.[0-9]*)?)\s*,\s*0\s*(\)\s*--\s*\()\s*(-?[0-9]+(?:\.[0-9]*)?)\s*,\s*0\s*\)`
+      );
+      const m = rawInput.match(xRe);
+      if (!m) {
+        toast.error("X축 \\draw[->] 명령어를 찾을 수 없습니다.");
+        return;
+      }
+      let num1 = parseFloat(m[2]);
+      let num2 = parseFloat(m[4]);
+      if (end === "left") {
+        // 음의 방향(좌측) → num1 조절
+        num1 = Math.round((num1 + delta) * 100) / 100;
+      } else {
+        // 양의 방향(우측) → num2 조절
+        num2 = Math.round((num2 + delta) * 100) / 100;
+      }
+      updated = rawInput.replace(xRe, `${m[1]}${num1}, 0${m[3]}${num2}, 0)`);
+      const endLabel = end === "left" ? `X좌측: ${num1}` : `X우측: ${num2}`;
+      toast.success(`✅ ${endLabel}`);
+    } else {
+      // Y축: \draw[->] (0, num3) -- (0, num4)
+      const yRe = new RegExp(
+        String.raw`(\\draw\s*\[-?>?\]\s*\()\s*0\s*,\s*(-?[0-9]+(?:\.[0-9]*)?)\s*(\)\s*--\s*\()\s*0\s*,\s*(-?[0-9]+(?:\.[0-9]*)?)\s*\)`
+      );
+      const m = rawInput.match(yRe);
+      if (!m) {
+        toast.error("Y축 \\draw[->] 명령어를 찾을 수 없습니다.");
+        return;
+      }
+      let num3 = parseFloat(m[2]);
+      let num4 = parseFloat(m[4]);
+      if (end === "bottom") {
+        // 음의 방향(하단) → num3 조절
+        num3 = Math.round((num3 + delta) * 100) / 100;
+      } else {
+        // 양의 방향(상단) → num4 조절
+        num4 = Math.round((num4 + delta) * 100) / 100;
+      }
+      updated = rawInput.replace(yRe, `${m[1]}0, ${num3}${m[3]}0, ${num4})`);
+      const endLabel = end === "bottom" ? `Y하단: ${num3}` : `Y상단: ${num4}`;
+      toast.success(`✅ ${endLabel}`);
+    }
+
+    handleRawInputChange(updated);
+  };
+
   // ── 줌 계산 ─────────────────────────────────────────────────
   const zoomScale = zoomPercent / 100;
 
@@ -1243,6 +1303,88 @@ export default function Home() {
                 className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="세로 비율 10% 증가 (y=Ncm 배율 적용)"
               >+</button>
+            </div>
+
+          </div>
+        </div>
+
+        <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
+
+        {/* ── 축 길이 조절 (Axis Length) ── */}
+        <div className="flex flex-col shrink-0">
+          <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5">Axis Length</span>
+          <div className="grid grid-cols-2 gap-1">
+
+            {/* X축 좌측 (음의 방향) */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <svg className="w-2.5 h-2.5 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 12H5M9 8l-4 4 4 4" />
+              </svg>
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">X←</span>
+              <button
+                onClick={() => handleAxisLength("x", "left", 0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="X축 좌측(음의 방향) 길이 +0.5 (더 늘리기)"
+              >+</button>
+              <button
+                onClick={() => handleAxisLength("x", "left", -0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="X축 좌측(음의 방향) 길이 -0.5 (줄이기)"
+              >−</button>
+            </div>
+
+            {/* X축 우측 (양의 방향) */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <svg className="w-2.5 h-2.5 text-amber-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M15 8l4 4-4 4" />
+              </svg>
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">X→</span>
+              <button
+                onClick={() => handleAxisLength("x", "right", 0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="X축 우측(양의 방향) 길이 +0.5"
+              >+</button>
+              <button
+                onClick={() => handleAxisLength("x", "right", -0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="X축 우측(양의 방향) 길이 -0.5"
+              >−</button>
+            </div>
+
+            {/* Y축 하단 (음의 방향) */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <svg className="w-2.5 h-2.5 text-sky-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M8 15l4 4 4-4" />
+              </svg>
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">Y↓</span>
+              <button
+                onClick={() => handleAxisLength("y", "bottom", -0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="Y축 하단(음의 방향) 길이 +0.5 (더 늘리기)"
+              >+</button>
+              <button
+                onClick={() => handleAxisLength("y", "bottom", 0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="Y축 하단(음의 방향) 길이 -0.5 (줄이기)"
+              >−</button>
+            </div>
+
+            {/* Y축 상단 (양의 방향) */}
+            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+              <svg className="w-2.5 h-2.5 text-sky-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 19V5M8 9l4-4 4 4" />
+              </svg>
+              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">Y↑</span>
+              <button
+                onClick={() => handleAxisLength("y", "top", 0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="Y축 상단(양의 방향) 길이 +0.5"
+              >+</button>
+              <button
+                onClick={() => handleAxisLength("y", "top", -0.5)}
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                title="Y축 상단(양의 방향) 길이 -0.5"
+              >−</button>
             </div>
 
           </div>
