@@ -172,17 +172,26 @@ export default function Home() {
   const [isHelpOpen,    setIsHelpOpen]    = useState(false);
   const [hasSeenHelp,   setHasSeenHelp]   = useState(true); // 불마켜있음 시작, 마운트에서 정정
 
+  // USAGE_ENTER 중복 실행 방지 ref
+  const hasLoggedEnter = useRef(false);
+
   // 마운트 시 hasSeenHelp 종류 확인
   useEffect(() => {
     const seen = localStorage.getItem("kosmart_seen_help");
     if (!seen) setHasSeenHelp(false);
   }, []);
 
-  // ── 에디터 진입 로그 (authenticated 상태에서 마운트될 때 1회) ──
+  // ── 에디터 진입 로그 — status=authenticated + email 확정 후 단 1회 ──
+  const { data: session, status } = useSession();
   useEffect(() => {
-    logUserAction("USAGE_ENTER");
+    if (status !== "authenticated") return;
+    const email = session?.user?.email;
+    if (!email) return;
+    if (hasLoggedEnter.current) return; // 중복 차단
+    hasLoggedEnter.current = true;
+    logUserAction("USAGE_ENTER", email);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [status]);
 
   // 사용 설명서 열기 핸들러
   const handleOpenHelp = () => {
@@ -289,7 +298,7 @@ export default function Home() {
       return;
     }
     // 다운로드 액션 서버 로그
-    logUserAction("EXPORT_DOWNLOAD");
+    logUserAction("EXPORT_DOWNLOAD", session?.user?.email ?? "");
     setIsHighResDownloading(true);
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
@@ -646,10 +655,7 @@ export default function Home() {
   void BASE_WIDTH;
   void imgRenderedH;
 
-  // ── NextAuth 세션 확인 ────────────────────────────────────────
-  const { status } = useSession();
-
-  // ── 잊금 화면 (unauthenticated) ─────────────────────────
+  // ── 잠금 화면 (unauthenticated) ─────────────────────────
   if (status === "unauthenticated") {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0d1117] text-zinc-100 font-sans p-6">
