@@ -1642,7 +1642,7 @@ export default function Home() {
                       <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">−</kbd>
                       <kbd className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded">+</kbd>
                     </span>
-                    <span>그래프의 <strong className="text-zinc-200">세로(y축) 비율</strong>만 독립적으로 늘리거나 줄입니다. <span className="text-zinc-500">(함수의 뾰족한 정도를 튜닝할 때 유용합니다.)</span></span>
+                    <span>그래프의 <strong className="text-zinc-200">세로(y축) 비율</strong>만 독립적으로 늘리거나 줄입니다.<br /><span className="text-zinc-500 text-[11px]">(함수의 뾰족한 정도를 튜닝할 때 유용합니다.)</span></span>
                   </li>
                 </ul>
               </div>
@@ -1661,9 +1661,9 @@ export default function Home() {
                     </span>
                     <span>
                       렌더링된 그래프의 여백이 부족하거나 너무 길 때,{" "}
-                      <strong className="text-zinc-200">X축과 Y축의 상·하·좌·우 꼬리 길이를 0.5 단위로 미세 조정</strong>하여
-                      최적의 비율을 맞출 수 있습니다.{" "}
-                      <span className="text-zinc-500">TikZ 코드의 <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[10px]">\draw[-&gt;]</code> 좌표값을 자동으로 파싱해 치환합니다.</span>
+                      <strong className="text-zinc-200">X축과 Y축의 상·하·좌·우 꼬리 길이를 0.5 단위로 미세 조정</strong>하여 최적의 비율을 맞출 수 있습니다.
+                      <br />
+                      <span className="text-zinc-500 text-[11px]">TikZ 코드의 <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[10px]">\draw[-&gt;]</code> 좌표값을 자동으로 파싱해 치환합니다.</span>
                     </span>
                   </li>
                 </ul>
