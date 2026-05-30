@@ -298,7 +298,7 @@ export default function Home() {
       return;
     }
     // 다운로드 액션 서버 로그
-    logUserAction("EXPORT_DOWNLOAD", session?.user?.email ?? "");
+    logUserAction("EXPORT_DOWNLOAD", session?.user?.email ?? "", rawInput);
     setIsHighResDownloading(true);
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
