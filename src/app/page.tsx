@@ -1310,71 +1310,71 @@ export default function Home() {
 
         <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
 
-        {/* \ucd95 \uae38\uc774 \uc870\uc808 (Axis Length) */}
+        {/* 축 길이 조절 (Axis Length) */}
         <div className="flex flex-col shrink-0">
           <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5">Axis Length</span>
           <div className="flex flex-col gap-1">
 
-            {/* X\ucd95 (\uac00\ub85c) */}
+            {/* X축 (가로) */}
             <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
-              <span className="text-[9px] font-bold text-amber-400/80 w-[46px] shrink-0">X\ucd95 \uac00\ub85c</span>
+              <span className="text-[9px] font-bold text-amber-400/80 w-[46px] shrink-0">X축 가로</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">\uc88c\uce21</span>
+                <span className="text-[9px] text-zinc-500">좌측</span>
                 <button
                   onClick={() => handleAxisLength("x", "left", -0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X\ucd95 \uc88c\uce21 \uae38\uc774 -0.5"
+                  title="X축 좌측 길이 -0.5"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "left", 0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X\ucd95 \uc88c\uce21 \uae38\uc774 +0.5"
+                  title="X축 좌측 길이 +0.5"
                 >+</button>
               </div>
               <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">\uc6b0\uce21</span>
+                <span className="text-[9px] text-zinc-500">우측</span>
                 <button
                   onClick={() => handleAxisLength("x", "right", -0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X\ucd95 \uc6b0\uce21 \uae38\uc774 -0.5"
+                  title="X축 우측 길이 -0.5"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "right", 0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X\ucd95 \uc6b0\uce21 \uae38\uc774 +0.5"
+                  title="X축 우측 길이 +0.5"
                 >+</button>
               </div>
             </div>
 
-            {/* Y\ucd95 (\uc138\ub85c) */}
+            {/* Y축 (세로) */}
             <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
-              <span className="text-[9px] font-bold text-sky-400/80 w-[46px] shrink-0">Y\ucd95 \uc138\ub85c</span>
+              <span className="text-[9px] font-bold text-sky-400/80 w-[46px] shrink-0">Y축 세로</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">\ud558\ub2e8</span>
+                <span className="text-[9px] text-zinc-500">하단</span>
                 <button
                   onClick={() => handleAxisLength("y", "bottom", 0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y\ucd95 \ud558\ub2e8 \uae38\uc774 -0.5"
+                  title="Y축 하단 길이 -0.5"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "bottom", -0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y\ucd95 \ud558\ub2e8 \uae38\uc774 +0.5"
+                  title="Y축 하단 길이 +0.5"
                 >+</button>
               </div>
               <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">\uc0c1\ub2e8</span>
+                <span className="text-[9px] text-zinc-500">상단</span>
                 <button
                   onClick={() => handleAxisLength("y", "top", -0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y\ucd95 \uc0c1\ub2e8 \uae38\uc774 -0.5"
+                  title="Y축 상단 길이 -0.5"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "top", 0.5)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y\ucd95 \uc0c1\ub2e8 \uae38\uc774 +0.5"
+                  title="Y축 상단 길이 +0.5"
                 >+</button>
               </div>
             </div>
@@ -1647,10 +1647,32 @@ export default function Home() {
                 </ul>
               </div>
 
-              {/* 섹션 3 */}
+              {/* 섹션 2.5 — 축 길이 조절 */}
               <div>
                 <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
-                  <span className="text-base">💾</span> 3. 저장 및 프롬프트 가이드
+                  <span className="text-base">📐</span> 3. 축 길이 조절 (Axis Length)
+                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">하단 패널</span>
+                </h4>
+                <ul className="space-y-2.5 pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-amber-300 text-[10px] font-bold px-2 py-0.5 rounded">X축 가로</span>
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-sky-300 text-[10px] font-bold px-2 py-0.5 rounded">Y축 세로</span>
+                    </span>
+                    <span>
+                      렌더링된 그래프의 여백이 부족하거나 너무 길 때,{" "}
+                      <strong className="text-zinc-200">X축과 Y축의 상·하·좌·우 꼬리 길이를 0.5 단위로 미세 조정</strong>하여
+                      최적의 비율을 맞출 수 있습니다.{" "}
+                      <span className="text-zinc-500">TikZ 코드의 <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[10px]">\draw[-&gt;]</code> 좌표값을 자동으로 파싱해 치환합니다.</span>
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* 섹션 3 — 기존 저장/프롬프트 (번호 4로 조정) */}
+              <div>
+                <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
+                  <span className="text-base">💾</span> 4. 저장 및 프롬프트 가이드
                 </h4>
                 <ul className="space-y-2.5 pl-1">
                   <li className="flex items-start gap-2">
