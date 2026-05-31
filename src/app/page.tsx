@@ -106,39 +106,49 @@ const KICE_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 // ─────────────────────────────────────────────────────────────
 //  메타수학용 프롬프트 가이드 원문
 // ─────────────────────────────────────────────────────────────
-const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일 v2.0 - 1.6배율 최적화]
+const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일 v2.0 - 260531]
 
 앞으로 모든 TikZ 수학 그래프 코드를 생성할 때는 웹 렌더링 환경(TikZJax)의 한계를 고려하여 아래의 규칙을 예외 없이 엄격하게 적용하세요.
 
-1. [웹 렌더링 호환 및 언어 규칙 - 절대 규칙]
+1. [웹 렌더링 호환 및 완전한 문서 구조 - 절대 규칙]
+
 - 한글 원천 차단: \\usepackage{kotex} 패키지는 절대 선언하지 않습니다. 코드 내부의 모든 % 주석은 반드시 영어로만 작성하며, 노드(Node)나 텍스트 출력 부분에 한글을 절대 포함하지 않습니다. (모든 라벨은 수식, 기호, 영어로만 구성)
-- 기본 환경: \\documentclass[tikz, border=10pt]{standalone} 및 \\usetikzlibrary{arrows.meta}만을 기본으로 포함합니다.
+
+- 완전한 코드 출력: 코드는 반드시 \\documentclass[tikz, border=10pt]{standalone}와 \\usetikzlibrary{arrows.meta} 선언으로 시작해야 합니다.
+- Document 환경 필수 (가장 중요): 그 아래에 반드시 \\begin{document}를 열고 전체 \\begin{tikzpicture} ... \\end{tikzpicture} 코드를 작성한 뒤, 마지막에 \\end{document}로 닫으세요. 복붙 즉시 렌더링이 가능한 '완전한 전체 문서' 형태로만 출력해야 하며, 중간 코드만 발췌해서 출력하는 것을 엄격히 금지합니다.
 
 2. [전역 환경 및 1.6배율 최적화 고정]
+
 - 전역 폰트/화살표 및 스케일: 글자 크기(1.6배)와 기하학적 비율을 맞추기 위해 x축과 y축의 1단위 스케일을 1.3cm 수준으로 넉넉하게 설정합니다. 폰트와 화살표 크기, 기본 선 두께는 전역(Global)으로 한 번만 설정하여 중복 적용(가분수 현상)을 원천 차단합니다.
 - 필수 적용 옵션: \\begin{tikzpicture}[>={Stealth[length=11.2pt, width=6.08pt]}, x=1.3cm, y=1.3cm, line width=0.48pt, every node/.style={scale=1.6, font=\\rm}]
 
 3. [축(Axis) 렌더링 및 고정 뼈대]
+
 - 축을 그릴 때는 기본 제공되는 [-stealth]를 절대 사용하지 않으며, 반드시 [->] 또는 [-Stealth]를 사용하여 전역 화살표 설정이 적용되도록 합니다.
 - 축의 양 끝 라벨(x, y)은 겹침 방지를 위한 shift 값을 반드시 포함합니다. (전역 설정이 있으므로 node 안에 별도의 scale이나 font 옵션은 넣지 않습니다.)
 - x축 고정 뼈대: \\draw[->] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, xshift=2pt] {$x$};
 - y축 고정 뼈대: \\draw[->] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, yshift=1pt] {$y$};
 
 4. [마이크로 타이포그래피: 폰트 및 라벨 스타일링]
+
 - 배경색 투명도 유지: 텍스트가 선을 가리더라도 모든 텍스트 및 수식 노드에 fill=white 옵션을 절대 사용하지 않습니다. 모든 배경은 투명하게 둡니다.
 - 일반 텍스트 간소화: scale=1.6, font=\\rm은 전역 설정되었으므로, 개별 노드에는 위치 옵션(above, right 등)과 shift만 작성하여 코드를 간결하게 유지합니다.
 - 대문자 점(Point) 라벨 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 특수 조작(transform shape, xscale=0.9, font=\\large)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다. (scale=1.6은 전역에서 상속받음)
 - 원점 노드 예시: \\node [below left, inner sep=2pt, transform shape, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
+- 분수 크기 보존(중요): 노드(\\node) 내에서 분수(\\frac), 시그마, 극한 등의 수식을 작성할 때는 기호가 위아래로 작게 눌리는 현상(Text style)을 방지하기 위해, 반드시 달러 기호 직후에 \\displaystyle을 선언하여 원래 크기(Display style)를 유지하세요. (예시: $\\displaystyle y = 2 - \\frac{4}{x}$)
 
 5. [점(Point) 및 교점 렌더링]
+
 - 타원형 에러 방지: \\fill circle 명령어는 절대 금지합니다. 모든 렌더링 포인트는 반드시 \\node[circle, fill=black, inner sep=1.2pt] at (좌표) {}; 형태로 작성합니다.
 - 평가원 표준 마커: 중요한 수학적 교점 및 경계점에는 반드시 위 검은 점 마커를 추가하여 명확히 표시합니다.
 
 6. [곡선 및 주요 도형 렌더링]
+
 - 메인 함수 곡선과 굵은 실선은 두께를 1.2배 키운 line width=0.96pt를 적용합니다. (보조선과 지시선은 전역 설정인 0.48pt를 따름)
 - 곡선은 임의의 점을 잇지 않고 수학 함수식 \\draw[line width=0.96pt] plot (\\x, {수식})을 사용하며 samples=150 이상을 적용합니다. (\\addplot 사용 금지)
 
 7. [기하학적 기호 및 보조선 표시]
+
 - 직각 기호: 수직(직각) 기호는 삼각형 바깥으로 튀어나가지 않도록 scope의 rotate 각도를 조절하여 반드시 도형 안쪽으로 그려지도록 세팅합니다.
 - 길이 표시: 변 바깥쪽에 길이를 표시할 때는 직선 대신 부드럽게 휘어지는 점선(활시위 모양)을 사용합니다. (예: \\draw[dashed] (A) to[bend right=25] node[midway] {$12$} (B);)
 - bend 옵션 주의: 가로세로 축의 비율(x, y 스케일)이 크게 다를 경우 to[bend...] 사용 시 렌더링 버그가 발생하므로, 비대칭 스케일에서는 반드시 베지어 곡선(.. controls (x,y) ..)을 대신 사용합니다.
