@@ -190,8 +190,7 @@ export default function Home() {
   const pmDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // 모는 가이드 (Grid) 토글
-  const [isGridOn, setIsGridOn] = useState(false);
+
 
   // USAGE_ENTER 중복 실행 방지 ref
   const hasLoggedEnter = useRef(false);
@@ -270,19 +269,14 @@ export default function Home() {
       setIsRendering(true);
       setRenderError("");
       setImgRenderedH(0);
-      // 모눈 가이드 ON 시: \end{tikzpicture} 직전에 grid 코드를 임시 삽입 (원본 불변)
-      const GRID_LINE = "  \\draw[gray!30, very thin, step=1] (-15,-15) grid (15,15);";
-      const codeToRender = isGridOn
-        ? debouncedInput.replace(/(\\end\{tikzpicture\})/, `${GRID_LINE}\n$1`)
-        : debouncedInput;
-      setSvgUrl(krokiUrl(codeToRender, "svg"));
+      setSvgUrl(krokiUrl(debouncedInput, "svg"));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Kroki encode error]", err);
       setRenderError("인코딩 오류: " + msg);
       setIsRendering(false);
     }
-  }, [debouncedInput, isGridOn]);
+  }, [debouncedInput]);
 
   // ── 이미지 로드 완료 핸들러 ─────────────────────────────────
   const handleImgLoad = useCallback(() => {
@@ -1069,22 +1063,6 @@ export default function Home() {
                 </span>
               </div>
 
-              {/* ── 모는 가이드 토글 ── */}
-              <button
-                onClick={() => setIsGridOn(v => !v)}
-                title={isGridOn ? "모눈 가이드 끄기" : "모눈 가이드 켜기 (좌표 검수용 임시 모눈)"}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-all duration-200 ${
-                  isGridOn
-                    ? "bg-emerald-900/60 border-emerald-600/60 text-emerald-300 shadow shadow-emerald-900/40"
-                    : "bg-zinc-900 border-zinc-700/60 text-zinc-500 hover:border-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                  <path d="M3 3h18v18H3z" />
-                  <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
-                </svg>
-                {isGridOn ? "Grid ON" : "Grid"}
-              </button>
 
               {/* ── PNG 저장 ── */}
               <Button
