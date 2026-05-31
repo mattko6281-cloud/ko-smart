@@ -673,10 +673,10 @@ export default function Home() {
       let num2 = parseFloat(m[4]);
       if (end === "left") {
         // 음의 방향(좌측) → num1 조절
-        num1 = Math.round((num1 + delta) * 100) / 100;
+        num1 = parseFloat((num1 + delta).toFixed(1));
       } else {
         // 양의 방향(우측) → num2 조절
-        num2 = Math.round((num2 + delta) * 100) / 100;
+        num2 = parseFloat((num2 + delta).toFixed(1));
       }
       updated = rawInput.replace(xRe, `${m[1]}${num1}, 0${m[3]}${num2}, 0)`);
       const endLabel = end === "left" ? `X좌측: ${num1}` : `X우측: ${num2}`;
@@ -695,10 +695,10 @@ export default function Home() {
       let num4 = parseFloat(m[4]);
       if (end === "bottom") {
         // 음의 방향(하단) → num3 조절
-        num3 = Math.round((num3 + delta) * 100) / 100;
+        num3 = parseFloat((num3 + delta).toFixed(1));
       } else {
         // 양의 방향(상단) → num4 조절
-        num4 = Math.round((num4 + delta) * 100) / 100;
+        num4 = parseFloat((num4 + delta).toFixed(1));
       }
       updated = rawInput.replace(yRe, `${m[1]}0, ${num3}${m[3]}0, ${num4})`);
       const endLabel = end === "bottom" ? `Y하단: ${num3}` : `Y상단: ${num4}`;
@@ -1321,12 +1321,12 @@ export default function Home() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-zinc-500">좌측</span>
                 <button
-                  onClick={() => handleAxisLength("x", "left", -0.5)}
+                  onClick={() => handleAxisLength("x", "left", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 -0.5"
                 >&minus;</button>
                 <button
-                  onClick={() => handleAxisLength("x", "left", 0.5)}
+                  onClick={() => handleAxisLength("x", "left", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 +0.5"
                 >+</button>
@@ -1335,12 +1335,12 @@ export default function Home() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-zinc-500">우측</span>
                 <button
-                  onClick={() => handleAxisLength("x", "right", -0.5)}
+                  onClick={() => handleAxisLength("x", "right", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 우측 길이 -0.5"
                 >&minus;</button>
                 <button
-                  onClick={() => handleAxisLength("x", "right", 0.5)}
+                  onClick={() => handleAxisLength("x", "right", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 우측 길이 +0.5"
                 >+</button>
@@ -1353,12 +1353,12 @@ export default function Home() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-zinc-500">하단</span>
                 <button
-                  onClick={() => handleAxisLength("y", "bottom", 0.5)}
+                  onClick={() => handleAxisLength("y", "bottom", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 -0.5"
                 >&minus;</button>
                 <button
-                  onClick={() => handleAxisLength("y", "bottom", -0.5)}
+                  onClick={() => handleAxisLength("y", "bottom", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 +0.5"
                 >+</button>
@@ -1367,12 +1367,12 @@ export default function Home() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-zinc-500">상단</span>
                 <button
-                  onClick={() => handleAxisLength("y", "top", -0.5)}
+                  onClick={() => handleAxisLength("y", "top", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 상단 길이 -0.5"
                 >&minus;</button>
                 <button
-                  onClick={() => handleAxisLength("y", "top", 0.5)}
+                  onClick={() => handleAxisLength("y", "top", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 상단 길이 +0.5"
                 >+</button>
