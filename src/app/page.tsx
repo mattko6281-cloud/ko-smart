@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import Draggable from "react-draggable";
 import { deflate } from "pako";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -185,6 +184,10 @@ export default function Home() {
 
   // 점 마커 관리자 모달
   const [isPointManagerOpen,  setIsPointManagerOpen]  = useState(false);
+  // 드래그 위치 상태
+  const [pmPos, setPmPos] = useState<{ x: number; y: number } | null>(null);
+  const pmDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   // USAGE_ENTER 중복 실행 방지 ref
   const hasLoggedEnter = useRef(false);
@@ -1464,129 +1467,132 @@ export default function Home() {
       </footer>
 
       {/* ══════════════════════════════════════════════════════
-          점 마커 관리자 — 드래그 가능 플로팅 패널
+          점 마커 관리자 — 네이티브 드래그 플로팅 패널
       ══════════════════════════════════════════════════════ */}
       {isPointManagerOpen && (
-        <Draggable handle=".pm-drag-handle" bounds="parent" defaultPosition={{ x: window.innerWidth - 420, y: 60 }}>
+        <div
+          ref={panelRef}
+          className="fixed z-40 w-[240px] flex flex-col rounded-xl border border-fuchsia-800/40 shadow-2xl shadow-fuchsia-900/30 select-none"
+          style={{
+            background: "linear-gradient(145deg, #160e1e 0%, #0e0d17 60%, #0d1117 100%)",
+            top:  pmPos ? pmPos.y : 60,
+            right: pmPos ? undefined : 20,
+            left:  pmPos ? pmPos.x : undefined,
+          }}
+        >
+          {/* 드래그 핸들 헤더 */}
           <div
-            className="fixed z-40 w-[380px] flex flex-col rounded-2xl border border-fuchsia-800/40 shadow-2xl shadow-fuchsia-900/30 select-none"
-            style={{ background: "linear-gradient(145deg, #160e1e 0%, #0e0d17 60%, #0d1117 100%)" }}
+            className="flex items-center justify-between px-3 py-2.5 border-b border-fuchsia-900/30 cursor-grab active:cursor-grabbing"
+            onMouseDown={(e) => {
+              if ((e.target as HTMLElement).closest("button")) return;
+              const rect = panelRef.current!.getBoundingClientRect();
+              pmDragRef.current = {
+                startX: e.clientX,
+                startY: e.clientY,
+                originX: rect.left,
+                originY: rect.top,
+              };
+              const onMove = (mv: MouseEvent) => {
+                if (!pmDragRef.current) return;
+                const dx = mv.clientX - pmDragRef.current.startX;
+                const dy = mv.clientY - pmDragRef.current.startY;
+                setPmPos({
+                  x: pmDragRef.current.originX + dx,
+                  y: pmDragRef.current.originY + dy,
+                });
+              };
+              const onUp = () => {
+                pmDragRef.current = null;
+                window.removeEventListener("mousemove", onMove);
+                window.removeEventListener("mouseup", onUp);
+              };
+              window.addEventListener("mousemove", onMove);
+              window.addEventListener("mouseup", onUp);
+            }}
           >
-            {/* 드래그 핸들 겨용 헤더 */}
-            <div className="pm-drag-handle flex items-center justify-between px-4 py-3 border-b border-fuchsia-900/30 cursor-grab active:cursor-grabbing">
-              <div className="flex items-center gap-2.5">
-                {/* 드래그 권패 아이콘 */}
-                <svg className="w-3.5 h-3.5 text-fuchsia-600/60 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <circle cx="7" cy="5" r="1.5" /><circle cx="13" cy="5" r="1.5" />
-                  <circle cx="7" cy="10" r="1.5" /><circle cx="13" cy="10" r="1.5" />
-                  <circle cx="7" cy="15" r="1.5" /><circle cx="13" cy="15" r="1.5" />
-                </svg>
-                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-fuchsia-700 to-violet-800 flex items-center justify-center shadow-sm">
-                  <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="12" cy="12" r="4" />
-                    <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
-                  </svg>
-                </div>
-                <div className="leading-none">
-                  <div className="text-[12px] font-black text-white tracking-tight">점 마커 관리자</div>
-                  <div className="text-[9px] text-zinc-600 font-medium mt-0.5">
-                    {extractedPoints.length > 0
-                      ? `${extractedPoints.length}개 발견 · 토글로 숨김/표시`
-                      : "발견된 점 마커 없음"}
-                  </div>
-                </div>
-              </div>
-              <button
-                onMouseDown={(e) => e.stopPropagation()}
-                onClick={() => setIsPointManagerOpen(false)}
-                className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-600 hover:text-white hover:bg-zinc-800 transition-all"
-                title="패널 닫기"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
+            <div className="flex items-center gap-2">
+              {/* grip 도트 */}
+              <svg className="w-3 h-3 text-fuchsia-700/60 shrink-0" viewBox="0 0 12 18" fill="currentColor">
+                <circle cx="3" cy="3"  r="1.3" /><circle cx="9" cy="3"  r="1.3" />
+                <circle cx="3" cy="9"  r="1.3" /><circle cx="9" cy="9"  r="1.3" />
+                <circle cx="3" cy="15" r="1.3" /><circle cx="9" cy="15" r="1.3" />
+              </svg>
+              <span className="text-[11px] font-black text-white">점 마커</span>
+              <span className="text-[9px] text-zinc-600">{extractedPoints.length}개</span>
             </div>
-
-            {/* 콘텐츠 */}
-            <div className="overflow-y-auto px-4 py-3 max-h-[50vh] min-h-[60px]">
-              {extractedPoints.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 gap-2 text-zinc-700">
-                  <svg className="w-8 h-8 opacity-30" viewBox="0 0 24 24" fill="currentColor">
-                    <circle cx="12" cy="12" r="4" />
-                    <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                  </svg>
-                  <p className="text-[11px]">
-                    <code className="bg-zinc-800 px-1 rounded text-[10px] text-zinc-500">\node[circle, fill=black</code> 없음
-                  </p>
-                </div>
-              ) : (
-                <ul className="space-y-1.5">
-                  {extractedPoints.map(({ raw, isCommented }, idx) => {
-                    const coordMatch = raw.match(/at\s*\(([^)]+)\)/);
-                    const coord = coordMatch ? coordMatch[1].trim() : "?";
-                    return (
-                      <li
-                        key={idx}
-                        className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 border transition-all ${
-                          isCommented
-                            ? "bg-zinc-900/40 border-zinc-800/40 opacity-50"
-                            : "bg-zinc-900/70 border-zinc-800/60 hover:border-fuchsia-800/40"
-                        }`}
-                      >
-                        {/* 순서 번호 */}
-                        <span className="shrink-0 w-4 h-4 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-600 text-[8px] font-bold flex items-center justify-center">
-                          {idx + 1}
-                        </span>
-                        {/* 좌표 배지 */}
-                        <span className={`shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5 font-mono border ${
-                          isCommented
-                            ? "text-zinc-600 bg-zinc-800/40 border-zinc-700/30"
-                            : "text-fuchsia-300/80 bg-fuchsia-950/40 border-fuchsia-900/30"
-                        }`}>
-                          ({coord})
-                        </span>
-                        {/* 코드 표시 */}
-                        <code className="flex-1 text-[9px] text-zinc-600 truncate font-mono">
-                          {isCommented ? raw.trim() : raw.trim()}
-                        </code>
-                        {/* 눈 아이콘 토글 버튼 */}
-                        <button
-                          onMouseDown={(e) => e.stopPropagation()}
-                          onClick={() => handleTogglePoint(raw, isCommented)}
-                          className={`shrink-0 w-7 h-7 rounded-md flex items-center justify-center border transition-all ${
-                            isCommented
-                              ? "text-zinc-600 hover:text-fuchsia-400 bg-zinc-900 border-zinc-700 hover:border-fuchsia-700"
-                              : "text-fuchsia-400 hover:text-fuchsia-200 bg-fuchsia-950/40 border-fuchsia-900/40 hover:border-fuchsia-600"
-                          }`}
-                          title={isCommented ? "점 표시 (% 주석 해제)" : "점 숨김 (% 주석 처리)"}
-                        >
-                          {isCommented ? (
-                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                              <line x1="1" y1="1" x2="23" y2="23" />
-                            </svg>
-                          ) : (
-                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                              <circle cx="12" cy="12" r="3" />
-                            </svg>
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-
-            {/* 하단 힌트 */}
-            <div className="px-4 py-2.5 border-t border-fuchsia-900/20 bg-black/20">
-              <p className="text-[9px] text-zinc-700">
-                👁 눈 아이콘 클릭 → <code className="text-zinc-600">% </code> 주석 스위치 (영구 삭제 없음)
-              </p>
-            </div>
+            <button
+              onClick={() => setIsPointManagerOpen(false)}
+              className="w-5 h-5 rounded flex items-center justify-center text-zinc-600 hover:text-white hover:bg-zinc-800 transition-all"
+            >
+              <X className="w-3 h-3" />
+            </button>
           </div>
-        </Draggable>
+
+          {/* 리스트 */}
+          <div className="overflow-y-auto max-h-[55vh] px-2.5 py-2">
+            {extractedPoints.length === 0 ? (
+              <p className="text-[10px] text-zinc-700 text-center py-4">점 마커 없음</p>
+            ) : (
+              <ul className="space-y-1">
+                {extractedPoints.map(({ raw, isCommented }, idx) => {
+                  const m = raw.match(/at\s*\(([^)]+)\)/);
+                  const coord = m ? m[1].trim() : "?";
+                  return (
+                    <li
+                      key={idx}
+                      className={`flex items-center gap-1.5 rounded-lg px-2 py-1 border transition-all ${
+                        isCommented
+                          ? "bg-zinc-900/30 border-zinc-800/30 opacity-40"
+                          : "bg-zinc-900/60 border-zinc-800/50 hover:border-fuchsia-800/50"
+                      }`}
+                    >
+                      {/* 순번 */}
+                      <span className="shrink-0 w-4 h-4 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-600 text-[7px] font-bold flex items-center justify-center">
+                        {idx + 1}
+                      </span>
+                      {/* 좌표 배지 */}
+                      <span className={`flex-1 text-[10px] font-mono font-bold rounded px-1.5 py-0.5 border ${
+                        isCommented
+                          ? "text-zinc-600 bg-zinc-800/30 border-zinc-700/20"
+                          : "text-fuchsia-300/90 bg-fuchsia-950/40 border-fuchsia-900/30"
+                      }`}>
+                        ({coord})
+                      </span>
+                      {/* 눈 토글 */}
+                      <button
+                        onClick={() => handleTogglePoint(raw, isCommented)}
+                        className={`shrink-0 w-6 h-6 rounded flex items-center justify-center border transition-all ${
+                          isCommented
+                            ? "text-zinc-600 hover:text-fuchsia-400 bg-zinc-900 border-zinc-700 hover:border-fuchsia-700"
+                            : "text-fuchsia-400 bg-fuchsia-950/40 border-fuchsia-900/40 hover:border-fuchsia-500"
+                        }`}
+                        title={isCommented ? "표시 (% 해제)" : "숨김 (% 주석)"}
+                      >
+                        {isCommented ? (
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                            <line x1="1" y1="1" x2="23" y2="23" />
+                          </svg>
+                        ) : (
+                          <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* 힌트 */}
+          <div className="px-3 py-1.5 border-t border-fuchsia-900/20 bg-black/20">
+            <p className="text-[8px] text-zinc-700">👁 토글 = <code className="text-zinc-600">%</code> 주석 스위치</p>
+          </div>
+        </div>
       )}
 
       {/* ══════════════════════════════════════════════════════
