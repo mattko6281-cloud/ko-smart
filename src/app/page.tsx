@@ -179,8 +179,11 @@ export default function Home() {
   const [isMetaCopied,    setIsMetaCopied]    = useState(false);
 
   // 사용 설명서 모달 + 온보딩 상태
-  const [isHelpOpen,    setIsHelpOpen]    = useState(false);
-  const [hasSeenHelp,   setHasSeenHelp]   = useState(true); // 불마켜있음 시작, 마운트에서 정정
+  const [isHelpOpen,          setIsHelpOpen]          = useState(false);
+  const [hasSeenHelp,         setHasSeenHelp]         = useState(true); // 불마켜있음 시작, 마운트에서 정정
+
+  // 점 마커 관리자 모달
+  const [isPointManagerOpen,  setIsPointManagerOpen]  = useState(false);
 
   // USAGE_ENTER 중복 실행 방지 ref
   const hasLoggedEnter = useRef(false);
@@ -716,6 +719,25 @@ export default function Home() {
     }
 
     handleRawInputChange(updated);
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  //  점 마커 관리자: \node[circle, fill=black … 라인 추출 & 삭제
+  // ─────────────────────────────────────────────────────────────
+  /** rawInput 에서 \node[circle, fill=black 을 포함하는 라인들만 추출 */
+  const extractedPoints: string[] = rawInput
+    .split("\n")
+    .filter((line) => /\\node\s*\[.*fill=black/.test(line))
+    .map((line) => line.trim());
+
+  /** index 에 해당하는 점(line)을 rawInput 에서 삭제 */
+  const handleDeletePoint = (lineContent: string) => {
+    const lines = rawInput.split("\n");
+    const filtered = lines.filter(
+      (l) => l.trim() !== lineContent.trim()
+    );
+    handleRawInputChange(filtered.join("\n"));
+    toast.success("✅ 점 마커 삭제됨");
   };
 
   // ── 줌 계산 ─────────────────────────────────────────────────
@@ -1392,6 +1414,24 @@ export default function Home() {
           </div>
         </div>
 
+        <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
+
+        {/* 점 마커 관리 버튼 */}
+        <button
+          onClick={() => setIsPointManagerOpen(true)}
+          className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-3 py-1.5 rounded-lg border border-zinc-700/60 bg-zinc-900/80 hover:bg-fuchsia-950/40 hover:border-fuchsia-700/60 transition-all group"
+          title="\node[circle, fill=black 마커 목록을 보고 개별 삭제합니다"
+        >
+          <span className="text-[9px] font-bold text-zinc-600 group-hover:text-fuchsia-400 uppercase tracking-wider transition-colors">
+            점 마커 관리
+          </span>
+          <span className="text-[11px] font-black text-zinc-500 group-hover:text-fuchsia-300 transition-colors">
+            {extractedPoints.length > 0
+              ? `● ${extractedPoints.length}개`
+              : "없음"}
+          </span>
+        </button>
+
         {/* 버전 정보 */}
         <div className="ml-auto flex flex-col items-end shrink-0">
           <div className="flex items-center gap-1.5">
@@ -1404,6 +1444,114 @@ export default function Home() {
           <div className="text-[8px] text-zinc-700 mt-0.5">Cloud TeX · Kroki API · GET Mode</div>
         </div>
       </footer>
+
+      {/* ══════════════════════════════════════════════════════
+          점 마커 관리자 모달
+      ══════════════════════════════════════════════════════ */}
+      {isPointManagerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.80)", backdropFilter: "blur(8px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setIsPointManagerOpen(false); }}
+        >
+          <div
+            className="relative w-full max-w-lg flex flex-col rounded-2xl border border-fuchsia-800/30 shadow-2xl shadow-fuchsia-900/20"
+            style={{ background: "linear-gradient(145deg, #160e1e 0%, #0e0d17 60%, #0d1117 100%)" }}
+          >
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-fuchsia-900/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-700 to-violet-800 flex items-center justify-center shadow-md">
+                  <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="4" />
+                    <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                  </svg>
+                </div>
+                <div className="leading-none">
+                  <div className="text-[14px] font-black text-white tracking-tight">
+                    점 마커 관리자
+                  </div>
+                  <div className="text-[10px] text-zinc-500 mt-0.5 font-medium">
+                    {extractedPoints.length > 0
+                      ? `\\node[circle, fill=black …] 명령어 ${extractedPoints.length}개 발견`
+                      : "발견된 점 마커 없음"}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsPointManagerOpen(false)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
+                title="닫기"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 콘텐츠 */}
+            <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0 max-h-[60vh]">
+              {extractedPoints.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 gap-3 text-zinc-600">
+                  <svg className="w-10 h-10 opacity-30" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="4" />
+                    <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                  </svg>
+                  <p className="text-[12px] font-medium">
+                    TikZ 코드에 <code className="text-zinc-500 bg-zinc-800 px-1 rounded text-[11px]">\node[circle, fill=black</code> 이 없습니다.
+                  </p>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {extractedPoints.map((line, idx) => {
+                    // at (x, y) 좌표 추출
+                    const coordMatch = line.match(/at\s*\(([^)]+)\)/);
+                    const coord = coordMatch ? coordMatch[1].trim() : "?";
+                    return (
+                      <li
+                        key={idx}
+                        className="flex items-center gap-2 rounded-lg bg-zinc-900/70 border border-zinc-800/60 px-3 py-2 group hover:border-fuchsia-800/40 hover:bg-fuchsia-950/20 transition-all"
+                      >
+                        {/* 이덕스 */}
+                        <span className="shrink-0 w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-500 text-[9px] font-bold flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        {/* 좌표 */}
+                        <span className="shrink-0 text-[11px] font-bold text-fuchsia-300/80 bg-fuchsia-950/40 border border-fuchsia-900/30 rounded px-2 py-0.5 font-mono">
+                          ({coord})
+                        </span>
+                        {/* 원시 코드 */}
+                        <code className="flex-1 text-[10px] text-zinc-500 truncate font-mono">
+                          {line}
+                        </code>
+                        {/* 삭제 버튼 */}
+                        <button
+                          onClick={() => handleDeletePoint(line)}
+                          className="shrink-0 px-2 py-1 rounded-md text-[10px] font-bold text-red-400/70 hover:text-red-300 hover:bg-red-950/40 border border-transparent hover:border-red-800/40 transition-all"
+                          title={`이 점 마커를 코드에서 삭제`}
+                        >
+                          삭제
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            {/* 모달 하단 */}
+            <div className="flex items-center justify-between px-5 py-3 border-t border-fuchsia-900/20 shrink-0 bg-black/20">
+              <p className="text-[10px] text-zinc-600">
+                삭제하면 TikZ 코드에서 해당 줄이 즉시 제거됩니다.
+              </p>
+              <button
+                onClick={() => setIsPointManagerOpen(false)}
+                className="px-4 py-1.5 rounded-lg text-[12px] font-bold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white transition-all"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════
           KICE 프롬프트 가이드 모달
