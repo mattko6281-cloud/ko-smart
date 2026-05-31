@@ -938,24 +938,30 @@ export default function Home() {
             메타수학 프롬프트 가이드
           </button>
 
-          {/* 사용 설명서 버튼 — 미방문 시 pulse 글로우 */}
+          {/* 사용 설명서 버튼 — 평상시 silver, hover 시 golden glow */}
           <button
             id="btn-help"
             onClick={handleOpenHelp}
             className={[
-              "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150",
-              "hover:scale-[1.03] active:scale-100 group",
-              hasSeenHelp
-                ? "bg-zinc-800/80 hover:bg-zinc-700/80 border border-zinc-700/50 hover:border-zinc-500/60 text-zinc-400 hover:text-white shadow-sm"
-                : "bg-zinc-800/90 hover:bg-zinc-700/90 border border-amber-500/60 hover:border-amber-400/80 text-amber-300 hover:text-amber-200 shadow-md shadow-amber-900/30 animate-pulse",
+              "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-tight",
+              "bg-zinc-800/80 border border-zinc-600/50 text-zinc-200",
+              "transition-all duration-300 hover:scale-[1.03] active:scale-100 group",
+              "hover:border-amber-400/70 hover:text-amber-200",
             ].join(" ")}
+            style={{
+              // hover 글로우는 onMouseEnter/Leave로 동적 처리
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow =
+                "0 0 10px 2px rgba(251,191,36,0.25), inset 0 0 6px 1px rgba(251,191,36,0.08)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.boxShadow = "";
+            }}
             title="KO-SMART 사용 설명서 열기"
           >
-            <HelpCircle className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+            <HelpCircle className="w-3.5 h-3.5 group-hover:scale-110 group-hover:text-amber-300 transition-all duration-300" />
             사용 설명서
-            {!hasSeenHelp && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 shadow shadow-amber-400/60" />
-            )}
           </button>
         </div>
 
