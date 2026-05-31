@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import Draggable from "react-draggable";
 import { deflate } from "pako";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -722,22 +723,39 @@ export default function Home() {
   };
 
   // ─────────────────────────────────────────────────────────────
-  //  점 마커 관리자: \node[circle, fill=black … 라인 추출 & 삭제
+  //  점 마커 관리자: \node[circle, fill=black … 라인 추출 & 주석 토글
   // ─────────────────────────────────────────────────────────────
-  /** rawInput 에서 \node[circle, fill=black 을 포함하는 라인들만 추출 */
-  const extractedPoints: string[] = rawInput
+  /**
+   * rawInput 에서 \node[circle, fill=black 을 포함하는 라인을 추출.
+   * 주석 중인 (`% ` 접두어) 라인도 포함하되, isCommented 플래그를 함께 반환.
+   */
+  const extractedPoints: { raw: string; isCommented: boolean }[] = rawInput
     .split("\n")
-    .filter((line) => /\\node\s*\[.*fill=black/.test(line))
-    .map((line) => line.trim());
+    .filter((line) => /^\s*%?\s*\\node\s*\[.*fill=black/.test(line))
+    .map((line) => ({
+      raw: line,
+      isCommented: /^\s*%/.test(line),
+    }));
 
-  /** index 에 해당하는 점(line)을 rawInput 에서 삭제 */
-  const handleDeletePoint = (lineContent: string) => {
+  /**
+   * 점의 주석 상태를 토글:
+   * - 현재 보이면(주석 없음) → `% ` 접두어를 연결하여 숨김
+   * - 현재 숨겨짐(주석 있음) → `% ` 제거하여 되살림
+   */
+  const handleTogglePoint = (raw: string, isCommented: boolean) => {
     const lines = rawInput.split("\n");
-    const filtered = lines.filter(
-      (l) => l.trim() !== lineContent.trim()
-    );
-    handleRawInputChange(filtered.join("\n"));
-    toast.success("✅ 점 마커 삭제됨");
+    const updated = lines.map((l) => {
+      if (l !== raw) return l;
+      if (isCommented) {
+        // 주석 해제: 맹 앞 `% ` (or `%`) 제거
+        return l.replace(/^(\s*)%\s?/, "$1");
+      } else {
+        // 주석 처리: 라인 압두어에 `% ` 삽입
+        return l.replace(/^(\s*)/, "$1% ");
+      }
+    });
+    handleRawInputChange(updated.join("\n"));
+    toast.success(isCommented ? "👁️ 점 표시" : "🛠️ 점 숨김");
   };
 
   // ── 줌 계산 ─────────────────────────────────────────────────
@@ -1446,89 +1464,113 @@ export default function Home() {
       </footer>
 
       {/* ══════════════════════════════════════════════════════
-          점 마커 관리자 모달
+          점 마커 관리자 — 드래그 가능 플로팅 패널
       ══════════════════════════════════════════════════════ */}
       {isPointManagerOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.80)", backdropFilter: "blur(8px)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setIsPointManagerOpen(false); }}
-        >
+        <Draggable handle=".pm-drag-handle" bounds="parent" defaultPosition={{ x: window.innerWidth - 420, y: 60 }}>
           <div
-            className="relative w-full max-w-lg flex flex-col rounded-2xl border border-fuchsia-800/30 shadow-2xl shadow-fuchsia-900/20"
+            className="fixed z-40 w-[380px] flex flex-col rounded-2xl border border-fuchsia-800/40 shadow-2xl shadow-fuchsia-900/30 select-none"
             style={{ background: "linear-gradient(145deg, #160e1e 0%, #0e0d17 60%, #0d1117 100%)" }}
           >
-            {/* 모달 헤더 */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-fuchsia-900/30 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-fuchsia-700 to-violet-800 flex items-center justify-center shadow-md">
-                  <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="currentColor">
+            {/* 드래그 핸들 겨용 헤더 */}
+            <div className="pm-drag-handle flex items-center justify-between px-4 py-3 border-b border-fuchsia-900/30 cursor-grab active:cursor-grabbing">
+              <div className="flex items-center gap-2.5">
+                {/* 드래그 권패 아이콘 */}
+                <svg className="w-3.5 h-3.5 text-fuchsia-600/60 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <circle cx="7" cy="5" r="1.5" /><circle cx="13" cy="5" r="1.5" />
+                  <circle cx="7" cy="10" r="1.5" /><circle cx="13" cy="10" r="1.5" />
+                  <circle cx="7" cy="15" r="1.5" /><circle cx="13" cy="15" r="1.5" />
+                </svg>
+                <div className="w-6 h-6 rounded-md bg-gradient-to-br from-fuchsia-700 to-violet-800 flex items-center justify-center shadow-sm">
+                  <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="12" cy="12" r="4" />
-                    <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                    <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="2" />
                   </svg>
                 </div>
                 <div className="leading-none">
-                  <div className="text-[14px] font-black text-white tracking-tight">
-                    점 마커 관리자
-                  </div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5 font-medium">
+                  <div className="text-[12px] font-black text-white tracking-tight">점 마커 관리자</div>
+                  <div className="text-[9px] text-zinc-600 font-medium mt-0.5">
                     {extractedPoints.length > 0
-                      ? `\\node[circle, fill=black …] 명령어 ${extractedPoints.length}개 발견`
+                      ? `${extractedPoints.length}개 발견 · 토글로 숨김/표시`
                       : "발견된 점 마커 없음"}
                   </div>
                 </div>
               </div>
               <button
+                onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setIsPointManagerOpen(false)}
-                className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
-                title="닫기"
+                className="w-6 h-6 rounded-md flex items-center justify-center text-zinc-600 hover:text-white hover:bg-zinc-800 transition-all"
+                title="패널 닫기"
               >
-                <X className="w-4 h-4" />
+                <X className="w-3.5 h-3.5" />
               </button>
             </div>
 
             {/* 콘텐츠 */}
-            <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0 max-h-[60vh]">
+            <div className="overflow-y-auto px-4 py-3 max-h-[50vh] min-h-[60px]">
               {extractedPoints.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-10 gap-3 text-zinc-600">
-                  <svg className="w-10 h-10 opacity-30" viewBox="0 0 24 24" fill="currentColor">
+                <div className="flex flex-col items-center justify-center py-6 gap-2 text-zinc-700">
+                  <svg className="w-8 h-8 opacity-30" viewBox="0 0 24 24" fill="currentColor">
                     <circle cx="12" cy="12" r="4" />
                     <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.5" />
                   </svg>
-                  <p className="text-[12px] font-medium">
-                    TikZ 코드에 <code className="text-zinc-500 bg-zinc-800 px-1 rounded text-[11px]">\node[circle, fill=black</code> 이 없습니다.
+                  <p className="text-[11px]">
+                    <code className="bg-zinc-800 px-1 rounded text-[10px] text-zinc-500">\node[circle, fill=black</code> 없음
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-2">
-                  {extractedPoints.map((line, idx) => {
-                    // at (x, y) 좌표 추출
-                    const coordMatch = line.match(/at\s*\(([^)]+)\)/);
+                <ul className="space-y-1.5">
+                  {extractedPoints.map(({ raw, isCommented }, idx) => {
+                    const coordMatch = raw.match(/at\s*\(([^)]+)\)/);
                     const coord = coordMatch ? coordMatch[1].trim() : "?";
                     return (
                       <li
                         key={idx}
-                        className="flex items-center gap-2 rounded-lg bg-zinc-900/70 border border-zinc-800/60 px-3 py-2 group hover:border-fuchsia-800/40 hover:bg-fuchsia-950/20 transition-all"
+                        className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 border transition-all ${
+                          isCommented
+                            ? "bg-zinc-900/40 border-zinc-800/40 opacity-50"
+                            : "bg-zinc-900/70 border-zinc-800/60 hover:border-fuchsia-800/40"
+                        }`}
                       >
-                        {/* 이덕스 */}
-                        <span className="shrink-0 w-5 h-5 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-500 text-[9px] font-bold flex items-center justify-center">
+                        {/* 순서 번호 */}
+                        <span className="shrink-0 w-4 h-4 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-600 text-[8px] font-bold flex items-center justify-center">
                           {idx + 1}
                         </span>
-                        {/* 좌표 */}
-                        <span className="shrink-0 text-[11px] font-bold text-fuchsia-300/80 bg-fuchsia-950/40 border border-fuchsia-900/30 rounded px-2 py-0.5 font-mono">
+                        {/* 좌표 배지 */}
+                        <span className={`shrink-0 text-[10px] font-bold rounded px-1.5 py-0.5 font-mono border ${
+                          isCommented
+                            ? "text-zinc-600 bg-zinc-800/40 border-zinc-700/30"
+                            : "text-fuchsia-300/80 bg-fuchsia-950/40 border-fuchsia-900/30"
+                        }`}>
                           ({coord})
                         </span>
-                        {/* 원시 코드 */}
-                        <code className="flex-1 text-[10px] text-zinc-500 truncate font-mono">
-                          {line}
+                        {/* 코드 표시 */}
+                        <code className="flex-1 text-[9px] text-zinc-600 truncate font-mono">
+                          {isCommented ? raw.trim() : raw.trim()}
                         </code>
-                        {/* 삭제 버튼 */}
+                        {/* 눈 아이콘 토글 버튼 */}
                         <button
-                          onClick={() => handleDeletePoint(line)}
-                          className="shrink-0 px-2 py-1 rounded-md text-[10px] font-bold text-red-400/70 hover:text-red-300 hover:bg-red-950/40 border border-transparent hover:border-red-800/40 transition-all"
-                          title={`이 점 마커를 코드에서 삭제`}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={() => handleTogglePoint(raw, isCommented)}
+                          className={`shrink-0 w-7 h-7 rounded-md flex items-center justify-center border transition-all ${
+                            isCommented
+                              ? "text-zinc-600 hover:text-fuchsia-400 bg-zinc-900 border-zinc-700 hover:border-fuchsia-700"
+                              : "text-fuchsia-400 hover:text-fuchsia-200 bg-fuchsia-950/40 border-fuchsia-900/40 hover:border-fuchsia-600"
+                          }`}
+                          title={isCommented ? "점 표시 (% 주석 해제)" : "점 숨김 (% 주석 처리)"}
                         >
-                          삭제
+                          {isCommented ? (
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                              <line x1="1" y1="1" x2="23" y2="23" />
+                            </svg>
+                          ) : (
+                            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                          )}
                         </button>
                       </li>
                     );
@@ -1537,20 +1579,14 @@ export default function Home() {
               )}
             </div>
 
-            {/* 모달 하단 */}
-            <div className="flex items-center justify-between px-5 py-3 border-t border-fuchsia-900/20 shrink-0 bg-black/20">
-              <p className="text-[10px] text-zinc-600">
-                삭제하면 TikZ 코드에서 해당 줄이 즉시 제거됩니다.
+            {/* 하단 힌트 */}
+            <div className="px-4 py-2.5 border-t border-fuchsia-900/20 bg-black/20">
+              <p className="text-[9px] text-zinc-700">
+                👁 눈 아이콘 클릭 → <code className="text-zinc-600">% </code> 주석 스위치 (영구 삭제 없음)
               </p>
-              <button
-                onClick={() => setIsPointManagerOpen(false)}
-                className="px-4 py-1.5 rounded-lg text-[12px] font-bold bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-300 hover:text-white transition-all"
-              >
-                닫기
-              </button>
             </div>
           </div>
-        </div>
+        </Draggable>
       )}
 
       {/* ══════════════════════════════════════════════════════
@@ -1827,10 +1863,44 @@ export default function Home() {
                 </ul>
               </div>
 
-              {/* 섹션 3 — 기존 저장/프롬프트 (번호 4로 조정) */}
+              {/* 섹션 3 — 점 마커 관리자 (신규 추가) */}
               <div>
                 <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
-                  <span className="text-base">💾</span> 4. 저장 및 프롬프트 가이드
+                  <span className="text-base">🟣</span> 4. 점 마커 관리 (Point Markers)
+                  <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">하단 패널</span>
+                </h4>
+                <ul className="space-y-2.5 pl-1">
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-fuchsia-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        점 마커 관리
+                      </span>
+                    </span>
+                    <span>
+                      화면 하단의 [점 마커 관리] 버튼을 누르면 <strong className="text-zinc-200">화면 내에서 자유롭게 이동 가능한 패널</strong>이 열립니다.{" "}
+                      드래그하여 원하는 위치에 배치하세요.
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex items-center">
+                      <svg className="w-5 h-5 text-fuchsia-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                    </span>
+                    <span>
+                      <strong className="text-zinc-200">눈 아이콘 토글</strong>로 특정 점을 쉽게{" "}
+                      <strong className="text-fuchsia-300">숨기거나(게서판 주석 처리)</strong> 다시 나타나게 할 수 있습니다.{" "}
+                      코드를 <strong className="text-zinc-200">영구 삭제하지 않으므로</strong> 언제든 안전하게 복구할 수 있습니다.
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              {/* 섹션 4 — 기존 저장/프롬프트 (번호 5로 조정) */}
+              <div>
+                <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
+                  <span className="text-base">💾</span> 5. 저장 및 프롬프트 가이드
                 </h4>
                 <ul className="space-y-2.5 pl-1">
                   <li className="flex items-start gap-2">
