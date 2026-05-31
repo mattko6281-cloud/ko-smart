@@ -1384,12 +1384,12 @@ export default function Home() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] text-zinc-500">좌측</span>
                 <button
-                  onClick={() => handleAxisLength("x", "left", -0.2)}
+                  onClick={() => handleAxisLength("x", "left", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 -0.2"
                 >&minus;</button>
                 <button
-                  onClick={() => handleAxisLength("x", "left", 0.2)}
+                  onClick={() => handleAxisLength("x", "left", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 +0.2"
                 >+</button>
