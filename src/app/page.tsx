@@ -1323,12 +1323,12 @@ export default function Home() {
                 <button
                   onClick={() => handleAxisLength("x", "left", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X축 좌측 길이 -0.5"
+                  title="X축 좌측 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "left", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X축 좌측 길이 +0.5"
+                  title="X축 좌측 길이 +0.2"
                 >+</button>
               </div>
               <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
@@ -1337,12 +1337,12 @@ export default function Home() {
                 <button
                   onClick={() => handleAxisLength("x", "right", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X축 우측 길이 -0.5"
+                  title="X축 우측 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "right", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="X축 우측 길이 +0.5"
+                  title="X축 우측 길이 +0.2"
                 >+</button>
               </div>
             </div>
@@ -1355,12 +1355,12 @@ export default function Home() {
                 <button
                   onClick={() => handleAxisLength("y", "bottom", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y축 하단 길이 -0.5"
+                  title="Y축 하단 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "bottom", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y축 하단 길이 +0.5"
+                  title="Y축 하단 길이 +0.2"
                 >+</button>
               </div>
               <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
@@ -1369,12 +1369,12 @@ export default function Home() {
                 <button
                   onClick={() => handleAxisLength("y", "top", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y축 상단 길이 -0.5"
+                  title="Y축 상단 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "top", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
-                  title="Y축 상단 길이 +0.5"
+                  title="Y축 상단 길이 +0.2"
                 >+</button>
               </div>
             </div>
@@ -1661,7 +1661,7 @@ export default function Home() {
                     </span>
                     <span>
                       렌더링된 그래프의 여백이 부족하거나 너무 길 때,{" "}
-                      <strong className="text-zinc-200">X축과 Y축의 상·하·좌·우 꼬리 길이를 0.5 단위로 미세 조정</strong>하여 최적의 비율을 맞출 수 있습니다.
+                      <strong className="text-zinc-200">X축과 Y축의 상·하·좌·우 꼬리 길이를 0.2 단위로 미세 조정</strong>하여 최적의 비율을 맞출 수 있습니다.
                       <br />
                       <span className="text-zinc-500 text-[11px]">TikZ 코드의 <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[10px]">\draw[-&gt;]</code> 좌표값을 자동으로 파싱해 치환합니다.</span>
                     </span>
