@@ -330,16 +330,75 @@ export default function Home() {
         const ratio    = img.naturalHeight / (img.naturalWidth || 1);
         const TARGET_H = Math.round(TARGET_W * ratio) || Math.round(TARGET_W * 0.8);
 
-        const canvas = document.createElement("canvas");
-        canvas.width  = TARGET_W;
-        canvas.height = TARGET_H;
-        const ctx = canvas.getContext("2d")!;
-        ctx.fillStyle = "white";
-        ctx.fillRect(0, 0, TARGET_W, TARGET_H);
-        ctx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
+        // ── 1단계: 풀 사이즈 캔버스에 흰 배경 + 그래프 렌더링 ──────────────
+        const fullCanvas = document.createElement("canvas");
+        fullCanvas.width  = TARGET_W;
+        fullCanvas.height = TARGET_H;
+        const fullCtx = fullCanvas.getContext("2d")!;
+        fullCtx.fillStyle = "white";
+        fullCtx.fillRect(0, 0, TARGET_W, TARGET_H);
+        fullCtx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
 
-        const ts   = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
-        const pngData = canvas.toDataURL("image/png");
+        // ── 2단계: 픽셀 스캔으로 실제 콘텐츠 바운딩 박스 계산 ───────────────
+        const imageData = fullCtx.getImageData(0, 0, TARGET_W, TARGET_H);
+        const data = imageData.data; // [r,g,b,a, r,g,b,a, ...]
+
+        let minX = TARGET_W, minY = TARGET_H, maxX = 0, maxY = 0;
+
+        for (let y = 0; y < TARGET_H; y++) {
+          for (let x = 0; x < TARGET_W; x++) {
+            const idx = (y * TARGET_W + x) * 4;
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+            const a = data[idx + 3];
+
+            // 투명 픽셀 또는 완전 흰색 픽셀은 무시
+            const isTransparent = a === 0;
+            const isPureWhite   = a === 255 && r === 255 && g === 255 && b === 255;
+            if (isTransparent || isPureWhite) continue;
+
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+
+        // 콘텐츠가 전혀 없으면 원본 그대로 저장
+        const hasContent = maxX > minX && maxY > minY;
+
+        // ── 3단계: 안전 마진 20px 추가 후 크롭 캔버스 생성 ──────────────────
+        const MARGIN = 20;
+        const cropX = Math.max(0, minX - MARGIN);
+        const cropY = Math.max(0, minY - MARGIN);
+        const cropW = Math.min(TARGET_W, maxX + MARGIN + 1) - cropX;
+        const cropH = Math.min(TARGET_H, maxY + MARGIN + 1) - cropY;
+
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width  = hasContent ? cropW : TARGET_W;
+        outputCanvas.height = hasContent ? cropH : TARGET_H;
+        const outCtx = outputCanvas.getContext("2d")!;
+
+        // 흰 배경 채우기 (HWP 삽입 시 투명 배경 방지)
+        outCtx.fillStyle = "white";
+        outCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+
+        if (hasContent) {
+          // 원본 풀 캔버스에서 크롭 영역만 새 캔버스로 복사
+          outCtx.drawImage(
+            fullCanvas,
+            cropX, cropY, cropW, cropH,   // 원본 소스 영역
+            0,     0,     cropW, cropH    // 출력 대상 영역
+          );
+        } else {
+          // fallback: 콘텐츠 감지 실패 시 원본 그대로
+          outCtx.drawImage(fullCanvas, 0, 0);
+        }
+
+        // ── 4단계: 크롭된 캔버스를 PNG로 저장 ────────────────────────────────
+        const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+        const pngData = outputCanvas.toDataURL("image/png");
         const a = document.createElement("a");
         a.href = pngData;
         a.download = `ko-smart-highres-${ts}.png`;
