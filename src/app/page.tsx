@@ -1281,7 +1281,7 @@ export default function Home() {
 
         {/* 노드 선택 — 선택된 노드의 실제 텍스트 표시 */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1">Node</span>
+          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Node</span>
           <Select
             value={selectedNodeIndex ?? ""}
             onValueChange={setSelectedNodeIndex}
@@ -1309,7 +1309,7 @@ export default function Home() {
         <div className="flex items-center gap-3 shrink-0">
           {/* 조이스틱 방향키 */}
           <div className="flex flex-col items-center">
-            <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
               <MousePointer2 className="w-2.5 h-2.5" /> Joystick
             </span>
             <div className="flex items-center gap-1">
@@ -1340,18 +1340,18 @@ export default function Home() {
 
           {/* 개별 노드 폰트 스케일 A+ / A- */}
           <div className="flex flex-col items-center">
-            <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
               <Type className="w-2.5 h-2.5" /> Node Font
             </span>
             <div className="flex flex-col gap-1">
               <button
                 onClick={() => handleNodeFontScale(0.1)}
-                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-400 text-[11px] font-black transition-all"
+                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-300 text-[11px] font-black transition-all"
                 title="선택된 노드 폰트 크기 10% 증감"
               >A＋</button>
               <button
                 onClick={() => handleNodeFontScale(-0.1)}
-                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-400 text-[11px] font-black transition-all"
+                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-300 text-[11px] font-black transition-all"
                 title="선택된 노드 폰트 크기 10% 증감"
               >A－</button>
             </div>
@@ -1362,21 +1362,21 @@ export default function Home() {
 
         {/* ── GLOBAL CONTROLS ── */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5">Global Controls</span>
+          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Global Controls</span>
           <div className="grid grid-cols-2 gap-1">
 
             {/* 전체 폰트 */}
             <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
               <Type className="w-2.5 h-2.5 text-violet-400 shrink-0" />
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">폰트</span>
+              <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">폰트</span>
               <button
                 onClick={() => handleGlobalFontScale(-0.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-300 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="전체 노드 폰트 크기 감소"
               >−</button>
               <button
                 onClick={() => handleGlobalFontScale(0.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-400 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-300 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="전체 노드 폰트 크기 증가"
               >+</button>
             </div>
@@ -1387,15 +1387,15 @@ export default function Home() {
                 <path strokeLinecap="round" d="M3 12h18" />
                 <path strokeLinecap="round" strokeWidth={1} d="M3 7h18M3 17h18" />
               </svg>
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">두께</span>
+              <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">두께</span>
               <button
                 onClick={() => handleGlobalLineWidth(0.9)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-300 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="선 두께 10% 감소 (배율 적용)"
               >−</button>
               <button
                 onClick={() => handleGlobalLineWidth(1.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-400 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-300 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="선 두께 10% 증가 (배율 적용)"
               >+</button>
             </div>
@@ -1405,15 +1405,15 @@ export default function Home() {
               <svg className="w-2.5 h-2.5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4" />
               </svg>
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">가로</span>
+              <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">가로</span>
               <button
                 onClick={() => handleCanvasScale("x", 0.9)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-300 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="가로 비율 10% 감소 (x=Ncm 배율 적용)"
               >−</button>
               <button
                 onClick={() => handleCanvasScale("x", 1.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-400 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-300 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="가로 비율 10% 증가 (x=Ncm 배율 적용)"
               >+</button>
             </div>
@@ -1423,15 +1423,15 @@ export default function Home() {
               <svg className="w-2.5 h-2.5 text-rose-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4" />
               </svg>
-              <span className="text-[9px] font-bold text-zinc-600 w-7 tracking-wide">세로</span>
+              <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">세로</span>
               <button
                 onClick={() => handleCanvasScale("y", 0.9)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-300 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="세로 비율 10% 감소 (y=Ncm 배율 적용)"
               >−</button>
               <button
                 onClick={() => handleCanvasScale("y", 1.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-400 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-300 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="세로 비율 10% 증가 (y=Ncm 배율 적용)"
               >+</button>
             </div>
@@ -1443,36 +1443,36 @@ export default function Home() {
 
         {/* 축 길이 조절 (Axis Length) */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-zinc-700 uppercase tracking-wider mb-1.5">Axis Length</span>
+          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Axis Length</span>
           <div className="flex flex-col gap-1">
 
             {/* X축 (가로) */}
             <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
               <span className="text-[9px] font-bold text-amber-400/80 w-[46px] shrink-0">X축 가로</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">좌측</span>
+                <span className="text-[9px] font-medium text-zinc-400">좌측</span>
                 <button
                   onClick={() => handleAxisLength("x", "left", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "left", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 +0.2"
                 >+</button>
               </div>
               <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">우측</span>
+                <span className="text-[9px] font-medium text-zinc-400">우측</span>
                 <button
                   onClick={() => handleAxisLength("x", "right", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 우측 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "right", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-400 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 우측 길이 +0.2"
                 >+</button>
               </div>
@@ -1482,29 +1482,29 @@ export default function Home() {
             <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
               <span className="text-[9px] font-bold text-sky-400/80 w-[46px] shrink-0">Y축 세로</span>
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">하단</span>
+                <span className="text-[9px] font-medium text-zinc-400">하단</span>
                 <button
                   onClick={() => handleAxisLength("y", "bottom", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "bottom", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 +0.2"
                 >+</button>
               </div>
               <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
               <div className="flex items-center gap-1.5">
-                <span className="text-[9px] text-zinc-500">상단</span>
+                <span className="text-[9px] font-medium text-zinc-400">상단</span>
                 <button
                   onClick={() => handleAxisLength("y", "top", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 상단 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "top", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-400 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 상단 길이 +0.2"
                 >+</button>
               </div>
@@ -1521,10 +1521,10 @@ export default function Home() {
           className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-3 py-1.5 rounded-lg border border-zinc-700/60 bg-zinc-900/80 hover:bg-fuchsia-950/40 hover:border-fuchsia-700/60 transition-all group"
           title="\node[circle, fill=black 마커 목록을 보고 개별 삭제합니다"
         >
-          <span className="text-[9px] font-bold text-zinc-600 group-hover:text-fuchsia-400 uppercase tracking-wider transition-colors">
+          <span className="text-[9px] font-bold text-zinc-400 group-hover:text-fuchsia-400 uppercase tracking-wider transition-colors">
             점 마커 관리
           </span>
-          <span className="text-[11px] font-black text-zinc-500 group-hover:text-fuchsia-300 transition-colors">
+          <span className="text-[11px] font-black text-zinc-300 group-hover:text-fuchsia-300 transition-colors">
             {extractedPoints.length > 0
               ? `● ${extractedPoints.length}개`
               : "없음"}
