@@ -115,10 +115,11 @@ const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 - 타이트한 여백 설정 (중요): 다운로드 및 크롭 최적화를 위해 첫 줄 문서 선언 시 여백을 최소화합니다. 반드시 \\documentclass[tikz, border=2pt]{standalone} 선언으로 시작하세요.
 - Document 환경 필수: 그 아래에 반드시 \\begin{document}를 열고 전체 \\begin{tikzpicture} ... \\end{tikzpicture} 코드를 작성한 뒤, 마지막에 \\end{document}로 닫으세요. 복붙 즉시 렌더링이 가능한 '완전한 전체 문서' 형태로만 출력해야 합니다.
 
-2. [전역 환경 및 일러스트레이터급 벌크업 스케일 고정]
-- 폰트/선/축 간격 전역 펌핑: HWP 축소 삽입 시 글자가 작아지거나 선이 흐려지는 현상을 막기 위해, 도화지 간격(x, y)과 폰트, 화살표 크기를 일러스트레이터 규격으로 대폭 키워 전역(Global) 설정합니다.
-- 필수 적용 옵션 (토씨 하나 틀리지 말고 고정):
-  \\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x=2.38cm, y=2.42cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}, dashed/.style={dash pattern=on 6pt off 4pt}]
+2. [전역 환경 및 폰트 벌크업 고정 / 스마트 캔버스 배율 적용]
+- 폰트/선/화살표 크기 고정: HWP 16% 축소 삽입 시 가독성을 위해 폰트 스케일(scale=2.2)과 화살표 크기, 선 두께는 절대 변경하지 말고 아래 뼈대를 고정으로 사용합니다.
+- 스마트 캔버스 배율(x, y) 동적 계산 (매우 중요): 그래프의 좌표 범위(Domain)가 좁든 넓든 렌더링된 결과물의 전체 물리적 너비가 항상 비슷하게 유지되어야 합니다. 따라서 x=2.38cm로 하드코딩하지 말고, 표현해야 할 좌표 구간이 좁으면(예: 0~2) x=4.5cm 등으로 크게 잡고, 구간이 넓으면(예: -5~5) x=1.2cm 등으로 작게 잡아, 글자(폰트)들이 서로 겹치거나 구겨지지 않는 최적의 황금비율 x, y 값을 스스로 계산하여 적용하세요.
+- 기본 뼈대 (x, y 값만 상황에 맞춰 동적 변경):
+  \\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x={계산된값}cm, y={계산된값}cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}, dashed/.style={dash pattern=on 6pt off 4pt}]
 
 3. [축(Axis) 렌더링 및 황금 비율 뼈대]
 - 축 두께 및 화살표: 축을 그릴 때는 기본 제공되는 [-stealth]를 절대 사용하지 않으며, 전역 line width=1pt와 Stealth[length=15pt, width=9pt] 화살표가 자연스럽게 적용되도록 [->]만 사용하여 선언합니다.
