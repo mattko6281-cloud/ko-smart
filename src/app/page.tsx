@@ -1143,20 +1143,20 @@ export default function Home() {
                 </Button>
                 {/* 툴팁 */}
                 <div
-                  className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50
+                  className="pointer-events-none absolute top-full right-0 mt-2 z-50
                              opacity-0 group-hover:opacity-100
                              transition-opacity duration-200 ease-in-out"
                 >
+                  {/* 위쪽 화살표 */}
+                  <div className="ml-auto mr-3 w-0 h-0
+                                  border-l-[5px] border-l-transparent
+                                  border-r-[5px] border-r-transparent
+                                  border-b-[5px] border-b-zinc-900" />
                   <div className="bg-zinc-900 text-white text-[10px] font-medium leading-snug
                                   whitespace-nowrap rounded-md px-2.5 py-1.5
                                   shadow-lg shadow-black/40 border border-zinc-700/60">
                     HWP 삽입 후 [개체속성 → 그림 → 확대/축소비율 16%] 설정
                   </div>
-                  {/* 아래 화살표 */}
-                  <div className="mx-auto w-0 h-0
-                                  border-l-[5px] border-l-transparent
-                                  border-r-[5px] border-r-transparent
-                                  border-t-[5px] border-t-zinc-900" />
                 </div>
               </div>
             </div>
