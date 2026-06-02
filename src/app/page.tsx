@@ -1128,18 +1128,37 @@ export default function Home() {
               </Button>
 
               {/* ── HWP 인쇄용 PNG (1500px) ── */}
-              <Button
-                id="btn-download-highres"
-                onClick={handleDownloadHighRes}
-                disabled={isHighResDownloading || !debouncedInput.trim()}
-                size="sm"
-                className="h-8 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-[11px] font-bold gap-1.5 px-3 shadow shadow-amber-500/30 disabled:opacity-40 border-0"
-              >
-                {isHighResDownloading
-                  ? <Loader2 className="w-3 h-3 animate-spin" />
-                  : <Download className="w-3 h-3" />}
-                HWP 인쇄용 (1500px)
-              </Button>
+              <div className="relative group">
+                <Button
+                  id="btn-download-highres"
+                  onClick={handleDownloadHighRes}
+                  disabled={isHighResDownloading || !debouncedInput.trim()}
+                  size="sm"
+                  className="h-8 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-[11px] font-bold gap-1.5 px-3 shadow shadow-amber-500/30 disabled:opacity-40 border-0"
+                >
+                  {isHighResDownloading
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <Download className="w-3 h-3" />}
+                  HWP 인쇄용 (1500px)
+                </Button>
+                {/* 툴팁 */}
+                <div
+                  className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50
+                             opacity-0 group-hover:opacity-100
+                             transition-opacity duration-200 ease-in-out"
+                >
+                  <div className="bg-zinc-900 text-white text-[10px] font-medium leading-snug
+                                  whitespace-nowrap rounded-md px-2.5 py-1.5
+                                  shadow-lg shadow-black/40 border border-zinc-700/60">
+                    HWP 삽입 후 [개체속성 → 그림 → 확대/축소비율 16%] 설정
+                  </div>
+                  {/* 아래 화살표 */}
+                  <div className="mx-auto w-0 h-0
+                                  border-l-[5px] border-l-transparent
+                                  border-r-[5px] border-r-transparent
+                                  border-t-[5px] border-t-zinc-900" />
+                </div>
+              </div>
             </div>
           </div>
 
