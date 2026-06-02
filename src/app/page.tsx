@@ -317,9 +317,12 @@ export default function Home() {
     img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
-        const TARGET_W = 1500;
-        const ratio    = img.naturalHeight / (img.naturalWidth || 1);
-        const TARGET_H = Math.round(TARGET_W * ratio) || Math.round(TARGET_W * 0.8);
+        // ── 고정 배율(×4.0) 렌더링 — SVG 원본 크기에 일정 배수를 곱해 해상도 결정 ──
+        //  이렇게 하면 넓은 그래프는 크게, 좌은 그래프는 작게 저장되더라도
+        //  'cm 당 픽셀 밀도(즉 폰트 체급)'는 항상 동일함
+        const FIXED_SCALE = 4.0;
+        const TARGET_W = Math.round(img.naturalWidth  * FIXED_SCALE) || 1200;
+        const TARGET_H = Math.round(img.naturalHeight * FIXED_SCALE) || Math.round(TARGET_W * 0.8);
 
         // ── 1단계: 풀 사이즈 캔버스에 흰 배경 + 그래프 렌더링 ──────────────
         const fullCanvas = document.createElement("canvas");
@@ -398,7 +401,7 @@ export default function Home() {
         document.body.removeChild(a);
 
         toast.dismiss(toastId);
-        toast.success("✅ 초고화질 PNG가 저장되었습니다!");
+        toast.success(`✅ HWP 인쇄용 PNG 저장 완료! (${outputCanvas.width}×${outputCanvas.height}px)`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[High-res canvas]", err);
@@ -1212,7 +1215,7 @@ export default function Home() {
                   {isHighResDownloading
                     ? <Loader2 className="w-3 h-3 animate-spin" />
                     : <Download className="w-3 h-3" />}
-                  HWP 인쇄용 (1500px)
+                  HWP 인쇄용 (고정배율)
                 </Button>
                 {/* 툴팁 */}
                 <div
@@ -2094,8 +2097,8 @@ export default function Home() {
                     <span>일반적인 웹 해상도(기본 크기)로 이미지를 다운로드합니다.</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#f97316"}}>📥 HWP 인쇄용 (1500px)</span>
-                    <span>화면 확대 배율과 상관없이, <strong className="text-amber-300">HWP 인쇄 최적화 1500px</strong>로 강제 렌더링 후 오토 크롭하여 저장합니다. 한글 문서에 넣을 땐 <strong className="text-amber-300">반드시 이 주황색 버튼</strong>을 누르세요!</span>
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#f97316"}}>📥 HWP 인쇄용 (고정배율)</span>
+                    <span>SVG 원본 크기에 <strong className="text-amber-300">×4.0 고정 배율</strong>을 곱해 렌더링 후 오토 크롭하여 저장합니다. 그래프 가로폭에 무관하게 <strong className="text-amber-300">폰트 체급이 항상 균일</strong>하게 유지됩니다. 한글 문서에 넣을 땐 <strong className="text-amber-300">반드시 이 주황색 버튼</strong>을 누르세요!</span>
                   </li>
                 </ul>
               </div>
