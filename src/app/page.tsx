@@ -118,7 +118,7 @@ const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 2. [전역 환경 및 일러스트레이터급 벌크업 스케일 고정]
 - 폰트/선/축 간격 전역 펌핑: HWP 축소 삽입 시 글자가 작아지거나 선이 흐려지는 현상을 막기 위해, 도화지 간격(x, y)과 폰트, 화살표 크기를 일러스트레이터 규격으로 대폭 키워 전역(Global) 설정합니다.
 - 필수 적용 옵션 (토씨 하나 틀리지 말고 고정):
-  \\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x=2.2cm, y=2.2cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}]
+  \\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x=2.38cm, y=2.42cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}, dashed/.style={dash pattern=on 6pt off 4pt}]
 
 3. [축(Axis) 렌더링 및 황금 비율 뼈대]
 - 축 두께 및 화살표: 축을 그릴 때는 기본 제공되는 [-stealth]를 절대 사용하지 않으며, 전역 line width=1pt와 Stealth[length=15pt, width=9pt] 화살표가 자연스럽게 적용되도록 [->]만 사용하여 선언합니다.
@@ -132,8 +132,8 @@ const META_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 
 5. [마이크로 타이포그래피: 폰트 및 라벨 스타일링]
 - 배경색 투명도 유지: 모든 텍스트 및 수식 노드에 fill=white 옵션을 절대 사용하지 않습니다. 모든 배경은 투명하게 둡니다.
-- 대문자 점(Point) 라벨 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 스케일업 환경에서 완벽한 자리를 잡도록 특수 조작(transform shape, xscale=0.9, font=\\large)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다. 원점 라벨에는 아래쪽 간격 확보를 위해 yshift=-5pt를 필수 적용합니다.
-- 원점 노드 표준: \\node [below left, inner sep=2pt, transform shape, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
+- 대문자 점(Point) 라벨 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 스케일업 환경에서 완벽한 자리를 잡도록 특수 조작(transform shape, xscale=0.9)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다. (전역 scale이 충분히 크므로 font=\\large 등은 절대 사용하지 마세요)
+- 원점 노드 표준: \\node [below left, inner sep=2pt, transform shape, xscale=0.9] at (0,0) {$\\rm O$};
 - 분수 크기 보존: 노드(\\node) 내에서 분수(\\frac)나 극한 수식을 작성할 때는 기호가 찌그러지는 현상을 방지하기 위해, 반드시 달러 기호 직후에 \\displaystyle을 선언하세요. (예시: $\\displaystyle y = 2 - \\frac{16}{x^2}$)
 
 6. [점(Point) 및 필수 마커 렌더링 제한]
