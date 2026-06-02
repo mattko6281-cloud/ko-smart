@@ -452,69 +452,117 @@ export default function Home() {
     }
   };
 
-  // ── 노드 스캔 v2 — at(...) 블록을 건너뛴 뒤 마지막 {라벨}만 캡처 ──────────
+  // ── UI 표기용 라벨 정제 함수 ────────────────────────────────────
+  //  content(원본 LaTeX)를 사람이 읽기 편한 텍스트로 변환
+  //  원본 content는 절대 손대지 않음 — 표시 전용
+  const sanitizeLabel = (raw: string): string => {
+    let s = raw;
+    // \frac{A}{B} → A / B  (중첩 미지원이지만 1단계는 처리)
+    s = s.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "$1 / $2");
+    // \sqrt{X} → √X
+    s = s.replace(/\\sqrt\{([^{}]*)\}/g, "√$1");
+    // \left, \right, \bigl 등 크기 제어 명령어 제거
+    s = s.replace(/\\(?:left|right|bigl?|bigr?|Bigl?|Bigr?)\s*/g, "");
+    // \displaystyle 제거
+    s = s.replace(/\\displaystyle\s*/g, "");
+    // \rm, \bf, \it, \text{...} → 내용만
+    s = s.replace(/\\text\{([^}]*)\}/g, "$1");
+    s = s.replace(/\\(?:rm|bf|it|mathrm|mathbf|mathit)\s*/g, "");
+    // $ 기호 제거
+    s = s.replace(/\$/g, "");
+    // 나머지 \명령어 제거 (알파벳으로만 이루어진 것)
+    s = s.replace(/\\[a-zA-Z]+\s*/g, "");
+    // 중괄호 제거
+    s = s.replace(/[{}]/g, "");
+    // 공백 정리
+    s = s.replace(/\s+/g, " ").trim();
+    return s || raw; // 정제 결과가 빈 문자열이면 원본 반환
+  };
+
+  // ── 노드 스캔 v3 — 인라인 node 캡처 + 좌표 {} 완전 차단 ──────────────
   //  개선 사항:
-  //  1. at (복잡한좌표) 내부의 {} 를 depth 카운팅으로 건너뛴 뒤 그 이후의 마지막 {}
-  //     만 라벨로 인식 → 좌표 중괄호 오인 버그 근본 해결
-  //  2. 빈 content ({}) 노드(점 마커)는 results에서 필터링
-  //  3. srcIndex(원본 rawInput 내 문자 위치)를 고유 ID로 저장해 인덱스 밀림 완전 차단
+  //  1. \node/\coordinate 독립 선언 + \draw 경로 내 인라인 node 모두 캡처
+  //  2. TikZ path의 (좌표) 블록 안 {} 를 완전히 skip → plot(\x,{수식}) 오인 차단
+  //  3. node 선언 직후 [] 옵션 다음의 첫 {텍스트}만 라벨로 인식
+  //  4. 빈 content 노드(점 마커) 필터링
+  //  5. srcIndex(rawInput 내 고유 offset)로 매핑 무결성 보장
   const scanNodes = () => {
-    // srcIndex: rawInput 내 node 선언 시작 위치 (고유 ID로 활용)
     const matches: { full: string; options: string; content: string; index: number; srcIndex: number }[] = [];
 
-    const startRe = /(?:(?:\\node|\\coordinate)(?![a-zA-Z])|(?<![\\a-zA-Z])node(?![a-zA-Z]))/g;
+    // \node, \coordinate, 또는 \draw path 안의 인라인 node 를 모두 탐색
+    // — \\node / \\coordinate : 행 시작 독립 선언
+    // — 인라인 node : 앞에 ) 또는 공백이 오고, 뒤에 [ 또는 { 가 오는 bare "node"
+    const startRe = /(?:(?:\\node|\\coordinate)(?![a-zA-Z])|(?<=[\s\)])node(?=\s*[\[{]))/g;
     let startMatch: RegExpExecArray | null;
 
     while ((startMatch = startRe.exec(rawInput)) !== null) {
       const startIdx = startMatch.index;
 
-      // 세미콜론까지 슬라이스 (최대 1200자)
-      const slice = rawInput.slice(startIdx, startIdx + 1200);
+      // 세미콜론까지 슬라이스 (최대 1500자)
+      const slice = rawInput.slice(startIdx, startIdx + 1500);
       const semiIdx = slice.indexOf(";");
       if (semiIdx === -1) continue;
       const stmt = slice.slice(0, semiIdx);
 
-      // options: [] 블록
+      // options: [] 블록 — 첫 번째 [...] 만 추출 (depth-safe)
       const optMatch = stmt.match(/^(?:\\node|\\coordinate|node)\s*\[([^\]]*)\]/);
       const options = optMatch ? optMatch[1] : "";
 
-      // ── at (…) 블록의 끝 위치를 찾아 건너뜀 ──────────────────────
-      //  'at' 키워드를 찾고, 이후 첫 '(' 부터 depth 카운팅으로 닫히는 ')' 위치를 구함
-      let scanFrom = 0;
-      const atMatch = stmt.match(/(?:^|\s)at\s*\(/);
-      if (atMatch && atMatch.index !== undefined) {
-        const parenStart = stmt.indexOf("(", atMatch.index + atMatch[0].indexOf("("));
-        let pd = 0;
-        let parenEnd = -1;
-        for (let i = parenStart; i < stmt.length; i++) {
-          if (stmt[i] === "(") pd++;
-          else if (stmt[i] === ")") { pd--; if (pd === 0) { parenEnd = i; break; } }
-        }
-        if (parenEnd !== -1) scanFrom = parenEnd + 1; // at(...) 이후부터 라벨 탐색
-      }
+      // ── "node 키워드 + 옵션" 이후 위치를 scanFrom 으로 설정 ──────────
+      //  → 옵션이 있으면 ] 다음, 없으면 keyword 직후
+      let scanFrom = optMatch
+        ? (optMatch.index ?? 0) + optMatch[0].length
+        : (stmt.match(/^(?:\\node|\\coordinate|node)/))?.[0].length ?? 0;
 
-      // ── at(...) 이후 구간에서 마지막 depth-0 {…} 를 라벨로 캡처 ──
+      // ── scanFrom 이후에서 ( 좌표 ) 블록을 모두 건너뜀 ──────────────
+      //  TikZ: node "at" (x, {수식}) 또는 \draw path 안의 (x,y) 좌표
+      //  → '(' 발견 즉시 depth 카운팅으로 닫히는 ')' 까지 skip
+      let i = scanFrom;
+      while (i < stmt.length) {
+        // 공백 건너뜀
+        if (/\s/.test(stmt[i])) { i++; continue; }
+        // 'at' 키워드 건너뜀
+        if (stmt.slice(i, i + 2) === "at" && /\W/.test(stmt[i + 2] ?? " ")) { i += 2; continue; }
+        // '(' 블록 → depth 카운팅으로 닫힘까지 skip
+        if (stmt[i] === "(") {
+          let pd = 0;
+          for (; i < stmt.length; i++) {
+            if (stmt[i] === "(") pd++;
+            else if (stmt[i] === ")") { pd--; if (pd === 0) { i++; break; } }
+          }
+          continue;
+        }
+        // '{' 발견 → 여기가 라벨 시작
+        if (stmt[i] === "{") break;
+        // 그 외 예상치 못한 문자 → 이 node는 건너뜀
+        i = stmt.length;
+      }
+      scanFrom = i;
+
+      // ── scanFrom 위치의 첫 번째 depth-0 {라벨} 만 캡처 ──────────────
+      if (scanFrom >= stmt.length || stmt[scanFrom] !== "{") continue;
+
       let labelStart = -1;
       let labelEnd   = -1;
       let depth = 0;
-      for (let i = scanFrom; i < stmt.length; i++) {
-        const ch   = stmt[i];
-        const prev = i > 0 ? stmt[i - 1] : "";
+      for (let j = scanFrom; j < stmt.length; j++) {
+        const ch   = stmt[j];
+        const prev = j > 0 ? stmt[j - 1] : "";
         if (ch === "{" && prev !== "\\") {
-          if (depth === 0) labelStart = i + 1;
+          if (depth === 0) labelStart = j + 1;
           depth++;
         } else if (ch === "}" && prev !== "\\") {
           depth--;
-          if (depth === 0) labelEnd = i;
+          if (depth === 0) { labelEnd = j; break; } // 첫 번째 닫힘에서 즉시 종료
         }
       }
       if (labelStart === -1 || labelEnd === -1) continue;
 
       const content = stmt.slice(labelStart, labelEnd).trim();
 
-      // 빈 content({}) = 점 마커 → 드롭다운에서 제외
+      // 빈 content = 점 마커 → 제외
       if (content === "") {
-        startRe.lastIndex = startIdx + stmt.slice(0, labelEnd + 1).length;
+        startRe.lastIndex = startIdx + (labelEnd + 1);
         continue;
       }
 
@@ -526,15 +574,15 @@ export default function Home() {
   };
   const nodes = scanNodes();
 
-  // ── 선택된 노드의 표시 텍스트 계산 ─────────────────────────
-  //  selectedNodeIndex は srcIndex (原 rawInput offset 문자열) を使用
+  // ── 선택된 노드의 표시 텍스트 계산 ─────────────────────────────────
+  //  selectedNodeIndex = srcIndex 문자열. find()로 안전 조회 후 sanitize 적용
   const getSelectedNodeLabel = () => {
     if (selectedNodeIndex === null) return undefined;
     const srcIdx = parseInt(selectedNodeIndex);
     const node = nodes.find(n => n.srcIndex === srcIdx);
     if (!node) return undefined;
     const seqNum = nodes.indexOf(node) + 1;
-    return `${seqNum}. ${node.content}`;
+    return `${seqNum}. ${sanitizeLabel(node.content)}`;
   };
 
   // ── 글로벌 폰트 스케일 조절 ──────────────────────────────
@@ -1322,7 +1370,7 @@ export default function Home() {
               {nodes.map((n, i) => (
                 // value = srcIndex (rawInput 내 고유 offset) → 인덱스 밀림 완전 방지
                 <SelectItem key={n.srcIndex} value={n.srcIndex.toString()} className="text-xs">
-                  {i + 1}. {n.content}
+                  {i + 1}. {sanitizeLabel(n.content)}
                 </SelectItem>
               ))}
             </SelectContent>
