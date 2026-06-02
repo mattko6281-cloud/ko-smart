@@ -310,7 +310,7 @@ export default function Home() {
     } finally { setIsDownloading(false); }
   };
 
-  // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 4000px ───
+  // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 1500px ───
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
   const handleDownloadHighRes = () => {
     if (!svgUrl) {
@@ -326,7 +326,7 @@ export default function Home() {
     img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
-        const TARGET_W = 4000;
+        const TARGET_W = 1500;
         const ratio    = img.naturalHeight / (img.naturalWidth || 1);
         const TARGET_H = Math.round(TARGET_W * ratio) || Math.round(TARGET_W * 0.8);
 
@@ -1137,7 +1137,7 @@ export default function Home() {
                 PNG
               </Button>
 
-              {/* ── 초고화질 PNG (4000px) ── */}
+              {/* ── HWP 인쇄용 PNG (1500px) ── */}
               <Button
                 id="btn-download-highres"
                 onClick={handleDownloadHighRes}
@@ -1148,7 +1148,7 @@ export default function Home() {
                 {isHighResDownloading
                   ? <Loader2 className="w-3 h-3 animate-spin" />
                   : <Download className="w-3 h-3" />}
-                초고화질 (4000px)
+                HWP 인쇄용 (1500px)
               </Button>
             </div>
           </div>
@@ -2011,8 +2011,8 @@ export default function Home() {
                     <span>일반적인 웹 해상도(기본 크기)로 이미지를 다운로드합니다.</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#f97316"}}>📥 초고화질 (4000px)</span>
-                    <span>화면 확대 배율과 상관없이, <strong className="text-amber-300">무조건 출판/인쇄(한글 HWP)용 초고화질 대형 사이즈</strong>로 강제 렌더링하여 저장합니다. 한글 문서에 넣을 땐 <strong className="text-amber-300">반드시 이 주황색 버튼</strong>을 누르세요!</span>
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#f97316"}}>📥 HWP 인쇄용 (1500px)</span>
+                    <span>화면 확대 배율과 상관없이, <strong className="text-amber-300">HWP 인쇄 최적화 1500px</strong>로 강제 렌더링 후 오토 크롭하여 저장합니다. 한글 문서에 넣을 땐 <strong className="text-amber-300">반드시 이 주황색 버튼</strong>을 누르세요!</span>
                   </li>
                 </ul>
               </div>
