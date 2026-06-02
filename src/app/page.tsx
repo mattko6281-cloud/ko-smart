@@ -452,51 +452,74 @@ export default function Home() {
     }
   };
 
-  // ── 노드 스캔 — 세미콜론 전 마지막 {...} 블록을 라벨로 추출 ──────────────
-  //  at ({ln(23)/ln(2)}) 체 좌표 중괄호를 라벨로 오인하는 버그 해결:
-  //  stmt 내에서 세미콜론 직전까지 스캔하여 마지막 가장 바깥 depth-0 진입점 == 라벨 시작
+  // ── 노드 스캔 v2 — at(...) 블록을 건너뛴 뒤 마지막 {라벨}만 캡처 ──────────
+  //  개선 사항:
+  //  1. at (복잡한좌표) 내부의 {} 를 depth 카운팅으로 건너뛴 뒤 그 이후의 마지막 {}
+  //     만 라벨로 인식 → 좌표 중괄호 오인 버그 근본 해결
+  //  2. 빈 content ({}) 노드(점 마커)는 results에서 필터링
+  //  3. srcIndex(원본 rawInput 내 문자 위치)를 고유 ID로 저장해 인덱스 밀림 완전 차단
   const scanNodes = () => {
-    const matches: { full: string; options: string; content: string; index: number }[] = [];
+    // srcIndex: rawInput 내 node 선언 시작 위치 (고유 ID로 활용)
+    const matches: { full: string; options: string; content: string; index: number; srcIndex: number }[] = [];
 
-    // \node / node / \coordinate 위치를 먼저 탐색
     const startRe = /(?:(?:\\node|\\coordinate)(?![a-zA-Z])|(?<![\\a-zA-Z])node(?![a-zA-Z]))/g;
     let startMatch: RegExpExecArray | null;
 
     while ((startMatch = startRe.exec(rawInput)) !== null) {
       const startIdx = startMatch.index;
+
       // 세미콜론까지 슬라이스 (최대 1200자)
       const slice = rawInput.slice(startIdx, startIdx + 1200);
       const semiIdx = slice.indexOf(";");
       if (semiIdx === -1) continue;
-      const stmt = slice.slice(0, semiIdx); // 세미콜론 미포함 (마지막 {...} 탐색용)
+      const stmt = slice.slice(0, semiIdx);
 
-      // options: [] 블록 (탐욕적이지 않게)
+      // options: [] 블록
       const optMatch = stmt.match(/^(?:\\node|\\coordinate|node)\s*\[([^\]]*)\]/);
       const options = optMatch ? optMatch[1] : "";
 
-      // ▶ 라벨 = stmt 내에서 마지막 depth-0 진입점의 {...}
-      //   세미콜론 앞까지 스캔하면서 가장 나중에 나오는
-      //   대치되는 } 를 찾고, 거기서 역방향 depth-0 지점을 추적
+      // ── at (…) 블록의 끝 위치를 찾아 건너뜀 ──────────────────────
+      //  'at' 키워드를 찾고, 이후 첫 '(' 부터 depth 카운팅으로 닫히는 ')' 위치를 구함
+      let scanFrom = 0;
+      const atMatch = stmt.match(/(?:^|\s)at\s*\(/);
+      if (atMatch && atMatch.index !== undefined) {
+        const parenStart = stmt.indexOf("(", atMatch.index + atMatch[0].indexOf("("));
+        let pd = 0;
+        let parenEnd = -1;
+        for (let i = parenStart; i < stmt.length; i++) {
+          if (stmt[i] === "(") pd++;
+          else if (stmt[i] === ")") { pd--; if (pd === 0) { parenEnd = i; break; } }
+        }
+        if (parenEnd !== -1) scanFrom = parenEnd + 1; // at(...) 이후부터 라벨 탐색
+      }
+
+      // ── at(...) 이후 구간에서 마지막 depth-0 {…} 를 라벨로 캡처 ──
       let labelStart = -1;
       let labelEnd   = -1;
       let depth = 0;
-      for (let i = 0; i < stmt.length; i++) {
-        const ch = stmt[i];
+      for (let i = scanFrom; i < stmt.length; i++) {
+        const ch   = stmt[i];
         const prev = i > 0 ? stmt[i - 1] : "";
         if (ch === "{" && prev !== "\\") {
-          if (depth === 0) labelStart = i + 1; // 후보 시작점 갱신 (매번 새로 덮어쓀)
+          if (depth === 0) labelStart = i + 1;
           depth++;
         } else if (ch === "}" && prev !== "\\") {
           depth--;
-          if (depth === 0) labelEnd = i; // 후보 종료점 갱신 (매번 갱신 → 결국 마지막 측이 남음)
+          if (depth === 0) labelEnd = i;
         }
       }
       if (labelStart === -1 || labelEnd === -1) continue;
-      const content = stmt.slice(labelStart, labelEnd);
-      // full = stmt 시작~라벨 닫히는 } 까지 (+1 인덱스, 세미콜론 제외)
-      const full = stmt.slice(0, labelEnd + 1);
 
-      matches.push({ full, options, content, index: startIdx });
+      const content = stmt.slice(labelStart, labelEnd).trim();
+
+      // 빈 content({}) = 점 마커 → 드롭다운에서 제외
+      if (content === "") {
+        startRe.lastIndex = startIdx + stmt.slice(0, labelEnd + 1).length;
+        continue;
+      }
+
+      const full = stmt.slice(0, labelEnd + 1);
+      matches.push({ full, options, content, index: startIdx, srcIndex: startIdx });
       startRe.lastIndex = startIdx + full.length;
     }
     return matches;
@@ -504,13 +527,14 @@ export default function Home() {
   const nodes = scanNodes();
 
   // ── 선택된 노드의 표시 텍스트 계산 ─────────────────────────
+  //  selectedNodeIndex は srcIndex (原 rawInput offset 문자열) を使用
   const getSelectedNodeLabel = () => {
     if (selectedNodeIndex === null) return undefined;
-    const idx = parseInt(selectedNodeIndex);
-    const node = nodes[idx];
+    const srcIdx = parseInt(selectedNodeIndex);
+    const node = nodes.find(n => n.srcIndex === srcIdx);
     if (!node) return undefined;
-    const content = node.content || "(empty)";
-    return `${idx + 1}. ${content}`;
+    const seqNum = nodes.indexOf(node) + 1;
+    return `${seqNum}. ${node.content}`;
   };
 
   // ── 글로벌 폰트 스케일 조절 ──────────────────────────────
@@ -619,10 +643,10 @@ export default function Home() {
   };
 
   // ── 개별 노드 폰트 스케일 조절 (A+ / A-) ──────────────────
-  //  선택된 노드의 [...] 옵션 내부 scale=N 을 0.1 단위 upsert
+  //  selectedNodeIndex = srcIndex (rawInput 내 offset). find()로 안전 조회
   const handleNodeFontScale = (delta: number) => {
     if (selectedNodeIndex === null) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
-    const node = nodes[parseInt(selectedNodeIndex)];
+    const node = nodes.find(n => n.srcIndex === parseInt(selectedNodeIndex));
     if (!node) return;
 
     let opts = node.options;
@@ -644,13 +668,13 @@ export default function Home() {
           `[${opts}]`)
       : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
 
-    const newCode = rawInput.slice(0, node.index) + updatedFull + rawInput.slice(node.index + node.full.length);
+    const newCode = rawInput.slice(0, node.srcIndex) + updatedFull + rawInput.slice(node.srcIndex + node.full.length);
     handleRawInputChange(newCode);
   };
 
   const handleShift = (axis: "x" | "y", direction: number) => {
     if (selectedNodeIndex === null) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
-    const node = nodes[parseInt(selectedNodeIndex)];
+    const node = nodes.find(n => n.srcIndex === parseInt(selectedNodeIndex));
     if (!node) return;
     let opts = node.options;
     const key = `${axis}shift`;
@@ -666,7 +690,7 @@ export default function Home() {
           `[${opts}]`)
       : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
 
-    const newCode = rawInput.slice(0, node.index) + updatedFull + rawInput.slice(node.index + node.full.length);
+    const newCode = rawInput.slice(0, node.srcIndex) + updatedFull + rawInput.slice(node.srcIndex + node.full.length);
     handleRawInputChange(newCode);
   };
 
@@ -1288,16 +1312,17 @@ export default function Home() {
             onValueChange={setSelectedNodeIndex}
           >
             <SelectTrigger className="w-[210px] h-8 bg-zinc-900 border-zinc-800 text-[11px] font-medium text-zinc-300">
-              {/* 선택된 노드의 실제 텍스트를 직접 렌더링하여 인덱스 노출 버그 방지 */}
-              {selectedNodeIndex !== null && nodes[parseInt(selectedNodeIndex)]
+              {/* value = srcIndex 문자열. find()로 안전 조회해 표시 */}
+              {selectedNodeIndex !== null && nodes.find(n => n.srcIndex === parseInt(selectedNodeIndex))
                 ? <span className="truncate">{getSelectedNodeLabel()}</span>
                 : <SelectValue placeholder={nodes.length > 0 ? "노드 선택..." : "노드 없음"} />
               }
             </SelectTrigger>
             <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
               {nodes.map((n, i) => (
-                <SelectItem key={i} value={i.toString()} className="text-xs">
-                  {i + 1}. {n.content || "(empty)"}
+                // value = srcIndex (rawInput 내 고유 offset) → 인덱스 밀림 완전 방지
+                <SelectItem key={n.srcIndex} value={n.srcIndex.toString()} className="text-xs">
+                  {i + 1}. {n.content}
                 </SelectItem>
               ))}
             </SelectContent>
