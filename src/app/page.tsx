@@ -1231,7 +1231,7 @@ export default function Home() {
                   <div className="bg-zinc-900 text-white text-[10px] font-medium leading-snug
                                   whitespace-nowrap rounded-md px-2.5 py-1.5
                                   shadow-lg shadow-black/40 border border-zinc-700/60">
-                    HWP 삽입 후 [개체속성 → 그림 → 확대/축소비율 16%] 설정
+                    HWP 삽입 후 [개체속성 → 그림 → 확대/축소비율 13%] 설정
                   </div>
                 </div>
               </div>
