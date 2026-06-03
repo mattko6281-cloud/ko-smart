@@ -325,13 +325,12 @@ export default function Home() {
         const TARGET_W = Math.round(img.naturalWidth  * FIXED_SCALE) || 1200;
         const TARGET_H = Math.round(img.naturalHeight * FIXED_SCALE) || Math.round(TARGET_W * 0.8);
 
-        // ── 1단계: 풀 사이즈 캔버스에 흰 배경 + 그래프 렌더링 ──────────────
+        // ── 1단계: 풀 사이즈 캔버스에 그래프 렌더링 (투명 배경 유지) ──────────
         const fullCanvas = document.createElement("canvas");
         fullCanvas.width  = TARGET_W;
         fullCanvas.height = TARGET_H;
         const fullCtx = fullCanvas.getContext("2d")!;
-        fullCtx.fillStyle = "white";
-        fullCtx.fillRect(0, 0, TARGET_W, TARGET_H);
+        // 흰 배경 fillRect 삭제 — 캔버스 기본값이 투명(alpha=0)이므로 별도 채우지 않음
         fullCtx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
 
         // ── 2단계: 픽셀 스캔으로 실제 콘텐츠 바운딩 박스 계산 ───────────────
@@ -343,15 +342,9 @@ export default function Home() {
         for (let y = 0; y < TARGET_H; y++) {
           for (let x = 0; x < TARGET_W; x++) {
             const idx = (y * TARGET_W + x) * 4;
-            const r = data[idx];
-            const g = data[idx + 1];
-            const b = data[idx + 2];
-            const a = data[idx + 3];
-
-            // 투명 픽셀 또는 완전 흰색 픽셀은 무시
-            const isTransparent = a === 0;
-            const isPureWhite   = a === 255 && r === 255 && g === 255 && b === 255;
-            if (isTransparent || isPureWhite) continue;
+            // 투명 픽셀만 배경으로 인식하고 무시 — alpha=0 기준
+            // (흰색 조건을 제거하여 SVG에 흰색 내용이 있어도 크롭에서 보존)
+            if (data[idx + 3] === 0) continue;
 
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
@@ -374,10 +367,7 @@ export default function Home() {
         outputCanvas.width  = hasContent ? cropW : TARGET_W;
         outputCanvas.height = hasContent ? cropH : TARGET_H;
         const outCtx = outputCanvas.getContext("2d")!;
-
-        // 흰 배경 채우기 (HWP 삽입 시 투명 배경 방지)
-        outCtx.fillStyle = "white";
-        outCtx.fillRect(0, 0, outputCanvas.width, outputCanvas.height);
+        // 흰 배경 fillRect 삭제 — PNG 투명 배경 보장
 
         if (hasContent) {
           // 원본 풀 캔버스에서 크롭 영역만 새 캔버스로 복사
