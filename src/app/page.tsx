@@ -2289,6 +2289,16 @@ export default function Home() {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="shrink-0 mt-0.5 flex items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-fuchsia-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        전체 끄기 / 켜기
+                      </span>
+                    </span>
+                    <span>
+                      목록 상단의 <strong className="text-zinc-200">[전체 끄기/켜기]</strong> 버튼으로 수십 개의 점 마커를 <strong className="text-fuchsia-300">한 번에 제어</strong>할 수 있습니다.
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex items-center">
                       <svg className="w-5 h-5 text-fuchsia-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
                         <circle cx="12" cy="12" r="3" />
@@ -2296,7 +2306,7 @@ export default function Home() {
                     </span>
                     <span>
                       <strong className="text-zinc-200">눈 아이콘 토글</strong>로 특정 점을 쉽게{" "}
-                      <strong className="text-fuchsia-300">숨기거나(게서판 주석 처리)</strong> 다시 나타나게 할 수 있습니다.{" "}
+                      <strong className="text-fuchsia-300">숨기거나(코드상 주석 처리)</strong> 다시 나타나게 할 수 있습니다.{" "}
                       코드를 <strong className="text-zinc-200">영구 삭제하지 않으므로</strong> 언제든 안전하게 복구할 수 있습니다.
                     </span>
                   </li>
@@ -2306,7 +2316,7 @@ export default function Home() {
               {/* 섹션 4 — 기존 저장/프롬프트 (번호 5로 조정) */}
               <div>
                 <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
-                  <span className="text-base">💾</span> 5. 저장 및 프롬프트 가이드
+                  <span className="text-base">💾</span> 5. 프롬프트 및 QA 검수 가이드
                 </h4>
                 <ul className="space-y-2.5 pl-1">
                   <li className="flex items-start gap-2">
@@ -2314,8 +2324,12 @@ export default function Home() {
                     <span>실수로 새로고침해도 마지막 코드가 브라우저에 안전하게 남아 <strong className="text-zinc-200">자동 복구</strong>됩니다.</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#2563eb"}}>메타수학 프롬프트 가이드</span>
-                    <span>AI에게 코드를 뽑아낼 때 지시할 엄격한 스타일 가이드를 클립보드에 <strong className="text-zinc-200">원클릭 복사</strong>합니다.</span>
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#2563eb"}}>INF_KICE TikZ 프롬프트</span>
+                    <span>AI에게 코드를 뽑아낼 때 지시할 엄격한 <strong className="text-zinc-200">평가원 스타일 가이드</strong>를 클립보드에 <strong className="text-zinc-200">원클릭 복사</strong>합니다.</span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-amber-200 text-[10px] font-bold px-2 py-0.5 rounded border border-amber-500/60" style={{background:"transparent"}}>💡 KICE 검수 체크리스트</span>
+                    <span>렌더링된 그래프의 <strong className="text-zinc-200">마이크로 디테일</strong>(점선, 정렬, 여백 등)을 최종 점검할 수 있는 시각적 QA 가이드 모달을 엽니다.</span>
                   </li>
                 </ul>
               </div>
@@ -2339,7 +2353,7 @@ export default function Home() {
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#2563eb"}}>📥 PNG</span>
-                    <span>일반적인 웹 해상도(기본 크기)로 이미지를 다운로드합니다.</span>
+                    <span>일반적인 웹 해상도(기본 크기)로 이미지를 다운로드합니다. <strong className="text-zinc-200">(투명 배경 자동 적용)</strong></span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#f97316"}}>📥 HWP 인쇄용 (고정배율)</span>
