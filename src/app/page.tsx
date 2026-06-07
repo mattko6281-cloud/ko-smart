@@ -1892,7 +1892,7 @@ export default function Home() {
                   <div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src="/guide1.png?v=1"
+                      src="/guide1.png"
                       alt="기하도형 가이드"
                       className="w-full rounded-lg object-contain border border-gray-200"
                       style={{ background: "#fff", minHeight: "200px" }}
@@ -1940,14 +1940,14 @@ export default function Home() {
                   <div className="space-y-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src="/guide2.png?v=1"
+                      src="/guide2.png"
                       alt="함수 가이드 1"
                       className="w-full rounded-lg object-contain border border-gray-200"
                       style={{ background: "#fff", minHeight: "150px" }}
                     />
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src="/guide3.png?v=1"
+                      src="/guide3.png"
                       alt="함수 가이드 2"
                       className="w-full rounded-lg object-contain border border-gray-200"
                       style={{ background: "#fff", minHeight: "150px" }}
