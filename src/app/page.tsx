@@ -188,6 +188,9 @@ export default function Home() {
   const pmDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // KICE 검수 가이드 모달
+  const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
+
 
 
   // USAGE_ENTER 중복 실행 방지 ref
@@ -1106,6 +1109,19 @@ export default function Home() {
             )}
           </div>
 
+          {/* KICE 검수 체크리스트 버튼 */}
+          <button
+            id="btn-guide-checklist"
+            onClick={() => setIsGuideModalOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150
+              bg-transparent border border-amber-500/60 text-amber-300
+              hover:bg-amber-500/10 hover:border-amber-400/80 hover:text-amber-200
+              hover:scale-[1.03] active:scale-100"
+            title="INF_KICE 렌더링 실무 검수 체크리스트"
+          >
+            💡 KICE 검수 체크리스트
+          </button>
+
           {/* 사용 설명서 버튼 — 평상시 silver, hover 시 golden glow */}
           <button
             id="btn-help"
@@ -1820,6 +1836,159 @@ export default function Home() {
           {/* 힌트 */}
           <div className="px-3 py-1.5 border-t border-fuchsia-900/20 bg-black/20">
             <p className="text-[8px] text-zinc-700">👁 토글 = <code className="text-zinc-600">%</code> 주석 스위치 · 위쪽 버튼으로 일괄 처리</p>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          INF_KICE 검수 가이드 모달
+      ══════════════════════════════════════════════════════ */}
+      {isGuideModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setIsGuideModalOpen(false); }}
+        >
+          <div
+            className="relative w-full max-w-5xl max-h-[88vh] flex flex-col rounded-2xl border border-amber-800/30 shadow-2xl shadow-amber-900/20 overflow-hidden"
+            style={{ background: "linear-gradient(145deg, #1a1500 0%, #110f00 50%, #0d1117 100%)" }}
+          >
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-amber-900/30 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-md shadow-amber-900/40 text-base">
+                  🔍
+                </div>
+                <div>
+                  <div className="text-[13px] font-black text-white tracking-tight">
+                    KICE 스타일 마이크로 디테일 최종 검수 가이드
+                  </div>
+                  <div className="text-[10px] text-amber-400/60 mt-0.5">
+                    INF_KICE TikZ v2.1 · 렌더링 QA 검수 체크리스트
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsGuideModalOpen(false)}
+                className="w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-white hover:bg-zinc-800 transition-all"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 모달 콘텐츠 */}
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-8">
+
+              {/* ──────────────────────────────
+                  섭션 1: 기하 도형 디테일
+              ────────────────────────────── */}
+              <section>
+                <h2 className="text-[11px] font-black text-amber-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-[10px]">1</span>
+                  기하 도형 디테일 — 점, 선분, 길이 표시
+                </h2>
+                <div className="grid grid-cols-2 gap-5 items-start">
+                  {/* 이미지 */}
+                  <div>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/guide1.png"
+                      alt="기하도형 가이드"
+                      className="w-full rounded-lg object-contain"
+                      style={{ background: "#1e2030", minHeight: "200px" }}
+                    />
+                  </div>
+                  {/* 텍스트 */}
+                  <div className="space-y-4 text-[12px] text-zinc-300 leading-relaxed">
+                    <div className="flex gap-2.5">
+                      <span className="text-base shrink-0 mt-0.5">📍</span>
+                      <div>
+                        <p className="font-bold text-white mb-1">점 라벨 밀착 & 정렬</p>
+                        <p>A, B, C, D 등 모든 점 라벨은 꼭짓점에서 붕 뜨지 않게 <code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">inner sep=0~1pt</code>로 밀착해야 합니다. 수평/수직 선상의 점들(예: A와 D, B와 C)은 높낙이가 <strong className="text-white">완벽하게 맞아야</strong> 합니다.</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2.5">
+                      <span className="text-base shrink-0 mt-0.5">📏</span>
+                      <div>
+                        <p className="font-bold text-white mb-1">길이 수식 렌더링</p>
+                        <p>길이 표시는 반드시 점선 정중앙에 <code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">fill=white, inner sep=3pt</code>를 파고 들어가야 합니다. 숫자만 공중에 둥둥 띄우지 마세요.</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2.5">
+                      <span className="text-base shrink-0 mt-0.5">↪️</span>
+                      <div>
+                        <p className="font-bold text-white mb-1">지시선(Callout) 적극 활용</p>
+                        <p>내부 대각선(BD)처럼 길이 수식이 메인 도형의 실선을 <strong className="text-red-400">침범할 위험</strong>이 있다면, 억지로 구겨 넣지 말고 지시선(Arrow)을 바깥으로 우아하게 빼서 수식을 배치하세요.</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div className="border-t border-zinc-800/60" />
+
+              {/* ──────────────────────────────
+                  섭션 2: 함수 그래프 디테일
+              ────────────────────────────── */}
+              <section>
+                <h2 className="text-[11px] font-black text-amber-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <span className="w-5 h-5 rounded bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-[10px]">2</span>
+                  함수 그래프 디테일 — 축, 공선, 수식 라벨
+                </h2>
+                <div className="grid grid-cols-2 gap-5 items-start">
+                  {/* 이미지 2개 세로 배치 */}
+                  <div className="space-y-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/guide2.png"
+                      alt="함수 가이드 1"
+                      className="w-full rounded-lg object-contain"
+                      style={{ background: "#1e2030", minHeight: "150px" }}
+                    />
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src="/guide3.png"
+                      alt="함수 가이드 2"
+                      className="w-full rounded-lg object-contain"
+                      style={{ background: "#1e2030", minHeight: "150px" }}
+                    />
+                  </div>
+                  {/* 텍스트 */}
+                  <div className="space-y-4 text-[12px] text-zinc-300 leading-relaxed">
+                    <div className="flex gap-2.5">
+                      <span className="text-base shrink-0 mt-0.5">🎯</span>
+                      <div>
+                        <p className="font-bold text-white mb-1">라벨 위치 최적화</p>
+                        <p>점 라벨과 직선 표시가 해당 좌표나 선에 <strong className="text-white">너무 멀리 떨어지지 않게</strong> 바짝 안하 붙이세요. <code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">inner sep=1pt</code>가 기본입니다.</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2.5">
+                      <span className="text-base shrink-0 mt-0.5">🛡️</span>
+                      <div>
+                        <p className="font-bold text-white mb-1">절대 방어선 — 축 경계선 넘지 않기</p>
+                        <p>공선의 끝부분이나 수식 라벨(<code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">y=f(x), l, l&apos;</code>)이 x축과 y축의 <strong className="text-red-400">화살표 끝을 넘어 바깥으로 튀어나지 않도록</strong> 주의하세요. 모든 요소는 축이 이루는 Bounding Box ‘안쪽’에 안정적으로 담겼야 합니다.</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 p-3 rounded-xl border border-amber-800/30 bg-amber-950/20">
+                      <p className="text-[10px] text-amber-400/80 font-bold mb-1">💡 프로 팁</p>
+                      <p className="text-[11px] text-zinc-400">라벨 위치는 에디터의 조이스틱 기능으로 세밀하게 조정하세요. <code className="text-amber-300 bg-amber-950/40 px-1 rounded">yshift</code> / <code className="text-amber-300 bg-amber-950/40 px-1 rounded">xshift</code>로 세밀 튜닝이 가능합니다.</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+            </div>{/* /콘텐츠 스크롤 영역 */}
+
+            {/* 모달 푸터 */}
+            <div className="px-6 py-3 border-t border-amber-900/20 bg-black/20 shrink-0 flex items-center justify-between">
+              <p className="text-[9px] text-zinc-700">이미지 파일은 <code className="text-zinc-600">/public/guide1~3.png</code>에 넣으세요.</p>
+              <button
+                onClick={() => setIsGuideModalOpen(false)}
+                className="px-4 py-1.5 rounded-lg text-[11px] font-bold bg-amber-500/20 border border-amber-600/40 text-amber-300 hover:bg-amber-500/30 transition-all"
+              >
+                닫기
+              </button>
+            </div>
           </div>
         </div>
       )}
