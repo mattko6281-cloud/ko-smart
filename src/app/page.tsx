@@ -1980,8 +1980,7 @@ export default function Home() {
             </div>{/* /콘텐츠 스크롤 영역 */}
 
             {/* 모달 푸터 */}
-            <div className="px-6 py-3 border-t border-amber-900/20 bg-black/20 shrink-0 flex items-center justify-between">
-              <p className="text-[9px] text-zinc-700">이미지 파일은 <code className="text-zinc-600">/public/guide1~3.png</code>에 넣으세요.</p>
+            <div className="px-6 py-3 border-t border-amber-900/20 bg-black/20 shrink-0 flex items-center justify-end">
               <button
                 onClick={() => setIsGuideModalOpen(false)}
                 className="px-4 py-1.5 rounded-lg text-[11px] font-bold bg-amber-500/20 border border-amber-600/40 text-amber-300 hover:bg-amber-500/30 transition-all"
