@@ -1899,26 +1899,26 @@ export default function Home() {
                     />
                   </div>
                   {/* 텍스트 */}
-                  <div className="space-y-4 text-[12px] text-zinc-300 leading-relaxed">
+                  <div className="space-y-4 text-[12px] text-zinc-300 leading-relaxed break-keep">
                     <div className="flex gap-2.5">
                       <span className="text-base shrink-0 mt-0.5">📍</span>
                       <div>
-                        <p className="font-bold text-white mb-1">점 라벨 밀착 & 정렬</p>
-                        <p>A, B, C, D 등 모든 점 라벨은 꼭짓점에서 붕 뜨지 않게 <code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">inner sep=0~1pt</code>로 밀착해야 합니다. 수평/수직 선상의 점들(예: A와 D, B와 C)은 높낙이가 <strong className="text-white">완벽하게 맞아야</strong> 합니다.</p>
+                        <p className="font-bold text-white mb-1">점 라벨 밀착 &amp; 정렬</p>
+                        <p>A, B, C, D 등 모든 점 라벨은 꼭짓점에서 붕 뜨지 않게 <strong className="text-white">바짝 밀착</strong>해야 합니다. 수평/수직 선상의 점들(예: A와 D, B와 C)은 높낮이가 <strong className="text-white">완벽하게 맞아야</strong> 합니다.</p>
                       </div>
                     </div>
                     <div className="flex gap-2.5">
                       <span className="text-base shrink-0 mt-0.5">📏</span>
                       <div>
                         <p className="font-bold text-white mb-1">길이 수식 렌더링</p>
-                        <p>길이 표시는 반드시 점선 정중앙에 <code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">fill=white, inner sep=3pt</code>를 파고 들어가야 합니다. 숫자만 공중에 둥둥 띄우지 마세요.</p>
+                        <p>길이 표시는 반드시 점선 정중앙을 자연스럽게 <strong className="text-white">끊고 들어가도록</strong> 배치해야 합니다. 숫자만 공중에 둥둥 띄우지 마세요.</p>
                       </div>
                     </div>
                     <div className="flex gap-2.5">
                       <span className="text-base shrink-0 mt-0.5">↪️</span>
                       <div>
                         <p className="font-bold text-white mb-1">지시선(Callout) 적극 활용</p>
-                        <p>내부 대각선(BD)처럼 길이 수식이 메인 도형의 실선을 <strong className="text-red-400">침범할 위험</strong>이 있다면, 억지로 구겨 넣지 말고 지시선(Arrow)을 바깥으로 우아하게 빼서 수식을 배치하세요.</p>
+                        <p>내부 대각선(BD)처럼 길이 수식이 메인 도형의 실선을 <strong className="text-red-400">침범할 위험</strong>이 있다면, 억지로 구겨 넣지 말고 지시선(화살표)을 바깥으로 우아하게 빼서 수식을 배치하세요.</p>
                       </div>
                     </div>
                   </div>
@@ -1933,7 +1933,7 @@ export default function Home() {
               <section>
                 <h2 className="text-[11px] font-black text-amber-400 uppercase tracking-widest mb-3 flex items-center gap-2">
                   <span className="w-5 h-5 rounded bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-[10px]">2</span>
-                  함수 그래프 디테일 — 축, 공선, 수식 라벨
+                  함수 그래프 디테일 — 축, 곡선, 수식 라벨
                 </h2>
                 <div className="grid grid-cols-2 gap-5 items-start">
                   {/* 이미지 2개 세로 배치 */}
@@ -1954,24 +1954,24 @@ export default function Home() {
                     />
                   </div>
                   {/* 텍스트 */}
-                  <div className="space-y-4 text-[12px] text-zinc-300 leading-relaxed">
+                  <div className="space-y-4 text-[12px] text-zinc-300 leading-relaxed break-keep">
                     <div className="flex gap-2.5">
                       <span className="text-base shrink-0 mt-0.5">🎯</span>
                       <div>
                         <p className="font-bold text-white mb-1">라벨 위치 최적화</p>
-                        <p>점 라벨과 직선 표시가 해당 좌표나 선에 <strong className="text-white">너무 멀리 떨어지지 않게</strong> 바짝 안하 붙이세요. <code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">inner sep=1pt</code>가 기본입니다.</p>
+                        <p>점 라벨과 직선 이름(l, l’ 등)이 해당 좌표나 선에서 멀리 떨어지지 않게 <strong className="text-white">바짝 붙여주세요</strong>.</p>
                       </div>
                     </div>
                     <div className="flex gap-2.5">
                       <span className="text-base shrink-0 mt-0.5">🛡️</span>
                       <div>
                         <p className="font-bold text-white mb-1">절대 방어선 — 축 경계선 넘지 않기</p>
-                        <p>공선의 끝부분이나 수식 라벨(<code className="text-amber-300 bg-amber-950/40 px-1 rounded text-[11px]">y=f(x), l, l&apos;</code>)이 x축과 y축의 <strong className="text-red-400">화살표 끝을 넘어 바깥으로 튀어나지 않도록</strong> 주의하세요. 모든 요소는 축이 이루는 Bounding Box ‘안쪽’에 안정적으로 담겼야 합니다.</p>
+                        <p>공선의 끝부분이나 수식 라벨(y=f(x), l, l’)이 x축과 y축의 <strong className="text-red-400">화살표 끝을 넘어 바깥으로 튀어나지 않도록</strong> 주의하세요. 모든 요소는 축이 이루는 가상의 직사각형 ‘안쪽’에 안정적으로 담곌야 합니다.</p>
                       </div>
                     </div>
                     <div className="mt-4 p-3 rounded-xl border border-amber-800/30 bg-amber-950/20">
                       <p className="text-[10px] text-amber-400/80 font-bold mb-1">💡 프로 팁</p>
-                      <p className="text-[11px] text-zinc-400">라벨 위치는 에디터의 조이스틱 기능으로 세밀하게 조정하세요. <code className="text-amber-300 bg-amber-950/40 px-1 rounded">yshift</code> / <code className="text-amber-300 bg-amber-950/40 px-1 rounded">xshift</code>로 세밀 튜닝이 가능합니다.</p>
+                      <p className="text-[11px] text-zinc-400 break-keep leading-relaxed">라벨 위치나 간격이 미세하게 안 맞을 때는, 에디터 하단의 ‘조이스틱’ 기능을 활용하여 상하좌우로 정밀하게 튜닝해 주세요.</p>
                     </div>
                   </div>
                 </div>
