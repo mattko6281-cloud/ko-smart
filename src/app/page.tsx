@@ -18,6 +18,9 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useSession, signIn as nextAuthSignIn } from "next-auth/react";
 import { logUserAction } from "@/actions/logger";
+import guide1 from "@/assets/guide1.png";
+import guide2 from "@/assets/guide2.png";
+import guide3 from "@/assets/guide3.png";
 
 // ─────────────────────────────────────────────────────────────
 //  Kroki GET URL — zlib deflate + base64url (CORS-free)
@@ -1892,10 +1895,10 @@ export default function Home() {
                   <div>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src="/guide1.png"
+                      src={guide1.src}
                       alt="기하도형 가이드"
-                      className="w-full rounded-lg object-contain border border-gray-200"
-                      style={{ background: "#fff", minHeight: "200px" }}
+                      className="w-full bg-white rounded-lg object-contain border border-gray-200"
+                      style={{ minHeight: "200px" }}
                     />
                   </div>
                   {/* 텍스트 */}
@@ -1940,17 +1943,17 @@ export default function Home() {
                   <div className="space-y-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src="/guide2.png"
+                      src={guide2.src}
                       alt="함수 가이드 1"
-                      className="w-full rounded-lg object-contain border border-gray-200"
-                      style={{ background: "#fff", minHeight: "150px" }}
+                      className="w-full bg-white rounded-lg object-contain border border-gray-200"
+                      style={{ minHeight: "150px" }}
                     />
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src="/guide3.png"
+                      src={guide3.src}
                       alt="함수 가이드 2"
-                      className="w-full rounded-lg object-contain border border-gray-200"
-                      style={{ background: "#fff", minHeight: "150px" }}
+                      className="w-full bg-white rounded-lg object-contain border border-gray-200"
+                      style={{ minHeight: "150px" }}
                     />
                   </div>
                   {/* 텍스트 */}
