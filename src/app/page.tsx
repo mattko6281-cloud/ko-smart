@@ -880,6 +880,29 @@ export default function Home() {
     toast.success(isCommented ? "👁️ 점 표시" : "🛠️ 점 숨김");
   };
 
+  /**
+   * 전체 점 마커를 일괄 켜거나 끄는 함수.
+   * rawInput 을 한 번만 업데이트하여 렌더링 방스 최소화.
+   */
+  const handleToggleAllPoints = (targetState: "on" | "off") => {
+    const lines = rawInput.split("\n");
+    const updated = lines.map((l) => {
+      // 점 마커 라인인지 판별
+      if (!/^\s*%?\s*\\node\s*\[.*fill=black/.test(l)) return l;
+      if (targetState === "off") {
+        // 전체 끼기: 이미 주석된 라인은 건들지 않음
+        if (/^\s*%/.test(l)) return l;
+        return l.replace(/^(\s*)/, "$1% ");
+      } else {
+        // 전체 켜기: 주석된 라인만 해제
+        if (!/^\s*%/.test(l)) return l;
+        return l.replace(/^(\s*)%\s?/, "$1");
+      }
+    });
+    handleRawInputChange(updated.join("\n"));
+    toast.success(targetState === "on" ? "👁️ 전체 점 표시" : "🔕 전체 점 숨김");
+  };
+
   // ── 줌 계산 ─────────────────────────────────────────────────
   const zoomScale = zoomPercent / 100;
 
@@ -1674,6 +1697,39 @@ export default function Home() {
             </button>
           </div>
 
+          {/* 일괄 토글 버튼 */}
+          {extractedPoints.length > 0 && (
+            <div className="flex gap-1.5 px-2.5 py-2 border-b border-fuchsia-900/20">
+              <button
+                onClick={() => handleToggleAllPoints("on")}
+                className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[9px] font-bold
+                           bg-fuchsia-950/60 border border-fuchsia-800/40 text-fuchsia-300
+                           hover:bg-fuchsia-900/60 hover:border-fuchsia-600/60 hover:text-white transition-all"
+                title="하이라이트된 모든 점 표시"
+              >
+                <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                전체 켜기
+              </button>
+              <button
+                onClick={() => handleToggleAllPoints("off")}
+                className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[9px] font-bold
+                           bg-zinc-900/60 border border-zinc-700/40 text-zinc-400
+                           hover:bg-zinc-800/60 hover:border-zinc-500/60 hover:text-white transition-all"
+                title="모든 점 숨김"
+              >
+                <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+                전체 끄기
+              </button>
+            </div>
+          )}
+
           {/* 리스트 */}
           <div className="overflow-y-auto max-h-[55vh] px-2.5 py-2">
             {extractedPoints.length === 0 ? (
@@ -1736,7 +1792,7 @@ export default function Home() {
 
           {/* 힌트 */}
           <div className="px-3 py-1.5 border-t border-fuchsia-900/20 bg-black/20">
-            <p className="text-[8px] text-zinc-700">👁 토글 = <code className="text-zinc-600">%</code> 주석 스위치</p>
+            <p className="text-[8px] text-zinc-700">👁 토글 = <code className="text-zinc-600">%</code> 주석 스위치 · 위쪽 버튼으로 일괄 처리</p>
           </div>
         </div>
       )}
