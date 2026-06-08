@@ -9,7 +9,7 @@ import {
   Copy, History, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
-  RotateCcw, BookOpen, X, ClipboardCopy, Type, HelpCircle,
+  RotateCcw, BookOpen, X, ClipboardCopy, Type, HelpCircle, Sliders,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem,
@@ -1934,7 +1934,7 @@ export default function Home() {
         {/* 점 & 그래프 제어 버튼 */}
         <button
           onClick={() => setIsPointManagerOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-3 py-1.5 rounded-lg
+          className="flex items-center justify-center gap-1.5 shrink-0 px-4 py-2 rounded-lg
             border border-zinc-500/70 bg-zinc-800/90
             hover:bg-fuchsia-900/40 hover:border-fuchsia-500/80
             transition-all group"
@@ -1948,15 +1948,9 @@ export default function Home() {
           }}
           title="점 마커 & 그래프 Domain 제어 패널 열기"
         >
-          <span className="text-[9px] font-bold text-gray-200 group-hover:text-fuchsia-300 uppercase tracking-wider transition-colors">
+          <Sliders className="w-3.5 h-3.5 text-gray-200 group-hover:text-fuchsia-300 transition-colors" />
+          <span className="text-[11px] font-bold text-gray-100 group-hover:text-fuchsia-300 tracking-wider transition-colors">
             점 &amp; 그래프 제어
-          </span>
-          <span className="text-[11px] font-black text-gray-100 group-hover:text-fuchsia-200 transition-colors">
-            {extractedPoints.length > 0
-              ? `● ${extractedPoints.length}개`
-              : domains.length > 0
-                ? `📈 ${domains.length}개`
-                : "패널 열기"}
           </span>
         </button>
 
