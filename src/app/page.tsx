@@ -109,51 +109,87 @@ const KICE_PROMPT_GUIDE = `[TikZ 수학 그래프 렌더링 엄격한 스타일 
 // ─────────────────────────────────────────────────────────────
 //  메타수학용 프롬프트 가이드 원문
 // ─────────────────────────────────────────────────────────────
-const META_PROMPT_GUIDE = `[INF_TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일 v2.1 - 20260607]
+const META_PROMPT_GUIDE = `[INF_TikZ 수학 그래프 렌더링 엄격한 스타일 가이드: 평가원(KICE) 스타일 v2.1 - 20260608]
 
 앞으로 모든 TikZ 수학 그래프 코드를 생성할 때는 한글(HWP) 문서 삽입 후 축소(12.5% 고정 비율) 시 일러스트레이터 파일과 완벽히 동일한 가독성을 확보하고, 웹 에디터의 최적화 환경을 위해 아래의 규칙을 예외 없이 엄격하게 적용하세요.
 
 1. [웹 렌더링 호환 및 완전한 문서 구조 - 절대 규칙]
+
 - 한글 원천 차단: \\usepackage{kotex} 패키지는 절대 선언하지 않습니다. 코드 내부의 모든 % 주석은 반드시 영어로만 작성하며, 노드(Node)나 텍스트 출력 부분에 한글을 절대 포함하지 않습니다. (모든 라벨은 수식, 기호, 영어로만 구성)
+
 - 타이트한 여백 설정 (중요): 다운로드 및 크롭 최적화를 위해 첫 줄 문서 선언 시 여백을 최소화합니다. 반드시 \\documentclass[tikz, border=2pt]{standalone} 선언으로 시작하세요.
+
 - Document 환경 필수: 그 아래에 반드시 \\begin{document}를 열고 전체 \\begin{tikzpicture} ... \\end{tikzpicture} 코드를 작성한 뒤, 마지막에 \\end{document}로 닫으세요. 복붙 즉시 렌더링이 가능한 '완전한 전체 문서' 형태로만 출력해야 합니다.
 
 2. [전역 환경 및 스마트 캔버스 독립 배율 (일러스트레이터 대지 맞춤 방식)]
-- 폰트/선 두께 고정: HWP 12.5% 삽입 시 가독성을 위해 폰트 스케일(scale=2.2)과 선 두께는 절대 변경하지 마세요. (이는 텍스트를 고정 크기로 덧입히는 것과 같습니다.)
-- 대지 맞춤형 x, y 독립적 계산 (핵심): 렌더링될 그래프의 '가로와 세로'가 각각 물리적 길이 8~10cm 내외 (TikZ 기준)가 되도록 좌표 구간을 계산하여 x와 y 배율을 반드시 독립적으로(서로 다르게) 설정하세요.
-- 비율 왜곡 적극 허용: 수학적 정비율(1:1)에 집착하지 마세요. y값의 변동 폭이 좁은 경우(예: 극솟값이 -1 등), y 배율을 x 배율보다 훨씬 크게 주어 상하로 충분히 길게 늘려야 합니다. 그래야 거대한 고정 폰트(scale=2.2)들이 서로 겹치거나 답답해 보이지 않고 숨통(여백)이 트입니다.
-- 예시: x축 표현 구간 폭이 6이라면 x=1.5cm, y축 표현 구간 폭이 3이라면 y=3.0cm로 설정하여 가로/세로 물리적 균형을 맞춥니다.
-- 기본 뼈대:
-  \\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x={계산된값}cm, y={계산된값}cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}, dashed/.style={dash pattern=on 6pt off 4pt}]
+
+폰트/선 두께 고정: HWP 12.5% 삽입 시 가독성을 위해 폰트 스케일(scale=2.2)과 선 두께는 절대 변경하지 마세요. (이는 텍스트를 고정 크기로 덧입히는 것과 같습니다.)
+
+대지 맞춤형 x, y 독립적 계산 (핵심): 렌더링될 그래프의 '가로와 세로'가 각각 **물리적 길이 8~10cm 내외 (TikZ 기준)**가 되도록 좌표 구간을 계산하여 $x$와 $y$ 배율을 반드시 독립적으로(서로 다르게) 설정하세요.
+
+비율 왜곡 적극 허용: 수학적 정비율(1:1)에 집착하지 마세요. $y$값의 변동 폭이 좁은 경우(예: 극솟값이 -1 등), $y$ 배율을 $x$ 배율보다 훨씬 크게 주어 상하로 충분히 길게 늘려야 합니다. 그래야 거대한 고정 폰트(scale=2.2)들이 서로 겹치거나 답답해 보이지 않고 숨통(여백)이 트입니다.
+
+예시: $x$축 표현 구간 폭이 6이라면 x=1.5cm, $y$축 표현 구간 폭이 3이라면 y=3.0cm로 설정하여 가로/세로 물리적 균형을 맞춥니다.
+
+기본 뼈대: \\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x={계산된값}cm, y={계산된값}cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}, dashed/.style={dash pattern=on 6pt off 4pt}]
 
 3. [축(Axis) 렌더링 및 황금 비율 뼈대]
+
 - 축 두께 및 화살표: 축을 그릴 때는 기본 제공되는 [-stealth]를 절대 사용하지 않으며, 전역 line width=1pt와 Stealth[length=15pt, width=9pt] 화살표가 자연스럽게 적용되도록 [->]만 사용하여 선언합니다.
-- 축 라벨 위치 제어: 축의 양 끝 라벨(x, y)은 폰트 벌크업으로 인한 축선과의 겹침을 방지하기 위해 정밀한 shift 값을 반드시 포함합니다.
+
+- 축 라벨 위치 제어: 축의 양 끝 라벨(x, y)은 폰트 벌크업으로 인한 축선과의 겹침을 방지하기 방지하기 위해 정밀한 shift 값을 반드시 포함합니다.
+
 - x축 표준 뼈대: \\draw[->] (-1.4, 0) -- (4.6, 0) node [below left, inner sep=2pt, yshift=-1.5pt, xshift=2.5pt] {$x$};
 - y축 표준 뼈대: \\draw[->] (0, -3) -- (0, 3) node [below left, inner sep=2pt, xshift=-0.5pt, yshift=2pt] {$y$};
 
 4. [메인 그래프 및 직선 렌더링 (엄격한 2:3 두께 법칙)]
+
 - 2:3 두께 균형: 전역 축 두께가 1pt이므로, 시각적 주목도를 높여야 하는 메인 함수 곡선, 주요 직선, 도형의 선 두께는 반드시 [line width=1.5pt]를 명시적으로 달아주어 축과 메인 그래프의 두께 비율을 정확히 2:3으로 유지합니다. (보조선과 지시선은 전역 설정인 1pt를 따름)
+
 - 곡선 함수식 규격: 곡선은 수학 함수식 \\draw[line width=1.5pt] plot (\\x, {수식})을 사용하며 samples=150 이상을 적용합니다. (\\addplot 사용 금지)
 
+[그래프 렌더링 필수 규칙: 1차 함수 및 상수 함수 Domain 강제]
+좌표평면 위에서 y=f(x) 형태의 1차 함수(사선) 및 상수 함수(수평선) 그래프를 렌더링할 때는 절대 두 점을 잇는 \`--\` 방식을 사용하지 마세요. 곡선과 동일하게 반드시 \`domain\` 범위를 지정하고 \`plot (\\x, {방정식})\` 명령어를 사용하세요. 
+(단, x=k 형태의 수직선이나 순수 기하 도형의 꼭짓점을 잇는 단순 보조선은 기존처럼 \`--\` 방식을 유지합니다.)
+
+❌ 잘못된 예 (단순 좌표 잇기):
+\\draw[line width=1.0pt] (-5, 4) -- (5, 4);
+\\draw[line width=1.0pt] (-1.5, -0.25) -- (1.5, 5.75);
+
+✅ 올바른 예 (Domain 범위 및 plot 방정식 사용):
+\\draw[line width=1.0pt, domain=-5:5] plot (\\x, {4});
+\\draw[line width=1.0pt, domain=-1.5:1.5] plot (\\x, {2*\\x + 11/4});
+
 5. [마이크로 타이포그래피: 폰트 및 라벨 스타일링]
+
 - 배경색 투명도 유지: 모든 텍스트 및 수식 노드에 fill=white 옵션을 절대 사용하지 않습니다. 모든 배경은 투명하게 둡니다. (단, 7번 항목의 '길이 표시' 점선 위에 올라가는 노드는 예외적으로 fill=white를 허용합니다.)
+
 - 대문자 점(Point) 바짝 붙이기 (HWP 신명조 모방): 원점(\\rm O)을 포함해 그래프에 표시되는 모든 대문자 점 라벨(\\rm A, B, P, Q 등)은 거대한 전역 스케일로 인해 좌표에서 멀리 밀려나는 현상을 방지해야 합니다. 따라서 반드시 [inner sep=0pt] 또는 [inner sep=1pt] 옵션을 추가하여 좌표(점)에 바짝 붙여서 렌더링하세요. 또한 완벽한 자리를 잡도록 특수 조작(transform shape, xscale=0.9)을 적용하고 반드시 $\\rm 대문자$ 형태를 유지합니다. (전역 scale이 충분히 크므로 font=\\large 등은 절대 사용하지 마세요)
+
 - 원점 노드 표준: \\node [below left, inner sep=1pt, transform shape, xscale=0.9] at (0,0) {$\\rm O$};
+
 - 분수 크기 보존: 노드(\\node) 내에서 분수(\\frac)나 극한 수식을 작성할 때는 기호가 찌그러지는 현상을 방지하기 위해, 반드시 달러 기호 직후에 \\displaystyle을 선언하세요. (예시: $\\displaystyle y = 2 - \\frac{16}{x^2}$)
 
 6. [점(Point) 및 필수 마커 렌더링 제한]
+
 - 타원형 에러 방지: 점을 그릴 때 \\fill circle 명령어는 절대 금지합니다. 모든 렌더링 포인트는 반드시 \\node[circle, fill=black, inner sep=1.2pt] at (좌표) {}; 형태로만 작성합니다. (※ 단, 에디터의 '점 마커 관리자' 플로팅 UI와의 완벽한 주석 토글 호환을 위해 이 형식을 엄격히 준수해야 합니다.)
+
 - 무분별한 교점 표시 금지: 그래프의 모든 교점에 기계적으로 검은 점을 남발하지 마세요. 오직 문제 발문에서 직접 언급된 구체적인 점(예: 점 A_n, 점 B_n)이거나, 함수의 불연속을 나타내는 경우에만 명시적으로 마커를 추가하세요.
 
 7. [기하학적 기호 및 보조선 마이크로 디테일 (KICE 조판 표준)]
+
 - 직각 기호 (1.5배 확대): 수직(직각) 기호는 스케일업 환경에서 너무 작아 보이지 않도록, 기본 변의 길이 비율 대비 1.5배 넉넉한 크기(예: 한 변을 0.15 단위 이상)로 명확하게 그립니다. (도형 안쪽으로 그려지도록 rotate 주의)
+
 - 각도 호(Arc) 렌더링 (두께 0.5pt): 각도(θ 등)를 표시하는 곡선 호(Arc)를 그릴 때는 둔탁해 보이지 않도록, 반드시 [line width=0.5pt] 옵션을 개별 적용하여 메인 선 두께(1pt)의 정확히 절반 두께로 얇게 빼주세요.
+
 - 지시선 화살표 (머리 65% 축소): 길이 변화나 영역을 지시하는 화살표(예: bend right)를 그릴 때는 선 두께는 1pt를 유지하되, 화살표 머리만 65% 크기로 줄인 [-{Stealth[length=9.75pt, width=5.85pt]}] 옵션을 개별적으로 적용하세요.
+
 - 길이 표시 (평가원 점선 스타일 및 메인 선 침범 절대 금지): 길이를 표시할 때는 도형의 외곽선뿐만 아니라 내부 보조선(수선, 대각선 등)에도 예외 없이 부드럽게 휘어지는 점선(bend)을 사용합니다. 숫자만 공중에 띄워두지 마세요.
 - 절연 기법 및 넉넉한 휨 각도: 텍스트 노드에 [midway, fill=white, inner sep=3pt] 옵션을 주어 점선 한가운데를 끊고 들어가게 연출하되, 이 하얀색 배경 박스가 메인 실선을 지우개처럼 파먹는 일이 절대 없도록 bend 각도를 최소 25~35 이상으로 넉넉하게 부여하여 실선에서 완전히 이격시키세요. (선분이 짧을수록 bend 값을 더 키워야 합니다.)
-- [필수 코드 예시] 길이 표시 점선을 그릴 때는 반드시 아래 코드를 그대로 복붙해서 응용하세요.
-  \\draw[dashed] (A) to[bend left=30] node[midway, fill=white, inner sep=3pt] {수식} (B);
+
+[필수 코드 예시] 길이 표시 점선을 그릴 때는 반드시 아래 코드를 그대로 복붙해서 응용하세요.
+\\draw[dashed] (A) to[bend left=30] node[midway, fill=white, inner sep=3pt] {수식} (B);
+
 - 길이 같음 기호(Tick marks): 짧은 선분(빗금)은 해당 변과 완벽히 직교하도록 rotate 각도를 정확히 계산하여 설정합니다.`;
 
 // ─────────────────────────────────────────────────────────────
@@ -170,7 +206,11 @@ export default function Home() {
   const [isDownloading,  setIsDownloading]  = useState(false);
   const [zoomPercent,    setZoomPercent]    = useState<number>(100);
   const [imgRenderedH,   setImgRenderedH]   = useState<number>(0);
-  const [selectedNodeIndex, setSelectedNodeIndex] = useState<string | null>(null);
+  // 다중 선택지원 노드 선택 상태 (srcIndex 문자열들의 Set)
+  const [selectedNodeIndices, setSelectedNodeIndices] = useState<Set<string>>(new Set());
+  // 콘텍스트 노드 선택 드롭다운 열림 상태
+  const [isNodeDropdownOpen, setIsNodeDropdownOpen] = useState(false);
+  const nodeDropdownRef = useRef<HTMLDivElement>(null);
 
   // KICE 프롬프트 모달
   const [isKiceModalOpen, setIsKiceModalOpen] = useState(false);
@@ -495,6 +535,36 @@ export default function Home() {
     return s || raw; // 정제 결과가 빈 문자열이면 원본 반환
   };
 
+  // ── Domain 패널 전용 UI 라벨 포매터 ─────────────────────────────────
+  //  ※ 이 함수는 화면 표시용 문자열만 가공합니다.
+  //     TikZ 원본 코드나 domain 파싱/치환 로직에는 절대 영향 없음.
+  const formatDomainLabel = (raw: string): string => {
+    let s = raw;
+
+    // 1) \x → x  (JS 문자열에서 \x 가 증발하는 현상 방지)
+    //    TikZ 코드상 \x 는 JS 소스에서 \\x 로 저장되어 있으므로
+    //    두 케이스 모두 처리한다.
+    s = s.replace(/\\x/g, "x");   // 이미 한 번 이스케이프 해석된 경우
+    s = s.replace(/\\\\x/g, "x"); // 이중 이스케이프가 남아있는 경우
+
+    // 2) pow(A, B) → A^(B)  (C/Python 스타일 거듭제곱 → 수학 표기)
+    //    중첩 pow 는 바깥부터 순차 처리 (1단계)
+    s = s.replace(/pow\(([^,)]+),\s*([^)]+)\)/g, "$1^($2)");
+
+    // 3) * 제거  (예: 2*x → 2x, 3*x^2 → 3x^2)
+    s = s.replace(/\*/g, "");
+
+    // 4) 이중 부호 정리  (예: "+ -" → "-", "- +" → "-", "+-" → "-")
+    s = s.replace(/\+\s*-/g, "-");
+    s = s.replace(/-\s*\+/g, "-");
+    s = s.replace(/\+\s*\+/g, "+");
+
+    // 5) 남은 LaTeX 명령어·기호를 sanitizeLabel 로 정제
+    s = sanitizeLabel(s);
+
+    return s || raw;
+  };
+
   // ── 노드 스캔 v3 — 인라인 node 캡처 + 좌표 {} 완전 차단 ──────────────
   //  개선 사항:
   //  1. \node/\coordinate 독립 선언 + \draw 경로 내 인라인 node 모두 캡처
@@ -590,15 +660,32 @@ export default function Home() {
   };
   const nodes = scanNodes();
 
-  // ── 선택된 노드의 표시 텍스트 계산 ─────────────────────────────────
-  //  selectedNodeIndex = srcIndex 문자열. find()로 안전 조회 후 sanitize 적용
-  const getSelectedNodeLabel = () => {
-    if (selectedNodeIndex === null) return undefined;
-    const srcIdx = parseInt(selectedNodeIndex);
-    const node = nodes.find(n => n.srcIndex === srcIdx);
-    if (!node) return undefined;
-    const seqNum = nodes.indexOf(node) + 1;
-    return `${seqNum}. ${sanitizeLabel(node.content)}`;
+  // ── [버그 수정] 노드 개수가 변할 때(유령 데이터) out-of-bounds 인덱스 정리 ──
+  useEffect(() => {
+    setSelectedNodeIndices(prev => {
+      let changed = false;
+      const valid = new Set<string>();
+      for (const idxStr of prev) {
+        if (parseInt(idxStr) < nodes.length) {
+          valid.add(idxStr);
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? valid : prev;
+    });
+  }, [nodes.length]);
+
+  // ── 선택된 노드(들)의 표시 텍스트 계산 (다중 선택 지원) ──────────────
+  const getSelectedNodesLabel = (): string => {
+    if (selectedNodeIndices.size === 0) return "";
+    if (selectedNodeIndices.size === 1) {
+      const arrIdx = parseInt([...selectedNodeIndices][0]);
+      const node = nodes[arrIdx];
+      if (!node) return "";
+      return `${arrIdx + 1}. ${sanitizeLabel(node.content)}`;
+    }
+    return `${selectedNodeIndices.size}개 선택됨`;
   };
 
   // ── 글로벌 폰트 스케일 조절 ──────────────────────────────
@@ -706,55 +793,82 @@ export default function Home() {
     toast.success(`✅ 선 두께 배율: ×${newScale.toFixed(2)}`);
   };
 
-  // ── 개별 노드 폰트 스케일 조절 (A+ / A-) ──────────────────
-  //  selectedNodeIndex = srcIndex (rawInput 내 offset). find()로 안전 조회
+  // ── 다중 노드 폰트 스케일 조절 (A+ / A-) ──────────────────
   const handleNodeFontScale = (delta: number) => {
-    if (selectedNodeIndex === null) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
-    const node = nodes.find(n => n.srcIndex === parseInt(selectedNodeIndex));
-    if (!node) return;
+    if (selectedNodeIndices.size === 0) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
+    
+    // [중요] 문자열 앞쪽에서 치환이 발생하면 뒤쪽 노드들의 srcIndex가 밀리는 현상을 방지하기 위해,
+    // 선택된 노드들을 srcIndex 기준 내림차순(역순)으로 정렬하여 뒤에서부터 치환합니다.
+    const selectedNodes = nodes
+      .filter((n, i) => selectedNodeIndices.has(i.toString()))
+      .sort((a, b) => b.srcIndex - a.srcIndex);
+      
+    if (selectedNodes.length === 0) return;
 
-    let opts = node.options;
-    const scaleRe = /(?<![a-zA-Z])scale\s*=\s*([0-9.]+)/;
-    const hit = opts.match(scaleRe);
+    let newCode = rawInput;
 
-    if (hit) {
-      const cur = parseFloat(hit[1]);
-      const next = Math.max(0.5, Math.round((cur + delta) * 10) / 10);
-      opts = opts.replace(scaleRe, `scale=${next}`);
-    } else {
-      const initVal = delta > 0 ? 1.1 : 0.9;
-      opts = (opts.trim() ? opts + ", " : "") + `scale=${initVal}`;
+    for (const node of selectedNodes) {
+      let opts = node.options;
+      const scaleRe = /(?<![a-zA-Z])scale\s*=\s*([0-9.]+)/;
+      const hit = opts.match(scaleRe);
+
+      if (hit) {
+        const cur = parseFloat(hit[1]);
+        const next = Math.max(0.5, Math.round((cur + delta) * 10) / 10);
+        opts = opts.replace(scaleRe, `scale=${next}`);
+      } else {
+        const initVal = delta > 0 ? 1.1 : 0.9;
+        opts = (opts.trim() ? opts + ", " : "") + `scale=${initVal}`;
+      }
+
+      const updatedFull = node.options
+        ? node.full.replace(
+            new RegExp(`\\[${node.options.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`),
+            `[${opts}]`)
+        : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
+
+      newCode = newCode.slice(0, node.srcIndex) + updatedFull + newCode.slice(node.srcIndex + node.full.length);
     }
-
-    const updatedFull = node.options
-      ? node.full.replace(
-          new RegExp(`\\[${node.options.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`),
-          `[${opts}]`)
-      : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
-
-    const newCode = rawInput.slice(0, node.srcIndex) + updatedFull + rawInput.slice(node.srcIndex + node.full.length);
+    
     handleRawInputChange(newCode);
   };
 
+  // ── 다중 노드 조이스틱 시프트 ───────────────────────────────────
   const handleShift = (axis: "x" | "y", direction: number) => {
-    if (selectedNodeIndex === null) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
-    const node = nodes.find(n => n.srcIndex === parseInt(selectedNodeIndex));
-    if (!node) return;
-    let opts = node.options;
+    if (selectedNodeIndices.size === 0) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
+    
+    // [중요] 인덱스 밀림 방지를 위한 역순 정렬 처리
+    const selectedNodes = nodes
+      .filter((n, i) => selectedNodeIndices.has(i.toString()))
+      .sort((a, b) => b.srcIndex - a.srcIndex);
+      
+    if (selectedNodes.length === 0) return;
+
+    let newCode = rawInput;
     const key = `${axis}shift`;
     const re = new RegExp(`${key}\\s*=\\s*(-?\\d+)pt`);
-    const hit = opts.match(re);
-    let newVal = direction;
-    if (hit) { newVal = parseInt(hit[1]) + direction; opts = opts.replace(re, `${key}=${newVal}pt`); }
-    else opts = (opts.trim() ? opts + ", " : "") + `${key}=${newVal}pt`;
 
-    const updatedFull = node.options
-      ? node.full.replace(
-          new RegExp(`\\[${node.options.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`),
-          `[${opts}]`)
-      : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
+    for (const node of selectedNodes) {
+      let opts = node.options;
+      const hit = opts.match(re);
+      let newVal = direction;
+      
+      if (hit) { 
+        newVal = parseInt(hit[1]) + direction; 
+        opts = opts.replace(re, `${key}=${newVal}pt`); 
+      } else {
+        opts = (opts.trim() ? opts + ", " : "") + `${key}=${newVal}pt`;
+      }
 
-    const newCode = rawInput.slice(0, node.srcIndex) + updatedFull + rawInput.slice(node.srcIndex + node.full.length);
+      const updatedFull = node.options
+        ? node.full.replace(
+            new RegExp(`\\[${node.options.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]`),
+            `[${opts}]`)
+        : node.full.replace(/^((?:\\node|node|\\coordinate)\s*)/, `$1[${opts}] `);
+
+      newCode = newCode.slice(0, node.srcIndex) + updatedFull + newCode.slice(node.srcIndex + node.full.length);
+    }
+    
     handleRawInputChange(newCode);
   };
 
@@ -867,6 +981,77 @@ export default function Home() {
   };
 
   // ─────────────────────────────────────────────────────────────
+  //  Domain 파서: \draw plot[domain=A:B] ... {수식} 추출
+  //  엄격한 정규식으로 다른 좌표와 꼬이지 않도록 보호
+  // ─────────────────────────────────────────────────────────────
+  interface DomainEntry {
+    lineIdx: number;    // rawInput 에서의 줄 번호 (0-indexed)
+    lineRaw: string;    // 원본 줄 전체 텍스트
+    start: number;      // domain= 의 A 값
+    end: number;        // domain= 의 B 값
+    formula: string;    // {수식} 부분 (sanitizeLabel 로 정제 전 원본)
+  }
+
+  const scanDomains = (): DomainEntry[] => {
+    const results: DomainEntry[] = [];
+    const lines = rawInput.split("\n");
+    // 패턴: domain=숫자:숫자  (정수/소수/음수 모두 허용, 앞뒤는 비단어 경계)
+    const domainRe = /domain\s*=\s*(-?[0-9]+(?:\.[0-9]*)?)\s*:\s*(-?[0-9]+(?:\.[0-9]*)?)/;
+    // 같은 줄에서 plot(\x, {수식}) 또는 {수식} 파싱 (첫 번째 중괄호 그룹을 수식으로)
+    // 단, node 등의 라벨 중괄호와 구분하기 위해 \\x 또는 plot 컨텍스트가 있는 줄에서만 추출
+    const formulaRe = /plot\s*(?:\([^)]*\))?\s*\{([^{}]+)\}|\\draw[^;]*\{([^{}]+)\}/;
+    lines.forEach((line, idx) => {
+      // 주석 줄 건너뜀
+      if (/^\s*%/.test(line)) return;
+      const dm = line.match(domainRe);
+      if (!dm) return;
+      const start = parseFloat(dm[1]);
+      const end   = parseFloat(dm[2]);
+      // 수식 추출 시도: plot(\x, {수식}) 우선
+      let formula = "";
+      const fm = line.match(formulaRe);
+      if (fm) {
+        formula = (fm[1] ?? fm[2] ?? "").trim();
+      }
+      // 수식을 못 찾으면 그냥 빈 문자열 (라벨에 그래프N으로 표시)
+      results.push({ lineIdx: idx, lineRaw: line, start, end, formula });
+    });
+    return results;
+  };
+
+  const domains = scanDomains();
+
+  // ── Domain 시작/끝 조절 핸들러 ──────────────────────────────
+  //  end: 'start' = A값 조절, 'end' = B값 조절
+  //  delta: ±0.1
+  const handleDomainChange = (idx: number, end: "start" | "end", delta: number) => {
+    const entry = domains[idx];
+    if (!entry) return;
+    // 엄격한 정규식: domain=A:B 패턴을 해당 줄에서만 치환
+    // 다른 좌표나 숫자가 꼬이지 않도록 라인 단위 치환
+    const domainRe = /(domain\s*=\s*)(-?[0-9]+(?:\.[0-9]*)?)\s*:\s*(-?[0-9]+(?:\.[0-9]*)?)/;
+    const lines = rawInput.split("\n");
+    const targetLine = lines[entry.lineIdx];
+    const m = targetLine.match(domainRe);
+    if (!m) { toast.error("domain 패턴을 찾을 수 없습니다."); return; }
+    let newStart = entry.start;
+    let newEnd   = entry.end;
+    if (end === "start") {
+      newStart = parseFloat((newStart + delta).toFixed(2));
+    } else {
+      newEnd = parseFloat((newEnd + delta).toFixed(2));
+    }
+    // 시작 > 끝 역전 방지
+    if (newStart >= newEnd) {
+      toast.error("시작점이 끝점보다 클 수 없습니다.");
+      return;
+    }
+    lines[entry.lineIdx] = targetLine.replace(domainRe, `${m[1]}${newStart}:${newEnd}`);
+    handleRawInputChange(lines.join("\n"));
+    toast.success(`✅ domain: ${newStart} → ${newEnd}`);
+  };
+
+  // ─────────────────────────────────────────────────────────────
   //  점 마커 관리자: \node[circle, fill=black … 라인 추출 & 주석 토글
   // ─────────────────────────────────────────────────────────────
   /**
@@ -933,7 +1118,10 @@ export default function Home() {
   void imgRenderedH;
 
   // ── 잠금 화면 (unauthenticated) ─────────────────────────
-  if (status === "unauthenticated") {
+  // [DEV BYPASS] 로컬 개발 환경에서는 구글 로그인 세션 확인을 건너뜀
+  const isDev = process.env.NODE_ENV === "development";
+
+  if (!isDev && status === "unauthenticated") {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0d1117] text-zinc-100 font-sans p-6">
         {/* 배경 그라디언트 효과 */}
@@ -1022,7 +1210,8 @@ export default function Home() {
   }
 
   // ── 로딩 스피너 (세션 확인 중) ───────────────────────
-  if (status === "loading") {
+  // [DEV BYPASS] 개발 환경에서는 로딩 상태도 건너뜀
+  if (!isDev && status === "loading") {
     return (
       <div className="flex items-center justify-center min-h-screen bg-[#0d1117]">
         <div className="flex flex-col items-center gap-4">
@@ -1390,7 +1579,7 @@ export default function Home() {
       {/* ══════════════════════════════════════════════════════
           FOOTER — 항상 고정 (shrink-0)
       ══════════════════════════════════════════════════════ */}
-      <footer className="shrink-0 border-t border-white/[0.05] bg-[#0a0d12] px-5 py-0 flex items-center gap-5 z-20 shadow-[0_-6px_24px_rgba(0,0,0,0.4)]" style={{ height: "88px" }}>
+      <footer className="relative shrink-0 border-t border-white/[0.05] bg-[#0a0d12] px-5 py-0 flex items-center gap-5 z-20 shadow-[0_-6px_24px_rgba(0,0,0,0.4)]" style={{ height: "88px" }}>
 
         {/* 팀 배너 — object-fit: contain으로 얼굴이 잘리지 않게 */}
         <div className="flex items-center gap-3 shrink-0">
@@ -1415,29 +1604,119 @@ export default function Home() {
 
         <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
 
-        {/* 노드 선택 — 선택된 노드의 실제 텍스트 표시 */}
-        <div className="flex flex-col shrink-0">
+        {/* 노드 다중 선택 — 컴팩트 체크박스 패널 */}
+        <div className="flex flex-col shrink-0" ref={nodeDropdownRef}>
           <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Node</span>
-          <Select
-            value={selectedNodeIndex ?? ""}
-            onValueChange={setSelectedNodeIndex}
+
+          {/* 트리거: 클릭하면 체크박스 리스트 토글 */}
+          <button
+            onClick={() => setIsNodeDropdownOpen(v => !v)}
+            className="w-[210px] h-8 flex items-center justify-between px-2.5 rounded-md
+              border border-zinc-600 bg-zinc-800 hover:border-zinc-400 hover:bg-zinc-700
+              text-[11px] font-medium text-zinc-200 transition-all"
           >
-            <SelectTrigger className="w-[210px] h-8 bg-zinc-900 border-zinc-800 text-[11px] font-medium text-zinc-300">
-              {/* value = srcIndex 문자열. find()로 안전 조회해 표시 */}
-              {selectedNodeIndex !== null && nodes.find(n => n.srcIndex === parseInt(selectedNodeIndex))
-                ? <span className="truncate">{getSelectedNodeLabel()}</span>
-                : <SelectValue placeholder={nodes.length > 0 ? "노드 선택..." : "노드 없음"} />
+            <span className="truncate">
+              {selectedNodeIndices.size === 0
+                ? (nodes.length > 0 ? "노드 선택..." : "노드 없음")
+                : getSelectedNodesLabel()
               }
-            </SelectTrigger>
-            <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
-              {nodes.map((n, i) => (
-                // value = srcIndex (rawInput 내 고유 offset) → 인덱스 밀림 완전 방지
-                <SelectItem key={n.srcIndex} value={n.srcIndex.toString()} className="text-xs">
-                  {i + 1}. {sanitizeLabel(n.content)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            </span>
+            <svg className={`w-3 h-3 shrink-0 text-zinc-400 transition-transform ${isNodeDropdownOpen ? "rotate-180" : ""}`}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {/* 체크박스 패널 — 맨처음에 나타남 (absolute) */}
+          {isNodeDropdownOpen && nodes.length > 0 && (
+            <div
+              className="absolute bottom-full mb-1.5 z-50 w-[240px]
+                rounded-xl border border-zinc-600 shadow-2xl shadow-black/60
+                overflow-hidden"
+              style={{ background: "linear-gradient(160deg, #1a1d26 0%, #13151e 100%)" }}
+            >
+              {/* 헤더: 전체 선택/해제 */}
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-700/60 bg-black/20">
+                <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wide">
+                  {selectedNodeIndices.size > 0 ? `${selectedNodeIndices.size}개 선택됨` : "노드 선택"}
+                </span>
+                <div className="flex gap-1.5">
+                  <button
+                    onClick={() => setSelectedNodeIndices(new Set(nodes.map((n, i) => i.toString())))}
+                    className="text-[8px] px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-blue-800/60
+                      border border-zinc-500 hover:border-blue-500 text-zinc-300 hover:text-blue-200 transition-all"
+                  >전체</button>
+                  <button
+                    onClick={() => setSelectedNodeIndices(new Set())}
+                    className="text-[8px] px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600
+                      border border-zinc-500 text-zinc-300 hover:text-white transition-all"
+                  >해제</button>
+                </div>
+              </div>
+
+              {/* 노드 리스트 */}
+              <ul className="max-h-[180px] overflow-y-auto py-1">
+                {nodes.map((n, i) => {
+                  const isChecked = selectedNodeIndices.has(i.toString());
+                  return (
+                    <li key={n.srcIndex}>
+                      <label
+                        className={`flex items-center gap-2 px-3 py-1 cursor-pointer transition-colors
+                          ${isChecked
+                            ? "bg-blue-900/30 hover:bg-blue-900/50"
+                            : "hover:bg-zinc-700/50"
+                          }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => {
+                            setSelectedNodeIndices(prev => {
+                              const next = new Set(prev);
+                              if (next.has(i.toString())) next.delete(i.toString());
+                              else next.add(i.toString());
+                              return next;
+                            });
+                          }}
+                          className="accent-blue-500 w-3 h-3 shrink-0"
+                        />
+                        <span className={`text-[11px] truncate ${isChecked ? "text-blue-200 font-bold" : "text-zinc-300"}`}>
+                          {i + 1}. {sanitizeLabel(n.content)}
+                        </span>
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+
+              {/* 선택된 태그 표시 (2개 이상) */}
+              {selectedNodeIndices.size >= 2 && (
+                <div className="px-2.5 py-1.5 border-t border-zinc-700/60 bg-black/20 flex flex-wrap gap-1">
+                  {nodes
+                    .filter((n, i) => selectedNodeIndices.has(i.toString()))
+                    .slice(0, 5)
+                    .map((n) => (
+                      <span key={n.srcIndex}
+                        className="text-[8px] bg-blue-900/50 border border-blue-700/60 text-blue-200 rounded px-1 py-0.5 font-bold">
+                        {nodes.indexOf(n) + 1}. {sanitizeLabel(n.content).slice(0, 8)}
+                      </span>
+                    ))}
+                  {selectedNodeIndices.size > 5 && (
+                    <span className="text-[8px] text-zinc-500">+{selectedNodeIndices.size - 5}개</span>
+                  )}
+                </div>
+              )}
+
+              {/* 푸터: 닫기 */}
+              <div className="px-3 py-1 border-t border-zinc-700/60 bg-black/20 flex justify-end">
+                <button
+                  onClick={() => setIsNodeDropdownOpen(false)}
+                  className="text-[8px] font-bold text-zinc-400 hover:text-white transition-colors px-2 py-0.5
+                    rounded bg-zinc-700/60 hover:bg-zinc-600"
+                >닫기</button>
+              </div>
+            </div>
+          )}
         </div>
 
         <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
@@ -1652,19 +1931,32 @@ export default function Home() {
 
         <Separator orientation="vertical" className="h-10 bg-zinc-800/60" />
 
-        {/* 점 마커 관리 버튼 */}
+        {/* 점 & 그래프 제어 버튼 */}
         <button
           onClick={() => setIsPointManagerOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-3 py-1.5 rounded-lg border border-zinc-700/60 bg-zinc-900/80 hover:bg-fuchsia-950/40 hover:border-fuchsia-700/60 transition-all group"
-          title="\node[circle, fill=black 마커 목록을 보고 개별 삭제합니다"
+          className="flex flex-col items-center justify-center gap-0.5 shrink-0 px-3 py-1.5 rounded-lg
+            border border-zinc-500/70 bg-zinc-800/90
+            hover:bg-fuchsia-900/40 hover:border-fuchsia-500/80
+            transition-all group"
+          style={{ boxShadow: "0 0 0 0 rgba(216,180,254,0)" }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.boxShadow =
+              "0 0 8px 2px rgba(216,180,254,0.18)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.boxShadow = "";
+          }}
+          title="점 마커 & 그래프 Domain 제어 패널 열기"
         >
-          <span className="text-[9px] font-bold text-zinc-400 group-hover:text-fuchsia-400 uppercase tracking-wider transition-colors">
-            점 마커 관리
+          <span className="text-[9px] font-bold text-gray-200 group-hover:text-fuchsia-300 uppercase tracking-wider transition-colors">
+            점 &amp; 그래프 제어
           </span>
-          <span className="text-[11px] font-black text-zinc-300 group-hover:text-fuchsia-300 transition-colors">
+          <span className="text-[11px] font-black text-gray-100 group-hover:text-fuchsia-200 transition-colors">
             {extractedPoints.length > 0
               ? `● ${extractedPoints.length}개`
-              : "없음"}
+              : domains.length > 0
+                ? `📈 ${domains.length}개`
+                : "패널 열기"}
           </span>
         </button>
 
@@ -1749,8 +2041,8 @@ export default function Home() {
               <button
                 onClick={() => handleToggleAllPoints("on")}
                 className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[9px] font-bold
-                           bg-fuchsia-950/60 border border-fuchsia-800/40 text-fuchsia-300
-                           hover:bg-fuchsia-900/60 hover:border-fuchsia-600/60 hover:text-white transition-all"
+                           bg-fuchsia-900/50 border border-fuchsia-700/60 text-fuchsia-200
+                           hover:bg-fuchsia-800/70 hover:border-fuchsia-500/80 hover:text-white transition-all"
                 title="하이라이트된 모든 점 표시"
               >
                 <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1762,8 +2054,8 @@ export default function Home() {
               <button
                 onClick={() => handleToggleAllPoints("off")}
                 className="flex-1 flex items-center justify-center gap-1 py-1 rounded-md text-[9px] font-bold
-                           bg-zinc-900/60 border border-zinc-700/40 text-zinc-400
-                           hover:bg-zinc-800/60 hover:border-zinc-500/60 hover:text-white transition-all"
+                           bg-zinc-800/70 border border-zinc-600/60 text-zinc-300
+                           hover:bg-zinc-700/80 hover:border-zinc-400/70 hover:text-white transition-all"
                 title="모든 점 숨김"
               >
                 <svg className="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1790,19 +2082,19 @@ export default function Home() {
                       key={idx}
                       className={`flex items-center gap-1.5 rounded-lg px-2 py-1 border transition-all ${
                         isCommented
-                          ? "bg-zinc-900/30 border-zinc-800/30 opacity-40"
-                          : "bg-zinc-900/60 border-zinc-800/50 hover:border-fuchsia-800/50"
+                          ? "bg-zinc-900/40 border-zinc-700/40 opacity-60"
+                          : "bg-zinc-900/60 border-zinc-700/60 hover:border-fuchsia-700/60"
                       }`}
                     >
                       {/* 순번 */}
-                      <span className="shrink-0 w-4 h-4 rounded-full bg-zinc-800 border border-zinc-700 text-zinc-600 text-[7px] font-bold flex items-center justify-center">
+                      <span className="shrink-0 w-4 h-4 rounded-full bg-zinc-700 border border-zinc-500 text-zinc-400 text-[7px] font-bold flex items-center justify-center">
                         {idx + 1}
                       </span>
                       {/* 좌표 배지 */}
                       <span className={`flex-1 text-[10px] font-mono font-bold rounded px-1.5 py-0.5 border ${
                         isCommented
-                          ? "text-zinc-600 bg-zinc-800/30 border-zinc-700/20"
-                          : "text-fuchsia-300/90 bg-fuchsia-950/40 border-fuchsia-900/30"
+                          ? "text-zinc-400 bg-zinc-800/50 border-zinc-600/40"
+                          : "text-fuchsia-300/90 bg-fuchsia-950/40 border-fuchsia-800/40"
                       }`}>
                         ({coord})
                       </span>
@@ -1811,8 +2103,8 @@ export default function Home() {
                         onClick={() => handleTogglePoint(raw, isCommented)}
                         className={`shrink-0 w-6 h-6 rounded flex items-center justify-center border transition-all ${
                           isCommented
-                            ? "text-zinc-600 hover:text-fuchsia-400 bg-zinc-900 border-zinc-700 hover:border-fuchsia-700"
-                            : "text-fuchsia-400 bg-fuchsia-950/40 border-fuchsia-900/40 hover:border-fuchsia-500"
+                            ? "text-zinc-400 hover:text-fuchsia-300 bg-zinc-800 border-zinc-500 hover:border-fuchsia-600"
+                            : "text-fuchsia-300 bg-fuchsia-900/40 border-fuchsia-700/60 hover:border-fuchsia-400"
                         }`}
                         title={isCommented ? "표시 (% 해제)" : "숨김 (% 주석)"}
                       >
@@ -1838,7 +2130,82 @@ export default function Home() {
 
           {/* 힌트 */}
           <div className="px-3 py-1.5 border-t border-fuchsia-900/20 bg-black/20">
-            <p className="text-[8px] text-zinc-700">👁 토글 = <code className="text-zinc-600">%</code> 주석 스위치 · 위쪽 버튼으로 일괄 처리</p>
+            <p className="text-[8px] text-zinc-500">👁 토글 = <code className="text-zinc-400">%</code> 주석 스위치 · 위쪽 버튼으로 일괄 처리</p>
+          </div>
+
+          {/* ── 📈 그래프 길이(Domain) 제어 섹션 ── */}
+          <div className="border-t border-fuchsia-900/30">
+            {/* 섹션 헤더 */}
+            <div className="flex items-center gap-2 px-3 py-2 bg-black/20">
+              <span className="text-[10px]">📈</span>
+              <span className="text-[10px] font-black text-emerald-400 tracking-wide">그래프 길이 (Domain)</span>
+              {domains.length > 0 && (
+                <span className="text-[8px] text-zinc-600">{domains.length}개</span>
+              )}
+            </div>
+
+            {domains.length === 0 ? (
+              <p className="text-[9px] text-zinc-700 text-center py-3 px-2">
+                <code className="text-zinc-600">domain=A:B</code> 패턴 없음
+              </p>
+            ) : (
+              <ul className="space-y-1.5 px-2.5 pb-2">
+                {domains.map((entry, idx) => {
+                  // formatDomainLabel: UI 표시 전용 — 원본 entry.formula 는 불변
+                  const label = entry.formula
+                    ? formatDomainLabel(entry.formula)
+                    : `그래프 ${idx + 1}`;
+                  return (
+                    <li key={idx} className="rounded-lg border border-emerald-900/40 bg-zinc-900/60 px-2 py-1.5">
+                      {/* 수식 라벨 */}
+                      <div className="mb-1.5 flex items-center gap-1">
+                        <span className="text-[8px] font-bold text-emerald-500/70">y =</span>
+                        <span
+                          className="flex-1 text-[9px] font-mono font-bold text-emerald-300/90 truncate"
+                          title={label}
+                        >
+                          {label}
+                        </span>
+                      </div>
+                      {/* 시작점(A) 제어 */}
+                      <div className="flex items-center gap-1 mb-1">
+                        <span className="w-[36px] text-[8px] font-bold text-zinc-500 shrink-0">시작점</span>
+                        <span className="flex-1 text-[9px] font-mono text-zinc-400 text-center">
+                          {entry.start}
+                        </span>
+                        <button
+                          onClick={() => handleDomainChange(idx, "start", -0.1)}
+                          className="w-5 h-5 rounded bg-zinc-700 hover:bg-emerald-800/80 border border-zinc-500 hover:border-emerald-500 text-zinc-200 hover:text-emerald-200 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                          title={`시작점 ${entry.start} → ${(entry.start - 0.1).toFixed(1)}`}
+                        >&minus;</button>
+                        <button
+                          onClick={() => handleDomainChange(idx, "start", 0.1)}
+                          className="w-5 h-5 rounded bg-zinc-700 hover:bg-emerald-800/80 border border-zinc-500 hover:border-emerald-500 text-zinc-200 hover:text-emerald-200 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                          title={`시작점 ${entry.start} → ${(entry.start + 0.1).toFixed(1)}`}
+                        >+</button>
+                      </div>
+                      {/* 끝점(B) 제어 */}
+                      <div className="flex items-center gap-1">
+                        <span className="w-[36px] text-[8px] font-bold text-zinc-500 shrink-0">끝점</span>
+                        <span className="flex-1 text-[9px] font-mono text-zinc-400 text-center">
+                          {entry.end}
+                        </span>
+                        <button
+                          onClick={() => handleDomainChange(idx, "end", -0.1)}
+                          className="w-5 h-5 rounded bg-zinc-700 hover:bg-blue-800/80 border border-zinc-500 hover:border-blue-500 text-zinc-200 hover:text-blue-200 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                          title={`끝점 ${entry.end} → ${(entry.end - 0.1).toFixed(1)}`}
+                        >&minus;</button>
+                        <button
+                          onClick={() => handleDomainChange(idx, "end", 0.1)}
+                          className="w-5 h-5 rounded bg-zinc-700 hover:bg-blue-800/80 border border-zinc-500 hover:border-blue-500 text-zinc-200 hover:text-blue-200 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                          title={`끝점 ${entry.end} → ${(entry.end + 0.1).toFixed(1)}`}
+                        >+</button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </div>
       )}
@@ -2177,7 +2544,9 @@ export default function Home() {
                 <ul className="space-y-2.5 pl-1">
                   <li className="flex items-start gap-2">
                     <span className="shrink-0 mt-0.5 inline-block bg-zinc-800 border border-zinc-700 text-zinc-300 text-[10px] font-bold px-2 py-0.5 rounded font-mono">노드 선택…</span>
-                    <span><strong className="text-zinc-200">(드롭다운)</strong> 위치나 크기를 바꾸고 싶은 특정 글자/수식을 목록에서 선택합니다.</span>
+                    <span>
+                      <strong className="text-zinc-200">(다중 선택 지원)</strong> 이제 노드를 여러 개 동시에 제어할 수 있습니다! 노드 선택 드롭다운에서 체크박스로 원하는 점과 수식을 여러 개 선택한 뒤, 조이스틱을 움직이거나 폰트 크기(A+/A-)를 조절하면 선택된 모든 항목에 한 번에 일괄 적용됩니다.
+                    </span>
                   </li>
                   <li className="flex items-start gap-2 flex-wrap gap-y-1">
                     <span className="shrink-0 mt-0.5 flex gap-1">
@@ -2185,14 +2554,14 @@ export default function Home() {
                         <kbd key={c} className="inline-flex items-center justify-center w-6 h-6 bg-zinc-800 border border-zinc-600 text-zinc-300 text-[11px] font-bold rounded shadow-sm">{c}</kbd>
                       ))}
                     </span>
-                    <span><strong className="text-zinc-200">(JOYSTICK)</strong> 선택된 노드를 1pt 단위로 상하좌우 미세 이동시킵니다.</span>
+                    <span><strong className="text-zinc-200">(JOYSTICK)</strong> 선택된 노드(들)를 1pt 단위로 상하좌우 미세 이동시킵니다.</span>
                   </li>
                   <li className="flex items-start gap-2">
                     <span className="shrink-0 mt-0.5 flex gap-1">
                       <kbd className="inline-flex items-center justify-center px-2 h-6 bg-violet-900/60 border border-violet-700/60 text-violet-300 text-[11px] font-black rounded shadow-sm">A＋</kbd>
                       <kbd className="inline-flex items-center justify-center px-2 h-6 bg-violet-900/60 border border-violet-700/60 text-violet-300 text-[11px] font-black rounded shadow-sm">A－</kbd>
                     </span>
-                    <span><strong className="text-zinc-200">(NODE FONT)</strong> <strong className="text-violet-300">선택된 특정 노드 하나</strong>의 글자 크기만 개별적으로 키우거나 줄입니다.</span>
+                    <span><strong className="text-zinc-200">(NODE FONT)</strong> 선택된 특정 노드(들)의 글자 크기를 개별적으로 키우거나 줄입니다.</span>
                   </li>
                 </ul>
               </div>
@@ -2269,21 +2638,32 @@ export default function Home() {
                 </ul>
               </div>
 
-              {/* 섹션 3 — 점 마커 관리자 (신규 추가) */}
+              {/* 섹션 3 — 점 & 그래프 제어 (신규 기능 통합) */}
               <div>
                 <h4 className="text-[13px] font-black text-white mb-2.5 flex items-center gap-2">
-                  <span className="text-base">🟣</span> 4. 점 마커 관리 (Point Markers)
+                  <span className="text-base">🟣</span> 4. 점 & 그래프 제어 (Markers & Domain)
                   <span className="text-[10px] font-semibold text-zinc-600 bg-zinc-800/60 px-2 py-0.5 rounded-full">하단 패널</span>
                 </h4>
                 <ul className="space-y-2.5 pl-1">
                   <li className="flex items-start gap-2">
                     <span className="shrink-0 mt-0.5 flex gap-1 items-center">
-                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-fuchsia-300 text-[10px] font-bold px-2 py-0.5 rounded">
-                        점 마커 관리
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-cyan-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        📈 그래프 길이(Domain)
                       </span>
                     </span>
                     <span>
-                      화면 하단의 [점 마커 관리] 버튼을 누르면 <strong className="text-zinc-200">화면 내에서 자유롭게 이동 가능한 패널</strong>이 열립니다.{" "}
+                      하단 [점 & 그래프 제어] 패널에서 곡선 및 직선의 시작점과 끝점을 0.1 단위로 쉽게 늘리고 줄일 수 있습니다.<br />
+                      <span className="text-zinc-500 text-[11px]">(💡 팁: AI가 코드를 생성할 때 직선도 <code className="text-zinc-400 bg-zinc-800 px-1 rounded text-[10px]">domain</code> 범위를 사용하여 그리도록 프롬프트를 작성하면 이 기능이 활성화됩니다.)</span>
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="shrink-0 mt-0.5 flex gap-1 items-center">
+                      <span className="inline-flex items-center gap-1 bg-zinc-800 border border-zinc-700 text-fuchsia-300 text-[10px] font-bold px-2 py-0.5 rounded">
+                        점 & 그래프 제어
+                      </span>
+                    </span>
+                    <span>
+                      화면 하단의 [점 & 그래프 제어] 버튼을 누르면 <strong className="text-zinc-200">화면 내에서 자유롭게 이동 가능한 패널</strong>이 열립니다.{" "}
                       드래그하여 원하는 위치에 배치하세요.
                     </span>
                   </li>
