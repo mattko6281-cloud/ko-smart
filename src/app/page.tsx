@@ -201,6 +201,7 @@ export default function Home() {
   const [rawInput,       setRawInput]       = useState("");
   const [debouncedInput, setDebouncedInput] = useState("");
   const [svgUrl,         setSvgUrl]         = useState("");  // Kroki SVG GET URL
+  const [renderEngine,   setRenderEngine]   = useState("public");
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderError,    setRenderError]    = useState("");
   const [isDownloading,  setIsDownloading]  = useState(false);
@@ -1253,12 +1254,31 @@ export default function Home() {
 
         <div className="h-7 w-px bg-zinc-800 mx-1" />
 
-        {/* Kroki 상태 */}
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-950/30 border border-blue-800/25">
-          <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-          <CloudCog className="w-3 h-3 text-blue-400" />
-          <span className="text-[10px] font-bold text-blue-300/80 tracking-wider">Kroki · TeXLive</span>
-        </div>
+        {/* Kroki 렌더링 엔진 선택 드롭다운 */}
+        <Select
+          value={renderEngine}
+          onValueChange={(val) => {
+            if (val === "private") {
+              toast.info("전용 서버 구축 예정입니다.");
+            } else {
+              setRenderEngine(val);
+            }
+          }}
+        >
+          <SelectTrigger className="flex items-center gap-1.5 h-[26px] px-2.5 rounded-full bg-blue-950/30 border border-blue-800/25 text-[10px] font-bold text-blue-300/80 tracking-wider shadow-none hover:bg-blue-900/40 focus:ring-0 focus:ring-offset-0 transition-colors w-auto min-w-max outline-none">
+            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
+            <CloudCog className="w-3 h-3 text-blue-400 shrink-0" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-zinc-900 border-zinc-800 shadow-2xl">
+            <SelectItem value="public" className="text-[11px] text-zinc-300 focus:bg-blue-900/30 focus:text-blue-300 cursor-pointer">
+              Kroki (공용 서버 - 기본)
+            </SelectItem>
+            <SelectItem value="private" className="text-[11px] text-zinc-300 focus:bg-blue-900/30 focus:text-blue-300 cursor-pointer">
+              Kroki (사내 전용 서버 - 준비중)
+            </SelectItem>
+          </SelectContent>
+        </Select>
 
         {/* ── 프롬프트 가이드 버튼 그룹 ── */}
         <div className="flex items-center gap-2">
