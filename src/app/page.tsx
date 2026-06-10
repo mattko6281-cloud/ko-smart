@@ -34,8 +34,9 @@ function encodeKroki(source: string): string {
     binary += String.fromCharCode(...compressed.subarray(i, i + CHUNK));
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
 }
-function krokiUrl(source: string, format: "svg" | "png") {
-  return `https://kroki.io/tikz/${format}/${encodeKroki(source)}`;
+function krokiUrl(source: string, format: "svg" | "png", engine: string) {
+  const baseUrl = engine === "private" ? "/api/kroki" : "https://kroki.io";
+  return `${baseUrl}/tikz/${format}/${encodeKroki(source)}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -201,7 +202,7 @@ export default function Home() {
   const [rawInput,       setRawInput]       = useState("");
   const [debouncedInput, setDebouncedInput] = useState("");
   const [svgUrl,         setSvgUrl]         = useState("");  // Kroki SVG GET URL
-  const [renderEngine,   setRenderEngine]   = useState("public");
+  const [renderEngine,   setRenderEngine]   = useState("private");
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderError,    setRenderError]    = useState("");
   const [isDownloading,  setIsDownloading]  = useState(false);
@@ -324,14 +325,14 @@ export default function Home() {
       setIsRendering(true);
       setRenderError("");
       setImgRenderedH(0);
-      setSvgUrl(krokiUrl(debouncedInput, "svg"));
+      setSvgUrl(krokiUrl(debouncedInput, "svg", renderEngine));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Kroki encode error]", err);
       setRenderError("인코딩 오류: " + msg);
       setIsRendering(false);
     }
-  }, [debouncedInput]);
+  }, [debouncedInput, renderEngine]);
 
   // ── 이미지 로드 완료 핸들러 ─────────────────────────────────
   const handleImgLoad = useCallback(() => {
@@ -346,7 +347,7 @@ export default function Home() {
   const handleDownloadPng = async () => {
     if (!debouncedInput.trim()) { toast.error("다운로드할 코드가 없습니다."); return; }
     setIsDownloading(true);
-    const url = krokiUrl(debouncedInput, "png");
+    const url = krokiUrl(debouncedInput, "png", renderEngine);
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
