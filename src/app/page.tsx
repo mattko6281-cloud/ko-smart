@@ -1387,7 +1387,7 @@ export default function Home() {
       {/* ── Dedicated Server Banner ── */}
       {renderEngine === "private" && (
         <div 
-          className={`bg-emerald-500/10 border-b border-emerald-500/20 px-4 flex items-center justify-between z-20 shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
+          className={`relative bg-emerald-500/10 border-b border-emerald-500/20 px-4 flex items-center justify-center z-20 shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
             showBanner ? "py-1.5 opacity-100 max-h-12" : "py-0 opacity-0 max-h-0 border-transparent"
           }`}
         >
@@ -1399,7 +1399,7 @@ export default function Home() {
           </div>
           <button
             onClick={() => setShowBanner(false)}
-            className="text-emerald-600/80 hover:text-emerald-300 hover:bg-emerald-500/20 p-0.5 rounded transition-colors"
+            className="absolute right-4 top-1/2 -translate-y-1/2 text-emerald-600/80 hover:text-emerald-300 hover:bg-emerald-500/20 p-0.5 rounded transition-colors"
             title="닫기"
           >
             <X className="w-3.5 h-3.5" />
