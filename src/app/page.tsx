@@ -1532,7 +1532,7 @@ export default function Home() {
           </div>
 
           {/* ── Preview Panel ─────────────────────────────── */}
-          <div className="flex-1 rounded-xl border border-zinc-800/60 overflow-hidden shadow-2xl shadow-black/40 relative bg-white">
+          <div className="flex-1 rounded-xl border border-zinc-800/60 overflow-auto shadow-2xl shadow-black/40 relative bg-white">
 
             {/* 로딩 오버레이 */}
             {isRendering && (
