@@ -203,6 +203,7 @@ export default function Home() {
   const [debouncedInput, setDebouncedInput] = useState("");
   const [svgUrl,         setSvgUrl]         = useState("");  // Kroki SVG GET URL
   const [renderEngine,   setRenderEngine]   = useState("private");
+  const [showBanner,     setShowBanner]     = useState(true);
   const [isRendering,    setIsRendering]    = useState(false);
   const [renderError,    setRenderError]    = useState("");
   const [isDownloading,  setIsDownloading]  = useState(false);
@@ -1385,11 +1386,24 @@ export default function Home() {
 
       {/* ── Dedicated Server Banner ── */}
       {renderEngine === "private" && (
-        <div className="bg-emerald-500/10 border-b border-emerald-500/20 py-1.5 px-4 flex items-center justify-center gap-2 z-20 shrink-0">
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-[11px] font-medium text-emerald-400 tracking-wide">
-            🚀 KO-SMART 사내 전용 렌더링 서버가 가동 중입니다. (속도 향상 및 무제한 렌더링)
-          </span>
+        <div 
+          className={`bg-emerald-500/10 border-b border-emerald-500/20 px-4 flex items-center justify-between z-20 shrink-0 transition-all duration-300 ease-in-out overflow-hidden ${
+            showBanner ? "py-1.5 opacity-100 max-h-12" : "py-0 opacity-0 max-h-0 border-transparent"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-[11px] font-medium text-emerald-400 tracking-wide">
+              🚀 KO-SMART 사내 전용 렌더링 서버가 가동 중입니다. (속도 향상 및 무제한 렌더링)
+            </span>
+          </div>
+          <button
+            onClick={() => setShowBanner(false)}
+            className="text-emerald-600/80 hover:text-emerald-300 hover:bg-emerald-500/20 p-0.5 rounded transition-colors"
+            title="닫기"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
