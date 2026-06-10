@@ -1260,24 +1260,22 @@ export default function Home() {
           value={renderEngine}
           onValueChange={(val) => {
             if (!val) return;
-            if (val === "private") {
-              toast.info("전용 서버 구축 예정입니다.");
-            } else {
-              setRenderEngine(val);
-            }
+            setRenderEngine(val);
           }}
         >
-          <SelectTrigger className="flex items-center gap-1.5 h-[26px] px-2.5 rounded-full bg-blue-950/30 border border-blue-800/25 text-[10px] font-bold text-blue-300/80 tracking-wider shadow-none hover:bg-blue-900/40 focus:ring-0 focus:ring-offset-0 transition-colors w-auto min-w-max outline-none">
-            <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
-            <CloudCog className="w-3 h-3 text-blue-400 shrink-0" />
-            <SelectValue />
+          <SelectTrigger className={`flex items-center gap-1.5 h-[26px] px-2.5 rounded-full ${renderEngine === "private" ? "bg-emerald-950/30 border-emerald-800/25 text-emerald-300/80 hover:bg-emerald-900/40" : "bg-blue-950/30 border-blue-800/25 text-blue-300/80 hover:bg-blue-900/40"} border text-[10px] font-bold tracking-wider shadow-none focus:ring-0 focus:ring-offset-0 transition-colors w-auto min-w-max outline-none`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${renderEngine === "private" ? "bg-emerald-400" : "bg-blue-400"} animate-pulse shrink-0`} />
+            <CloudCog className={`w-3 h-3 ${renderEngine === "private" ? "text-emerald-400" : "text-blue-400"} shrink-0`} />
+            <SelectValue placeholder={renderEngine === "private" ? "Dedicated (사내 전용)" : "Public (공용)"}>
+              {renderEngine === "private" ? "Dedicated (사내 전용)" : "Public (공용)"}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent className="bg-zinc-900 border-zinc-800 shadow-2xl">
             <SelectItem value="public" className="text-[11px] text-zinc-300 focus:bg-blue-900/30 focus:text-blue-300 cursor-pointer">
-              Kroki (공용 서버 - 기본)
+              Public Engine (공용)
             </SelectItem>
-            <SelectItem value="private" className="text-[11px] text-zinc-300 focus:bg-blue-900/30 focus:text-blue-300 cursor-pointer">
-              Kroki (사내 전용 서버 - 준비중)
+            <SelectItem value="private" className="text-[11px] text-emerald-300 focus:bg-emerald-900/30 focus:text-emerald-300 cursor-pointer">
+              Dedicated Engine (사내 전용)
             </SelectItem>
           </SelectContent>
         </Select>
@@ -1384,6 +1382,16 @@ export default function Home() {
           </Button>
         </div>
       </header>
+
+      {/* ── Dedicated Server Banner ── */}
+      {renderEngine === "private" && (
+        <div className="bg-emerald-500/10 border-b border-emerald-500/20 py-1.5 px-4 flex items-center justify-center gap-2 z-20 shrink-0">
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-[11px] font-medium text-emerald-400 tracking-wide">
+            🚀 KO-SMART 사내 전용 렌더링 서버가 가동 중입니다. (속도 향상 및 무제한 렌더링)
+          </span>
+        </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════
           MAIN — Code Editor  |  Preview
