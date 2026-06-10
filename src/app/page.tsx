@@ -1258,6 +1258,7 @@ export default function Home() {
         <Select
           value={renderEngine}
           onValueChange={(val) => {
+            if (!val) return;
             if (val === "private") {
               toast.info("전용 서버 구축 예정입니다.");
             } else {
