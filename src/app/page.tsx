@@ -239,6 +239,43 @@ export default function Home() {
   // KICE 검수 가이드 모달
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
 
+  // ── 렌더링 프리뷰 화면 마우스 드래그 스크롤 (Drag to Pan) ──
+  const previewContainerRef = useRef<HTMLDivElement>(null);
+  const [isPreviewDragging, setIsPreviewDragging] = useState(false);
+  const previewDragRef = useRef<{ startX: number; startY: number; scrollLeft: number; scrollTop: number } | null>(null);
+
+  const handlePreviewMouseDown = (e: React.MouseEvent) => {
+    if (!previewContainerRef.current) return;
+    setIsPreviewDragging(true);
+    previewDragRef.current = {
+      startX: e.pageX - previewContainerRef.current.offsetLeft,
+      startY: e.pageY - previewContainerRef.current.offsetTop,
+      scrollLeft: previewContainerRef.current.scrollLeft,
+      scrollTop: previewContainerRef.current.scrollTop,
+    };
+  };
+
+  const handlePreviewMouseLeave = () => {
+    setIsPreviewDragging(false);
+    previewDragRef.current = null;
+  };
+
+  const handlePreviewMouseUp = () => {
+    setIsPreviewDragging(false);
+    previewDragRef.current = null;
+  };
+
+  const handlePreviewMouseMove = (e: React.MouseEvent) => {
+    if (!isPreviewDragging || !previewContainerRef.current || !previewDragRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - previewContainerRef.current.offsetLeft;
+    const y = e.pageY - previewContainerRef.current.offsetTop;
+    const walkX = x - previewDragRef.current.startX;
+    const walkY = y - previewDragRef.current.startY;
+    previewContainerRef.current.scrollLeft = previewDragRef.current.scrollLeft - walkX;
+    previewContainerRef.current.scrollTop = previewDragRef.current.scrollTop - walkY;
+  };
+
 
 
   // USAGE_ENTER 중복 실행 방지 ref
@@ -271,6 +308,27 @@ export default function Home() {
     logUserAction("USAGE_ENTER", email);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
+
+  // ── 노드 선택 드롭다운 외부 클릭 시 닫기 및 상태 초기화 ──
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      
+      // 하단 컨트롤 패널 전체 영역(footer) 클릭 시 예외 처리 (Safe Zone)
+      if (target.closest("footer")) return;
+
+      if (
+        isNodeDropdownOpen &&
+        nodeDropdownRef.current &&
+        !nodeDropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsNodeDropdownOpen(false);
+        setSelectedNodeIndices(new Set()); // 다중 선택된 노드 모두 초기화
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isNodeDropdownOpen]);
 
   // 사용 설명서 열기 핸들러
   const handleOpenHelp = () => {
@@ -1577,11 +1635,17 @@ export default function Home() {
 
             {svgUrl && (
               <div
+                ref={previewContainerRef}
+                onMouseDown={handlePreviewMouseDown}
+                onMouseLeave={handlePreviewMouseLeave}
+                onMouseUp={handlePreviewMouseUp}
+                onMouseMove={handlePreviewMouseMove}
                 style={{
                   width: "100%",
                   height: "100%",
                   overflow: "auto",
                   background: "white",
+                  cursor: isPreviewDragging ? "grabbing" : "grab",
                 }}
               >
                 <div
@@ -1776,24 +1840,24 @@ export default function Home() {
             </span>
             <div className="flex items-center gap-1">
               <Button variant="outline" size="icon"
-                className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
+                className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
                 onClick={() => handleShift("x", -1)}>
                 <ChevronLeft className="w-3.5 h-3.5" />
               </Button>
               <div className="flex flex-col gap-1">
                 <Button variant="outline" size="icon"
-                  className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
+                  className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
                   onClick={() => handleShift("y", 1)}>
                   <ChevronUp className="w-3.5 h-3.5" />
                 </Button>
                 <Button variant="outline" size="icon"
-                  className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
+                  className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
                   onClick={() => handleShift("y", -1)}>
                   <ChevronDown className="w-3.5 h-3.5" />
                 </Button>
               </div>
               <Button variant="outline" size="icon"
-                className="w-7 h-7 rounded-full border-zinc-800 bg-zinc-900 hover:bg-blue-900/40 hover:border-blue-700 hover:text-blue-400 transition-all"
+                className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
                 onClick={() => handleShift("x", 1)}>
                 <ChevronRight className="w-3.5 h-3.5" />
               </Button>
@@ -1808,12 +1872,12 @@ export default function Home() {
             <div className="flex flex-col gap-1">
               <button
                 onClick={() => handleNodeFontScale(0.1)}
-                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-300 text-[11px] font-black transition-all"
+                className="w-[54px] h-7 rounded-md border border-zinc-600 bg-zinc-800 hover:bg-violet-900/50 hover:border-violet-500 text-zinc-200 hover:text-violet-300 text-[11px] font-black transition-all"
                 title="선택된 노드 폰트 크기 10% 증감"
               >A＋</button>
               <button
                 onClick={() => handleNodeFontScale(-0.1)}
-                className="w-[54px] h-7 rounded-md border border-zinc-800 bg-zinc-900 hover:bg-violet-900/40 hover:border-violet-700 hover:text-violet-300 text-zinc-300 text-[11px] font-black transition-all"
+                className="w-[54px] h-7 rounded-md border border-zinc-600 bg-zinc-800 hover:bg-violet-900/50 hover:border-violet-500 text-zinc-200 hover:text-violet-300 text-[11px] font-black transition-all"
                 title="선택된 노드 폰트 크기 10% 증감"
               >A－</button>
             </div>
@@ -1828,23 +1892,23 @@ export default function Home() {
           <div className="grid grid-cols-2 gap-1">
 
             {/* 전체 폰트 */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+            <div className="flex items-center gap-1 bg-zinc-800/80 border border-zinc-600/80 rounded-md px-1.5 py-1">
               <Type className="w-2.5 h-2.5 text-violet-400 shrink-0" />
               <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">폰트</span>
               <button
                 onClick={() => handleGlobalFontScale(-0.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-300 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-violet-900/50 border border-zinc-500 hover:border-violet-600 text-zinc-200 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="전체 노드 폰트 크기 감소"
               >−</button>
               <button
                 onClick={() => handleGlobalFontScale(0.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-violet-900/50 border border-zinc-700 hover:border-violet-700 text-zinc-300 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-violet-900/50 border border-zinc-500 hover:border-violet-600 text-zinc-200 hover:text-violet-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="전체 노드 폰트 크기 증가"
               >+</button>
             </div>
 
             {/* 선두께 */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+            <div className="flex items-center gap-1 bg-zinc-800/80 border border-zinc-600/80 rounded-md px-1.5 py-1">
               <svg className="w-2.5 h-2.5 text-cyan-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" d="M3 12h18" />
                 <path strokeLinecap="round" strokeWidth={1} d="M3 7h18M3 17h18" />
@@ -1852,48 +1916,48 @@ export default function Home() {
               <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">두께</span>
               <button
                 onClick={() => handleGlobalLineWidth(0.9)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-300 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-cyan-900/50 border border-zinc-500 hover:border-cyan-600 text-zinc-200 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="선 두께 10% 감소 (배율 적용)"
               >−</button>
               <button
                 onClick={() => handleGlobalLineWidth(1.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-cyan-900/50 border border-zinc-700 hover:border-cyan-700 text-zinc-300 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-cyan-900/50 border border-zinc-500 hover:border-cyan-600 text-zinc-200 hover:text-cyan-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="선 두께 10% 증가 (배율 적용)"
               >+</button>
             </div>
 
             {/* 가로 (X) */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+            <div className="flex items-center gap-1 bg-zinc-800/80 border border-zinc-600/80 rounded-md px-1.5 py-1">
               <svg className="w-2.5 h-2.5 text-emerald-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h16M8 8l-4 4 4 4M16 8l4 4-4 4" />
               </svg>
               <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">가로</span>
               <button
                 onClick={() => handleCanvasScale("x", 0.9)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-300 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-emerald-900/50 border border-zinc-500 hover:border-emerald-600 text-zinc-200 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="가로 비율 10% 감소 (x=Ncm 배율 적용)"
               >−</button>
               <button
                 onClick={() => handleCanvasScale("x", 1.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-emerald-900/50 border border-zinc-700 hover:border-emerald-700 text-zinc-300 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-emerald-900/50 border border-zinc-500 hover:border-emerald-600 text-zinc-200 hover:text-emerald-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="가로 비율 10% 증가 (x=Ncm 배율 적용)"
               >+</button>
             </div>
 
             {/* 세로 (Y) */}
-            <div className="flex items-center gap-1 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-1.5 py-1">
+            <div className="flex items-center gap-1 bg-zinc-800/80 border border-zinc-600/80 rounded-md px-1.5 py-1">
               <svg className="w-2.5 h-2.5 text-rose-400 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4" />
               </svg>
               <span className="text-[9px] font-medium text-zinc-400 w-7 tracking-wide">세로</span>
               <button
                 onClick={() => handleCanvasScale("y", 0.9)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-300 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-rose-900/50 border border-zinc-500 hover:border-rose-600 text-zinc-200 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="세로 비율 10% 감소 (y=Ncm 배율 적용)"
               >−</button>
               <button
                 onClick={() => handleCanvasScale("y", 1.1)}
-                className="w-5 h-5 rounded bg-zinc-800 hover:bg-rose-900/50 border border-zinc-700 hover:border-rose-700 text-zinc-300 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                className="w-5 h-5 rounded bg-zinc-700 hover:bg-rose-900/50 border border-zinc-500 hover:border-rose-600 text-zinc-200 hover:text-rose-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                 title="세로 비율 10% 증가 (y=Ncm 배율 적용)"
               >+</button>
             </div>
@@ -1909,64 +1973,64 @@ export default function Home() {
           <div className="flex flex-col gap-1">
 
             {/* X축 (가로) */}
-            <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
+            <div className="flex items-center gap-2 bg-zinc-800/80 border border-zinc-600/80 rounded-md px-2 py-1">
               <span className="text-[9px] font-bold text-amber-400/80 w-[46px] shrink-0">X축 가로</span>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] font-medium text-zinc-400">좌측</span>
                 <button
                   onClick={() => handleAxisLength("x", "left", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-amber-900/50 border border-zinc-500 hover:border-amber-600 text-zinc-200 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "left", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-amber-900/50 border border-zinc-500 hover:border-amber-600 text-zinc-200 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 +0.2"
                 >+</button>
               </div>
-              <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
+              <div className="w-px h-4 bg-zinc-600/60 shrink-0" />
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] font-medium text-zinc-400">우측</span>
                 <button
                   onClick={() => handleAxisLength("x", "right", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-amber-900/50 border border-zinc-500 hover:border-amber-600 text-zinc-200 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 우측 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("x", "right", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-amber-900/50 border border-zinc-700 hover:border-amber-700 text-zinc-300 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-amber-900/50 border border-zinc-500 hover:border-amber-600 text-zinc-200 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 우측 길이 +0.2"
                 >+</button>
               </div>
             </div>
 
             {/* Y축 (세로) */}
-            <div className="flex items-center gap-2 bg-zinc-900/80 border border-zinc-800/80 rounded-md px-2 py-1">
+            <div className="flex items-center gap-2 bg-zinc-800/80 border border-zinc-600/80 rounded-md px-2 py-1">
               <span className="text-[9px] font-bold text-sky-400/80 w-[46px] shrink-0">Y축 세로</span>
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] font-medium text-zinc-400">하단</span>
                 <button
                   onClick={() => handleAxisLength("y", "bottom", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-sky-900/50 border border-zinc-500 hover:border-sky-600 text-zinc-200 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "bottom", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-sky-900/50 border border-zinc-500 hover:border-sky-600 text-zinc-200 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 +0.2"
                 >+</button>
               </div>
-              <div className="w-px h-4 bg-zinc-700/60 shrink-0" />
+              <div className="w-px h-4 bg-zinc-600/60 shrink-0" />
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] font-medium text-zinc-400">상단</span>
                 <button
                   onClick={() => handleAxisLength("y", "top", -0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-sky-900/50 border border-zinc-500 hover:border-sky-600 text-zinc-200 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 상단 길이 -0.2"
                 >&minus;</button>
                 <button
                   onClick={() => handleAxisLength("y", "top", 0.2)}
-                  className="w-5 h-5 rounded bg-zinc-800 hover:bg-sky-900/50 border border-zinc-700 hover:border-sky-700 text-zinc-300 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
+                  className="w-5 h-5 rounded bg-zinc-700 hover:bg-sky-900/50 border border-zinc-500 hover:border-sky-600 text-zinc-200 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 상단 길이 +0.2"
                 >+</button>
               </div>
@@ -2122,7 +2186,7 @@ export default function Home() {
                       key={idx}
                       className={`flex items-center gap-1.5 rounded-lg px-2 py-1 border transition-all ${
                         isCommented
-                          ? "bg-zinc-900/40 border-zinc-700/40 opacity-60"
+                          ? "bg-zinc-800/60 border-zinc-600/60 opacity-90"
                           : "bg-zinc-900/60 border-zinc-700/60 hover:border-fuchsia-700/60"
                       }`}
                     >
@@ -2133,7 +2197,7 @@ export default function Home() {
                       {/* 좌표 배지 */}
                       <span className={`flex-1 text-[10px] font-mono font-bold rounded px-1.5 py-0.5 border ${
                         isCommented
-                          ? "text-zinc-400 bg-zinc-800/50 border-zinc-600/40"
+                          ? "text-zinc-300 bg-zinc-700/50 border-zinc-500/60"
                           : "text-fuchsia-300/90 bg-fuchsia-950/40 border-fuchsia-800/40"
                       }`}>
                         ({coord})
@@ -2143,7 +2207,7 @@ export default function Home() {
                         onClick={() => handleTogglePoint(raw, isCommented)}
                         className={`shrink-0 w-6 h-6 rounded flex items-center justify-center border transition-all ${
                           isCommented
-                            ? "text-zinc-400 hover:text-fuchsia-300 bg-zinc-800 border-zinc-500 hover:border-fuchsia-600"
+                            ? "text-zinc-200 hover:text-fuchsia-300 bg-zinc-700 border-zinc-400 hover:border-fuchsia-500"
                             : "text-fuchsia-300 bg-fuchsia-900/40 border-fuchsia-700/60 hover:border-fuchsia-400"
                         }`}
                         title={isCommented ? "표시 (% 해제)" : "숨김 (% 주석)"}
