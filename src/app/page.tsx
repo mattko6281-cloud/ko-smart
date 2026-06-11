@@ -47,21 +47,21 @@ const BASE_WIDTH = 720;
 // ─────────────────────────────────────────────────────────────
 //  평가원 표준 템플릿 (클릭 한 번으로 로드)
 // ─────────────────────────────────────────────────────────────
-const KICE_TEMPLATE = `\\documentclass[tikz, border=10pt]{standalone}
-% KICE Standard Style Guide Applied (English comments only, no Kotex)
+const KICE_TEMPLATE = `\\documentclass[tikz, border=2pt]{standalone}
+% KICE Standard Style Guide Applied (평가원 기본 축)
 \\usetikzlibrary{arrows.meta}
 
 \\begin{document}
-\\begin{tikzpicture}[>={Stealth[length=11.2pt, width=6.08pt]}, x=1.3cm, y=1.3cm, line width=0.48pt, every node/.style={scale=1.6, font=\\rm}]
+\\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x=1.5cm, y=1.1cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}, dashed/.style={dash pattern=on 6pt off 4pt}]
 
     % Axes Construction
     % x-axis
-    \\draw[->] (-1.5, 0) -- (5, 0) node [below left, inner sep=2pt, yshift=-2pt, xshift=2pt] {$x$};
+    \\draw[->] (-1.5, 0) -- (5.2, 0) node [below left, inner sep=2pt, yshift=-1.5pt, xshift=2.5pt] {$x$};
     % y-axis
-    \\draw[->] (0, -1.5) -- (0, 7.5) node [below left, inner sep=2pt, xshift=-2pt, yshift=1pt] {$y$};
+    \\draw[->] (0, -1.5) -- (0, 7.8) node [below left, inner sep=2pt, xshift=-0.5pt, yshift=2pt] {$y$};
 
-    % Origin Node (Special large font, inherited scale=1.6 from global)
-    \\node [below left, inner sep=2pt, transform shape, xscale=0.9, font=\\large] at (0,0) {$\\rm O$};
+    % Origin Node
+    \\node [below left, inner sep=1pt, transform shape, xscale=0.9] at (0,0) {$\\rm O$};
 
 \\end{tikzpicture}
 \\end{document}`;
