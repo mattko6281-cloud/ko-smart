@@ -939,7 +939,7 @@ export default function Home() {
   };
 
   // ── 다중 노드 조이스틱 시프트 ───────────────────────────────────
-  const handleShift = (axis: "x" | "y", direction: number) => {
+  const handleShift = useCallback((axis: "x" | "y", direction: number) => {
     if (selectedNodeIndices.size === 0) { toast.error("조정할 노드를 먼저 선택해주세요."); return; }
     
     // [중요] 인덱스 밀림 방지를 위한 역순 정렬 처리
@@ -951,7 +951,7 @@ export default function Home() {
 
     let newCode = rawInput;
     const key = `${axis}shift`;
-    const re = new RegExp(`${key}\\s*=\\s*(-?\\d+)pt`);
+    const re = new RegExp(`${key}\\s*=\\s*(-?\\d+(?:\\.\\d+)?)pt`);
 
     for (const node of selectedNodes) {
       let opts = node.options;
@@ -959,7 +959,7 @@ export default function Home() {
       let newVal = direction;
       
       if (hit) { 
-        newVal = parseInt(hit[1]) + direction; 
+        newVal = parseFloat((parseFloat(hit[1]) + direction).toFixed(2)); 
         opts = opts.replace(re, `${key}=${newVal}pt`); 
       } else {
         opts = (opts.trim() ? opts + ", " : "") + `${key}=${newVal}pt`;
@@ -975,7 +975,51 @@ export default function Home() {
     }
     
     handleRawInputChange(newCode);
-  };
+  }, [selectedNodeIndices, nodes, rawInput, handleRawInputChange]);
+
+  // ── 글로벌 키보드 이벤트 (방향키 노드 이동) ─────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 입력창 등 텍스트 타이핑 중일 때만 무시 (버튼/체크박스 포커스 시엔 작동 허용)
+      const active = document.activeElement as HTMLElement;
+      if (
+        active?.tagName === "TEXTAREA" ||
+        (active?.tagName === "INPUT" && (active as HTMLInputElement).type === "text") ||
+        active?.isContentEditable
+      ) {
+        return;
+      }
+
+      if (selectedNodeIndices.size === 0) return;
+
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+
+        // 기본 단위 1pt
+        let amount = 1;
+        if (e.shiftKey) amount = 10;
+        else if (e.altKey || e.ctrlKey || e.metaKey) amount = 0.1;
+
+        switch (e.key) {
+          case "ArrowUp":
+            handleShift("y", amount);
+            break;
+          case "ArrowDown":
+            handleShift("y", -amount);
+            break;
+          case "ArrowLeft":
+            handleShift("x", -amount);
+            break;
+          case "ArrowRight":
+            handleShift("x", amount);
+            break;
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedNodeIndices, handleShift]);
 
   // ── X/Y 캔버스 비율 스케일러 ───────────────────────────────
   //  \begin{tikzpicture}[...] 내부의 x=Ncm / y=Ncm 을 배율로 upsert
@@ -1776,7 +1820,12 @@ export default function Home() {
 
         {/* 노드 다중 선택 — 컴팩트 체크박스 패널 */}
         <div className="flex flex-col shrink-0" ref={nodeDropdownRef}>
-          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1">Node</span>
+          <div className="flex items-center mb-1">
+            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider">Node</span>
+            <span className="bg-blue-500/20 text-blue-300 border border-blue-500/40 px-1.5 py-[1px] rounded-md whitespace-nowrap text-[8.5px] tracking-tight ml-2 shadow-sm flex items-center">
+              키보드 조작 가능 <span className="opacity-70 text-[8px] ml-1">(shift: 10배 / Alt: 미세)</span>
+            </span>
+          </div>
 
           {/* 트리거: 클릭하면 체크박스 리스트 토글 */}
           <button
@@ -1895,32 +1944,48 @@ export default function Home() {
         <div className="flex items-center gap-3 shrink-0">
           {/* 조이스틱 방향키 */}
           <div className="flex flex-col items-center">
-            <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-              <MousePointer2 className="w-2.5 h-2.5" /> Joystick
-            </span>
-            <div className="flex items-center gap-1">
-              <Button variant="outline" size="icon"
-                className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
-                onClick={() => handleShift("x", -1)}>
-                <ChevronLeft className="w-3.5 h-3.5" />
-              </Button>
-              <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                <MousePointer2 className="w-2.5 h-2.5" /> Joystick
+              </span>
+              
+              {/* 시선 집중형 작은 키보드 아이콘 (툴팁 포함) */}
+              <div className="relative group cursor-help flex items-center justify-center w-4 h-4 rounded bg-orange-500/15 text-orange-400 border border-orange-500/30 hover:bg-orange-500/30 transition-colors">
+                <span className="text-[10px]">⌨️</span>
+                <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 opacity-0 group-hover:opacity-100 transition-opacity duration-200 ease-in-out w-48">
+                  <div className="bg-zinc-800 text-zinc-200 text-[10px] leading-relaxed p-2 rounded shadow-xl border border-zinc-700 break-keep text-center relative">
+                    키보드 방향키로 이동 가능<br />
+                    <span className="text-zinc-400 text-[9px]">(Shift: 10배 크게, Alt: 1/10 미세조정)</span>
+                    <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-r-[4px] border-t-[4px] border-transparent border-t-zinc-800" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col items-center gap-1">
+              <div className="flex justify-center">
                 <Button variant="outline" size="icon"
-                  className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
+                  className="w-7 h-7 rounded-md border border-zinc-600 border-b-[2.5px] border-b-zinc-900 bg-zinc-800 text-zinc-300 hover:bg-blue-900/40 hover:border-blue-500/50 hover:text-blue-300 active:border-b active:translate-y-[1.5px] transition-all shadow-sm"
                   onClick={() => handleShift("y", 1)}>
                   <ChevronUp className="w-3.5 h-3.5" />
                 </Button>
+              </div>
+              <div className="flex justify-center gap-1">
                 <Button variant="outline" size="icon"
-                  className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
+                  className="w-7 h-7 rounded-md border border-zinc-600 border-b-[2.5px] border-b-zinc-900 bg-zinc-800 text-zinc-300 hover:bg-blue-900/40 hover:border-blue-500/50 hover:text-blue-300 active:border-b active:translate-y-[1.5px] transition-all shadow-sm"
+                  onClick={() => handleShift("x", -1)}>
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </Button>
+                <Button variant="outline" size="icon"
+                  className="w-7 h-7 rounded-md border border-zinc-600 border-b-[2.5px] border-b-zinc-900 bg-zinc-800 text-zinc-300 hover:bg-blue-900/40 hover:border-blue-500/50 hover:text-blue-300 active:border-b active:translate-y-[1.5px] transition-all shadow-sm"
                   onClick={() => handleShift("y", -1)}>
                   <ChevronDown className="w-3.5 h-3.5" />
                 </Button>
+                <Button variant="outline" size="icon"
+                  className="w-7 h-7 rounded-md border border-zinc-600 border-b-[2.5px] border-b-zinc-900 bg-zinc-800 text-zinc-300 hover:bg-blue-900/40 hover:border-blue-500/50 hover:text-blue-300 active:border-b active:translate-y-[1.5px] transition-all shadow-sm"
+                  onClick={() => handleShift("x", 1)}>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </Button>
               </div>
-              <Button variant="outline" size="icon"
-                className="w-7 h-7 rounded-full border-zinc-600 bg-zinc-800 text-zinc-300 hover:bg-blue-900/50 hover:border-blue-500 hover:text-blue-300 transition-all"
-                onClick={() => handleShift("x", 1)}>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </Button>
             </div>
           </div>
 
