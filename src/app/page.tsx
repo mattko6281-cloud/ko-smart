@@ -282,6 +282,7 @@ export default function Home() {
   // USAGE_ENTER 중복 실행 방지 ref
   const hasLoggedEnter = useRef(false);
 
+
   // 마운트 시 hasSeenHelp 종류 확인
   useEffect(() => {
     const seen = localStorage.getItem("kosmart_seen_help");
@@ -780,6 +781,8 @@ export default function Home() {
       return changed ? valid : prev;
     });
   }, [nodes.length]);
+
+
 
   // ── 선택된 노드(들)의 표시 텍스트 계산 (다중 선택 지원) ──────────────
   const getSelectedNodesLabel = (): string => {
