@@ -429,6 +429,7 @@ export default function Home() {
 
   // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 1500px ───
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
+  const [saveTikzCode, setSaveTikzCode] = useState(false);
   const handleDownloadHighRes = () => {
     if (!svgUrl) {
       toast.error("렌더링된 SVG가 없습니다. 코드를 먼저 렌더링하세요.");
@@ -507,14 +508,34 @@ export default function Home() {
         }
 
         // ── 4단계: 크롭된 캔버스를 PNG로 저장 ────────────────────────────────
-        const ts = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+        const now = new Date();
+        const yy = String(now.getFullYear()).slice(-2);
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        const fileNameBase = `InfiniteMathlab_${yy}${mm}${dd}_${hh}${min}${ss}`;
         const pngData = outputCanvas.toDataURL("image/png");
         const a = document.createElement("a");
         a.href = pngData;
-        a.download = `ko-smart-highres-${ts}.png`;
+        a.download = `${fileNameBase}.png`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+
+        // ── 5단계: TikZ 코드 저장 (체크 시) ──────────────────────────────────
+        if (saveTikzCode) {
+          const blob = new Blob([rawInput], { type: "text/plain;charset=utf-8" });
+          const txtUrl = URL.createObjectURL(blob);
+          const txtA = document.createElement("a");
+          txtA.href = txtUrl;
+          txtA.download = `${fileNameBase}.txt`;
+          document.body.appendChild(txtA);
+          txtA.click();
+          document.body.removeChild(txtA);
+          URL.revokeObjectURL(txtUrl);
+        }
 
         toast.dismiss(toastId);
         toast.success(`✅ HWP 인쇄용 PNG 저장 완료! (${outputCanvas.width}×${outputCanvas.height}px)`);
@@ -1541,20 +1562,18 @@ export default function Home() {
                 </span>
               </div>
 
-
-              {/* ── PNG 저장 ── */}
-              <Button
-                id="btn-download-png"
-                onClick={handleDownloadPng}
-                disabled={isDownloading || !debouncedInput.trim()}
-                size="sm"
-                className="h-8 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold gap-1.5 px-3 shadow shadow-blue-600/30 disabled:opacity-40"
-              >
-                {isDownloading
-                  ? <Loader2 className="w-3 h-3 animate-spin" />
-                  : <Download className="w-3 h-3" />}
-                PNG
-              </Button>
+              {/* ── TikZ 코드 함께 저장 체크박스 ── */}
+              <label className="flex items-center gap-1.5 cursor-pointer mr-1">
+                <input
+                  type="checkbox"
+                  checked={saveTikzCode}
+                  onChange={(e) => setSaveTikzCode(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-neutral-500 bg-neutral-800 border-neutral-600 rounded-sm cursor-pointer"
+                />
+                <span className="text-[11px] font-medium text-neutral-300 whitespace-nowrap select-none">
+                  TikZ 코드 함께 저장
+                </span>
+              </label>
 
               {/* ── HWP 인쇄용 PNG (1500px) ── */}
               <div className="relative group">
