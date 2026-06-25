@@ -2017,12 +2017,12 @@ export default function Home() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] font-medium text-zinc-400">좌측</span>
                 <button
-                  onClick={() => handleAxisLength("x", "left", 0.2)}
+                  onClick={() => handleAxisLength("x", "left", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-700 hover:bg-amber-900/50 border border-zinc-500 hover:border-amber-600 text-zinc-200 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 -0.2"
                 >&minus;</button>
                 <button
-                  onClick={() => handleAxisLength("x", "left", -0.2)}
+                  onClick={() => handleAxisLength("x", "left", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-700 hover:bg-amber-900/50 border border-zinc-500 hover:border-amber-600 text-zinc-200 hover:text-amber-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="X축 좌측 길이 +0.2"
                 >+</button>
@@ -2049,12 +2049,12 @@ export default function Home() {
               <div className="flex items-center gap-1.5">
                 <span className="text-[9px] font-medium text-zinc-400">하단</span>
                 <button
-                  onClick={() => handleAxisLength("y", "bottom", 0.2)}
+                  onClick={() => handleAxisLength("y", "bottom", -0.2)}
                   className="w-5 h-5 rounded bg-zinc-700 hover:bg-sky-900/50 border border-zinc-500 hover:border-sky-600 text-zinc-200 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 -0.2"
                 >&minus;</button>
                 <button
-                  onClick={() => handleAxisLength("y", "bottom", -0.2)}
+                  onClick={() => handleAxisLength("y", "bottom", 0.2)}
                   className="w-5 h-5 rounded bg-zinc-700 hover:bg-sky-900/50 border border-zinc-500 hover:border-sky-600 text-zinc-200 hover:text-sky-300 text-[11px] font-bold leading-none transition-all flex items-center justify-center"
                   title="Y축 하단 길이 +0.2"
                 >+</button>
