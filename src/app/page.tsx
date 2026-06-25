@@ -2697,6 +2697,65 @@ export default function Home() {
                 KICE 표준 수학 그래프 렌더링 툴에 오신 것을 환영합니다. 아래 버튼들의 정확한 용도를 확인하세요.
               </p>
 
+              {/* 핵심 업데이트 안내 */}
+              <div className="rounded-xl border border-blue-900/40 bg-blue-950/20 px-4 py-4 mt-4 mb-2 shadow-inner">
+                <h4 className="text-[14px] font-black text-blue-400 mb-3.5 flex items-center gap-2">
+                  <span className="text-lg">🚀</span> KO-SMART 핵심 업데이트 안내
+                </h4>
+                
+                <div className="space-y-4">
+                  {/* 1. 다운로드 개편 */}
+                  <div>
+                    <h5 className="text-[12px] font-bold text-blue-200 mb-1.5 flex items-center gap-1.5">
+                      <span className="text-sm">💾</span> 1. 다운로드 및 내보내기 개편
+                    </h5>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-300 text-[11.5px]">
+                      <li><strong className="text-blue-100">단일화된 다운로드:</strong> 기존 PNG 버튼이 삭제되고, 평가원 규격에 맞춘 [HWP 인쇄용 (고정배율)] 버튼으로 통합되었습니다.</li>
+                      <li><strong className="text-blue-100">TikZ 원본 세트 저장:</strong> 다운로드 버튼 좌측의 <code className="text-blue-200 bg-blue-900/40 px-1.5 py-0.5 rounded">[TikZ 코드(.txt) 포함]</code> 버튼을 체크하면, 추후 그래프 재수정에 활용할 수 있도록 그림과 동일한 이름의 TikZ 소스 코드 파일이 함께 다운로드됩니다.</li>
+                      <li><strong className="text-blue-100">파일명 규칙:</strong> 다운로드되는 모든 파일은 <code className="text-zinc-400 bg-zinc-800/80 px-1 py-0.5 rounded">InfiniteMathlab_YYMMDD_HHMMSS</code> 형식으로 통일되어 관리가 더욱 편해졌습니다.</li>
+                    </ul>
+                  </div>
+
+                  {/* 2. 조작 편의성 */}
+                  <div>
+                    <h5 className="text-[12px] font-bold text-blue-200 mb-1.5 flex items-center gap-1.5">
+                      <span className="text-sm">🖱️</span> 2. 마우스 조작 편의성 향상
+                    </h5>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-300 text-[11.5px]">
+                      <li><strong className="text-blue-100">화면 드래그 스크롤:</strong> 우측 하얀색 렌더링 도화지 영역을 마우스로 클릭한 채 상하좌우로 드래그하면 스마트폰처럼 캔버스를 휙휙 이동할 수 있습니다.</li>
+                      <li><strong className="text-blue-100">스마트 창 닫기 (빈 공간 클릭):</strong>
+                        <ul className="list-disc pl-4 mt-1.5 space-y-1 text-zinc-400">
+                          <li><strong className="text-zinc-300">노드 선택 창:</strong> 창 바깥의 빈 공간을 클릭하면 창이 닫히며 <strong className="text-amber-200">'선택된 내역이 모두 초기화'</strong>됩니다. (단, 하단 컨트롤 패널 조작 시에는 초기화되지 않아 작업 흐름이 끊기지 않습니다.)</li>
+                          <li><strong className="text-zinc-300">점 &amp; 그래프 제어 창:</strong> 빈 공간을 클릭하면 창만 깔끔하게 숨겨지며, 입력해 둔 좌표 데이터는 안전하게 보존됩니다.</li>
+                        </ul>
+                      </li>
+                      <li><strong className="text-blue-100">제어 창 이동:</strong> '점 &amp; 그래프 제어' 창 상단의 그립(점 6개) 아이콘을 잡고 드래그하면, 우측 안내 문구를 가리지 않도록 창을 원하는 위치로 옮길 수 있습니다.</li>
+                    </ul>
+                  </div>
+
+                  {/* 3. 직관적인 컨트롤러 */}
+                  <div>
+                    <h5 className="text-[12px] font-bold text-blue-200 mb-1.5 flex items-center gap-1.5">
+                      <span className="text-sm">🎛️</span> 3. 직관적인 컨트롤러 조작
+                    </h5>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-300 text-[11.5px]">
+                      <li><strong className="text-blue-100">축 길이 조절 직관화:</strong> 사용자 편의를 위해 X축 가로(좌측) 및 Y축 세로(하단)의 길이를 조절할 때, <kbd className="bg-zinc-700/80 border border-zinc-600 px-1 rounded text-zinc-200">+</kbd> 버튼은 늘어나고 <kbd className="bg-zinc-700/80 border border-zinc-600 px-1 rounded text-zinc-200">−</kbd> 버튼은 줄어들도록 직관적으로 변경되었습니다.</li>
+                    </ul>
+                  </div>
+                  
+                  {/* 4. 한글 주의사항 */}
+                  <div className="bg-red-950/30 border border-red-900/50 rounded-lg p-3 mt-3">
+                    <h5 className="text-[12px] font-bold text-red-400 mb-1.5 flex items-center gap-1.5">
+                      <span className="text-sm">⚠️</span> 4. 한글 입력 주의사항 (필독)
+                    </h5>
+                    <ul className="list-disc pl-5 space-y-1 text-red-200/90 text-[11.5px]">
+                      <li>렌더링 도화지 내부(TikZ 코드)에는 <strong className="text-red-300 underline underline-offset-2">절대 한글을 직접 입력하지 마세요.</strong> (서버 에러 및 렌더링 실패의 원인이 됩니다.)</li>
+                      <li>A열, 상자 등 한글 라벨링이 필요한 경우, 영문 알파벳으로 대체하거나 다운로드 후 HWP에서 '글상자'를 이용해 덧입히는 방식을 권장합니다.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
               <hr className="border-zinc-800" />
 
               {/* 섹션 1 */}
@@ -2895,10 +2954,7 @@ export default function Home() {
                       <strong className="text-red-400">실제 이미지 저장 크기와는 전혀 무관합니다!</strong>
                     </span>
                   </li>
-                  <li className="flex items-start gap-2">
-                    <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#2563eb"}}>📥 PNG</span>
-                    <span>일반적인 웹 해상도(기본 크기)로 이미지를 다운로드합니다. <strong className="text-zinc-200">(투명 배경 자동 적용)</strong></span>
-                  </li>
+
                   <li className="flex items-start gap-2">
                     <span className="shrink-0 mt-0.5 inline-flex items-center gap-1 text-white text-[10px] font-bold px-2 py-0.5 rounded" style={{background:"#f97316"}}>📥 HWP 인쇄용 (고정배율)</span>
                     <span>SVG 원본 크기에 <strong className="text-amber-300">×4.0 고정 배율</strong>을 곱해 렌더링 후 오토 크롭하여 저장합니다. 그래프 가로폭에 무관하게 <strong className="text-amber-300">폰트 체급이 항상 균일</strong>하게 유지됩니다. 한글 문서에 넣을 땐 <strong className="text-amber-300">반드시 이 주황색 버튼</strong>을 누르세요!</span>
