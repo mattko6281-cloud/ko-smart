@@ -10,6 +10,7 @@ import {
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
   RotateCcw, BookOpen, X, ClipboardCopy, Type, HelpCircle, Sliders,
+  GripHorizontal, GripVertical, Info
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem,
@@ -1582,17 +1583,37 @@ export default function Home() {
                 </span>
               </div>
 
-              {/* ── TikZ 코드 함께 저장 체크박스 ── */}
-              <label className="flex items-center gap-1.5 cursor-pointer mr-1">
+              {/* ── TikZ 코드 함께 저장 체크박스 (Pill) ── */}
+              <label
+                className={`relative group flex items-center gap-1.5 cursor-pointer mr-3 px-3 py-1.5 rounded-md border transition-colors ${
+                  saveTikzCode
+                    ? "bg-zinc-700/80 border-neutral-500"
+                    : "bg-zinc-800/50 hover:bg-zinc-700/50 border-zinc-700"
+                }`}
+              >
                 <input
                   type="checkbox"
                   checked={saveTikzCode}
                   onChange={(e) => setSaveTikzCode(e.target.checked)}
                   className="w-3.5 h-3.5 accent-neutral-500 bg-neutral-800 border-neutral-600 rounded-sm cursor-pointer"
                 />
-                <span className="text-[11px] font-medium text-neutral-300 whitespace-nowrap select-none">
-                  TikZ 코드 함께 저장
+                <span className={`text-[11px] font-medium whitespace-nowrap select-none transition-colors ${saveTikzCode ? "text-neutral-100" : "text-neutral-300"}`}>
+                  TikZ 코드(.txt) 포함
                 </span>
+                <Info className={`w-[14px] h-[14px] transition-colors ${saveTikzCode ? "text-neutral-300" : "text-neutral-500 group-hover:text-neutral-400"}`} />
+
+                {/* 툴팁 */}
+                <div
+                  className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50
+                             opacity-0 group-hover:opacity-100 transition-opacity duration-200 ease-in-out w-56"
+                >
+                  {/* 위쪽 화살표 */}
+                  <div className="mx-auto w-0 h-0 border-l-[5px] border-r-[5px] border-b-[5px] border-transparent border-b-neutral-800" />
+                  {/* 말풍선 본문 */}
+                  <div className="bg-neutral-800 text-neutral-200 text-[10px] leading-relaxed p-2.5 rounded-md shadow-xl border border-neutral-700 break-keep text-center">
+                    나중에 그래프를 재수정할 수 있도록, 그림과 동일한 이름의 TikZ 소스 코드(.txt) 파일을 세트로 함께 저장합니다.
+                  </div>
+                </div>
               </label>
 
               {/* ── HWP 인쇄용 PNG (1500px) ── */}
@@ -2132,7 +2153,7 @@ export default function Home() {
         >
           {/* 드래그 핸들 헤더 */}
           <div
-            className="flex items-center justify-between px-3 py-2.5 border-b border-fuchsia-900/30 cursor-grab active:cursor-grabbing"
+            className="relative flex items-center justify-between px-3 py-2.5 border-b border-fuchsia-900/30 cursor-grab active:cursor-grabbing group"
             onMouseDown={(e) => {
               if ((e.target as HTMLElement).closest("button")) return;
               const rect = panelRef.current!.getBoundingClientRect();
@@ -2160,13 +2181,13 @@ export default function Home() {
               window.addEventListener("mouseup", onUp);
             }}
           >
+            {/* 중앙 드래그 핸들 (직관적 인지) */}
+            <div className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center text-zinc-600 group-hover:text-zinc-400 transition-colors pointer-events-none">
+              <GripHorizontal className="w-5 h-5" />
+            </div>
+
             <div className="flex items-center gap-2">
-              {/* grip 도트 */}
-              <svg className="w-3 h-3 text-fuchsia-700/60 shrink-0" viewBox="0 0 12 18" fill="currentColor">
-                <circle cx="3" cy="3"  r="1.3" /><circle cx="9" cy="3"  r="1.3" />
-                <circle cx="3" cy="9"  r="1.3" /><circle cx="9" cy="9"  r="1.3" />
-                <circle cx="3" cy="15" r="1.3" /><circle cx="9" cy="15" r="1.3" />
-              </svg>
+              <GripVertical className="w-4 h-4 text-fuchsia-700/80 shrink-0" />
               <span className="text-[11px] font-black text-white">점 마커</span>
               <span className="text-[9px] text-zinc-600">{extractedPoints.length}개</span>
             </div>
