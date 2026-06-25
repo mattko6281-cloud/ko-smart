@@ -330,6 +330,26 @@ export default function Home() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isNodeDropdownOpen]);
 
+  // ── 점 & 그래프 제어 창 외부 클릭 시 닫기 (단, 하단 컨트롤 예외) ──
+  useEffect(() => {
+    const handleClickOutsidePoint = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      
+      // 하단 컨트롤 패널(footer) 클릭 시 닫히지 않음 (Safe Zone)
+      if (target.closest("footer")) return;
+
+      if (
+        isPointManagerOpen &&
+        panelRef.current &&
+        !panelRef.current.contains(e.target as Node)
+      ) {
+        setIsPointManagerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutsidePoint);
+    return () => document.removeEventListener("mousedown", handleClickOutsidePoint);
+  }, [isPointManagerOpen]);
+
   // 사용 설명서 열기 핸들러
   const handleOpenHelp = () => {
     setIsHelpOpen(true);
