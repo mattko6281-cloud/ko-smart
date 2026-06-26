@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
-  Copy, History, ChevronUp, ChevronDown,
+  History, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
   RotateCcw, BookOpen, X, ClipboardCopy, Type, HelpCircle, Sliders,
@@ -576,11 +576,6 @@ export default function Home() {
       setIsHighResDownloading(false);
     };
     img.src = `${svgUrl}?t=${Date.now()}`;
-  };
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(rawInput);
-    toast.success("클립보드에 복사되었습니다.");
   };
 
   // ── 평가원 표준 템플릿 로드 ────────────────────────────────
@@ -1376,6 +1371,23 @@ export default function Home() {
   }
 
   // ─────────────────────────────────────────────────────────
+  let navigatorText: string | null = null;
+  if (selectedNodeIndices.size > 0) {
+    const selectedIndex = parseInt(Array.from(selectedNodeIndices)[0], 10);
+    const targetNode = nodes[selectedIndex];
+
+    if (targetNode && targetNode.content) {
+      const allLines = rawInput.split("\n");
+      const foundLineIndex = allLines.findIndex(line => line.includes(targetNode.content));
+      
+      if (foundLineIndex !== -1) {
+        const lineNumber = foundLineIndex + 1;
+        const lineText = allLines[foundLineIndex].trim();
+        navigatorText = `🎯 Line ${lineNumber}: ${lineText}`;
+      }
+    }
+  }
+
   return (
     <main className="flex flex-col h-screen overflow-hidden bg-[#0d1117] text-zinc-100 font-sans">
 
@@ -1524,12 +1536,6 @@ export default function Home() {
               <div className="text-[12px] font-bold text-white">고진일 팀장</div>
             </div>
           </div>
-
-          <Button variant="ghost" size="sm"
-            className="text-zinc-500 hover:text-white hover:bg-zinc-800/80 rounded-lg"
-            onClick={handleCopy}>
-            <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy
-          </Button>
         </div>
       </header>
 
@@ -1567,6 +1573,11 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <History className="w-3 h-3 text-blue-400/70" />
               <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400/70">Raw TikZ Code</span>
+              {navigatorText && (
+                <div className="ml-4 text-xs font-mono text-blue-300 bg-blue-900/20 px-2 py-1 rounded truncate max-w-md">
+                  {navigatorText}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {/* 초기화 버튼 */}
