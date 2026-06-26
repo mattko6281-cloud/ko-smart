@@ -1642,7 +1642,7 @@ export default function Home() {
               </div>
 
               {/* ── 다운로드 영역 그룹 ── */}
-              <div className="flex items-center gap-2 p-1.5 bg-gradient-to-r from-amber-950/40 to-zinc-900/60 border border-amber-700/40 rounded-xl shadow-lg shadow-amber-900/20 backdrop-blur-sm">
+              <div className="relative z-50 flex items-center gap-2 p-1.5 bg-gradient-to-r from-amber-950/40 to-zinc-900/60 border border-amber-700/40 rounded-xl shadow-lg shadow-amber-900/20 backdrop-blur-sm">
                 {/* ── TikZ 코드 함께 저장 체크박스 (Pill) ── */}
                 <label
                   className={`relative group flex items-center gap-1.5 cursor-pointer px-3 py-1.5 rounded-md border transition-colors ${
