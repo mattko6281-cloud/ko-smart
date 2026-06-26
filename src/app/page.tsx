@@ -2225,7 +2225,7 @@ export default function Home() {
       {isPointManagerOpen && (
         <div
           ref={panelRef}
-          className="fixed z-40 w-[240px] flex flex-col rounded-xl border border-fuchsia-800/40 shadow-2xl shadow-fuchsia-900/30 select-none"
+          className="fixed z-[100] w-[240px] flex flex-col rounded-xl border border-fuchsia-800/40 shadow-2xl shadow-fuchsia-900/30 select-none"
           style={{
             background: "linear-gradient(145deg, #160e1e 0%, #0e0d17 60%, #0d1117 100%)",
             top:  pmPos ? pmPos.y : 60,
