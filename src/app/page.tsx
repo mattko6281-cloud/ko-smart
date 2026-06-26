@@ -1641,68 +1641,71 @@ export default function Home() {
                 </span>
               </div>
 
-              {/* ── TikZ 코드 함께 저장 체크박스 (Pill) ── */}
-              <label
-                className={`relative group flex items-center gap-1.5 cursor-pointer mr-3 px-3 py-1.5 rounded-md border transition-colors ${
-                  saveTikzCode
-                    ? "bg-zinc-700/80 border-neutral-500"
-                    : "bg-zinc-800/50 hover:bg-zinc-700/50 border-zinc-700"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={saveTikzCode}
-                  onChange={(e) => setSaveTikzCode(e.target.checked)}
-                  className="w-3.5 h-3.5 accent-neutral-500 bg-neutral-800 border-neutral-600 rounded-sm cursor-pointer"
-                />
-                <span className={`text-[11px] font-medium whitespace-nowrap select-none transition-colors ${saveTikzCode ? "text-neutral-100" : "text-neutral-300"}`}>
-                  TikZ 코드(.txt) 포함
-                </span>
-                <Info className={`w-[14px] h-[14px] transition-colors ${saveTikzCode ? "text-neutral-300" : "text-neutral-500 group-hover:text-neutral-400"}`} />
-
-                {/* 툴팁 */}
-                <div
-                  className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50
-                             opacity-0 group-hover:opacity-100 transition-opacity duration-200 ease-in-out w-56"
+              {/* ── 다운로드 영역 그룹 ── */}
+              <div className="flex items-center gap-2 p-1.5 bg-gradient-to-r from-amber-950/40 to-zinc-900/60 border border-amber-700/40 rounded-xl shadow-lg shadow-amber-900/20 backdrop-blur-sm">
+                {/* ── TikZ 코드 함께 저장 체크박스 (Pill) ── */}
+                <label
+                  className={`relative group flex items-center gap-1.5 cursor-pointer px-3 py-1.5 rounded-md border transition-colors ${
+                    saveTikzCode
+                      ? "bg-zinc-700/80 border-neutral-500"
+                      : "bg-zinc-800/50 hover:bg-zinc-700/50 border-zinc-700"
+                  }`}
                 >
-                  {/* 위쪽 화살표 */}
-                  <div className="mx-auto w-0 h-0 border-l-[5px] border-r-[5px] border-b-[5px] border-transparent border-b-neutral-800" />
-                  {/* 말풍선 본문 */}
-                  <div className="bg-neutral-800 text-neutral-200 text-[10px] leading-relaxed p-2.5 rounded-md shadow-xl border border-neutral-700 break-keep text-center">
-                    나중에 그래프를 재수정할 수 있도록, 그림과 동일한 이름의 TikZ 소스 코드(.txt) 파일을 세트로 함께 저장합니다.
+                  <input
+                    type="checkbox"
+                    checked={saveTikzCode}
+                    onChange={(e) => setSaveTikzCode(e.target.checked)}
+                    className="w-3.5 h-3.5 accent-neutral-500 bg-neutral-800 border-neutral-600 rounded-sm cursor-pointer"
+                  />
+                  <span className={`text-[11px] font-medium whitespace-nowrap select-none transition-colors ${saveTikzCode ? "text-neutral-100" : "text-neutral-300"}`}>
+                    TikZ 코드(.txt) 포함
+                  </span>
+                  <Info className={`w-[14px] h-[14px] transition-colors ${saveTikzCode ? "text-neutral-300" : "text-neutral-500 group-hover:text-neutral-400"}`} />
+
+                  {/* 툴팁 */}
+                  <div
+                    className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50
+                               opacity-0 group-hover:opacity-100 transition-opacity duration-200 ease-in-out w-56"
+                  >
+                    {/* 위쪽 화살표 */}
+                    <div className="mx-auto w-0 h-0 border-l-[5px] border-r-[5px] border-b-[5px] border-transparent border-b-neutral-800" />
+                    {/* 말풍선 본문 */}
+                    <div className="bg-neutral-800 text-neutral-200 text-[10px] leading-relaxed p-2.5 rounded-md shadow-xl border border-neutral-700 break-keep text-center">
+                      나중에 그래프를 재수정할 수 있도록, 그림과 동일한 이름의 TikZ 소스 코드(.txt) 파일을 세트로 함께 저장합니다.
+                    </div>
                   </div>
-                </div>
-              </label>
+                </label>
 
-              {/* ── HWP 인쇄용 PNG (1500px) ── */}
-              <div className="relative group">
-                <Button
-                  id="btn-download-highres"
-                  onClick={handleDownloadHighRes}
-                  disabled={isHighResDownloading || !debouncedInput.trim()}
-                  size="sm"
-                  className="h-8 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-[11px] font-bold gap-1.5 px-3 shadow shadow-amber-500/30 disabled:opacity-40 border-0"
-                >
-                  {isHighResDownloading
-                    ? <Loader2 className="w-3 h-3 animate-spin" />
-                    : <Download className="w-3 h-3" />}
-                  HWP 인쇄용 (고정배율)
-                </Button>
-                {/* 툴팁 */}
-                <div
-                  className="pointer-events-none absolute top-full right-0 mt-2 z-50
-                             opacity-0 group-hover:opacity-100
-                             transition-opacity duration-200 ease-in-out"
-                >
-                  {/* 위쪽 화살표 */}
-                  <div className="ml-auto mr-3 w-0 h-0
-                                  border-l-[5px] border-l-transparent
-                                  border-r-[5px] border-r-transparent
-                                  border-b-[5px] border-b-zinc-900" />
-                  <div className="bg-zinc-900 text-white text-[10px] font-medium leading-snug
-                                  whitespace-nowrap rounded-md px-2.5 py-1.5
-                                  shadow-lg shadow-black/40 border border-zinc-700/60">
-                    HWP 삽입 후 [개체속성 → 그림 → 확대/축소비율 12.5%] 설정
+                {/* ── HWP 인쇄용 PNG (1500px) ── */}
+                <div className="relative group">
+                  <Button
+                    id="btn-download-highres"
+                    onClick={handleDownloadHighRes}
+                    disabled={isHighResDownloading || !debouncedInput.trim()}
+                    size="sm"
+                    className="h-8 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white text-[11px] font-bold gap-1.5 px-3 shadow shadow-amber-500/30 disabled:opacity-40 border-0"
+                  >
+                    {isHighResDownloading
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <Download className="w-3 h-3" />}
+                    HWP 인쇄용 (고정배율)
+                  </Button>
+                  {/* 툴팁 */}
+                  <div
+                    className="pointer-events-none absolute top-full right-0 mt-2 z-50
+                               opacity-0 group-hover:opacity-100
+                               transition-opacity duration-200 ease-in-out"
+                  >
+                    {/* 위쪽 화살표 */}
+                    <div className="ml-auto mr-3 w-0 h-0
+                                    border-l-[5px] border-l-transparent
+                                    border-r-[5px] border-r-transparent
+                                    border-b-[5px] border-b-zinc-900" />
+                    <div className="bg-zinc-900 text-white text-[10px] font-medium leading-snug
+                                    whitespace-nowrap rounded-md px-2.5 py-1.5
+                                    shadow-lg shadow-black/40 border border-zinc-700/60">
+                      HWP 삽입 후 [개체속성 → 그림 → 확대/축소비율 12.5%] 설정
+                    </div>
                   </div>
                 </div>
               </div>
