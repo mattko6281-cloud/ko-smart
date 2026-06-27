@@ -15,12 +15,24 @@ const ACTION_MESSAGES: Record<string, (email: string) => string> = {
 export async function logUserAction(
   actionType: string,
   email: string,
-  code_snippet?: string
+  code_snippet?: string,
+  durationMs?: number,
+  hasTikz?: boolean
 ): Promise<void> {
   const ts = new Date().toISOString();
-  const message =
+  let message =
     ACTION_MESSAGES[actionType]?.(email) ??
     `[${actionType}] ${email} 님이 액션을 실행했습니다.`;
+
+  if (actionType === "EXPORT_DOWNLOAD") {
+    if (hasTikz !== undefined) {
+      message += ` (TikZ 포함: ${hasTikz ? "O" : "X"})`;
+    }
+    if (durationMs !== undefined) {
+      const durationSec = (durationMs / 1000).toFixed(1);
+      message += ` [소요시간: ${durationSec}초]`;
+    }
+  }
 
   // ── 1. Vercel 서버 콘솔 로그 ──────────────────────────────────────
   console.log(`${message} 시간: ${ts}`);

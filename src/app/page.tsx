@@ -453,12 +453,11 @@ export default function Home() {
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
   const [saveTikzCode, setSaveTikzCode] = useState(false);
   const handleDownloadHighRes = () => {
+    const startTime = performance.now();
     if (!svgUrl) {
       toast.error("렌더링된 SVG가 없습니다. 코드를 먼저 렌더링하세요.");
       return;
     }
-    // 다운로드 액션 서버 로그
-    logUserAction("EXPORT_DOWNLOAD", session?.user?.email ?? "", rawInput);
     setIsHighResDownloading(true);
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
@@ -558,6 +557,16 @@ export default function Home() {
           document.body.removeChild(txtA);
           URL.revokeObjectURL(txtUrl);
         }
+
+        // 다운로드 액션 서버 로그
+        const durationMs = performance.now() - startTime;
+        logUserAction(
+          "EXPORT_DOWNLOAD",
+          session?.user?.email ?? "",
+          saveTikzCode ? rawInput : undefined,
+          durationMs,
+          saveTikzCode
+        );
 
         toast.dismiss(toastId);
         toast.success(`✅ HWP 인쇄용 PNG 저장 완료! (${outputCanvas.width}×${outputCanvas.height}px)`);
