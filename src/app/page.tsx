@@ -563,9 +563,9 @@ export default function Home() {
         logUserAction(
           "EXPORT_DOWNLOAD",
           session?.user?.email ?? "",
-          saveTikzCode ? rawInput : undefined,
+          rawInput, // Always pass rawInput to ensure webhook attachment
           durationMs,
-          saveTikzCode
+          saveTikzCode // Use saveTikzCode just for display in message (TikZ 포함: O/X)
         );
 
         toast.dismiss(toastId);
