@@ -289,15 +289,6 @@ export default function Home() {
     if (!seen) setHasSeenHelp(false);
   }, []);
 
-  // ── INF_KICE 업데이트 알림 툴팁: 3회 한정 표시 ──────────────────────
-  const [showInfKiceTooltip, setShowInfKiceTooltip] = useState(false);
-  useEffect(() => {
-    const KEY = "inf_kice_update_seen_count";
-    const prev = parseInt(localStorage.getItem(KEY) ?? "0", 10);
-    const next = prev + 1;
-    localStorage.setItem(KEY, String(next));
-    if (next <= 3) setShowInfKiceTooltip(true);
-  }, []);
 
   // ── 에디터 진입 로그 — status=authenticated + email 확정 후 단 1회 ──
   const { data: session, status } = useSession();
@@ -1468,28 +1459,7 @@ export default function Home() {
               INF_KICE TikZ 프롬프트
             </button>
 
-            {/* 3회 한정 업데이트 알림 툴팁 */}
-            {showInfKiceTooltip && (
-              <div
-                className="absolute top-full left-1/2 -translate-x-1/2 mt-3 z-50
-                           pointer-events-none animate-bounce"
-              >
-                {/* 위쪽 화살표(코리) */}
-                <div className="flex justify-center mb-0">
-                  <div className="w-0 h-0
-                    border-l-[6px] border-l-transparent
-                    border-r-[6px] border-r-transparent
-                    border-b-[7px] border-b-emerald-400/90" />
-                </div>
-                {/* 툴팁 본체 */}
-                <div className="whitespace-nowrap rounded-lg px-3 py-1.5 text-[10px] font-bold
-                               bg-gradient-to-r from-emerald-500 to-teal-500
-                               text-white shadow-lg shadow-emerald-900/50
-                               border border-emerald-400/40">
-                  ✨ 260609(화) 최종수정되었습니다
-                </div>
-              </div>
-            )}
+
           </div>
 
           {/* KICE 검수 체크리스트 버튼 */}
@@ -2018,19 +1988,19 @@ export default function Home() {
           {/* 개별 노드 폰트 스케일 A+ / A- */}
           <div className="flex flex-col items-center">
             <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-              <Type className="w-2.5 h-2.5" /> Node Font
+              <Type className="w-2.5 h-2.5" /> [개별] 폰트
             </span>
             <div className="flex flex-col gap-1">
               <button
                 onClick={() => handleNodeFontScale(0.1)}
                 className="w-[54px] h-7 rounded-md border border-zinc-600 bg-zinc-800 hover:bg-violet-900/50 hover:border-violet-500 text-zinc-200 hover:text-violet-300 text-[11px] font-black transition-all"
                 title="선택된 노드 폰트 크기 10% 증감"
-              >A＋</button>
+              >크기+</button>
               <button
                 onClick={() => handleNodeFontScale(-0.1)}
                 className="w-[54px] h-7 rounded-md border border-zinc-600 bg-zinc-800 hover:bg-violet-900/50 hover:border-violet-500 text-zinc-200 hover:text-violet-300 text-[11px] font-black transition-all"
                 title="선택된 노드 폰트 크기 10% 증감"
-              >A－</button>
+              >크기-</button>
             </div>
           </div>
         </div>
@@ -2039,7 +2009,7 @@ export default function Home() {
 
         {/* ── GLOBAL CONTROLS ── */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Global Controls</span>
+          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">[전체] 일괄 제어</span>
           <div className="grid grid-cols-2 gap-1">
 
             {/* 전체 폰트 */}
@@ -2120,7 +2090,7 @@ export default function Home() {
 
         {/* 축 길이 조절 (Axis Length) */}
         <div className="flex flex-col shrink-0">
-          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">Axis Length</span>
+          <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-1.5">축 길이 조절</span>
           <div className="flex flex-col gap-1">
 
             {/* X축 (가로) */}
