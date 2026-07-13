@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(
   request: NextRequest,
@@ -9,15 +9,28 @@ export async function GET(
     const pathStr = resolvedParams.path.join("/");
 
     // Use environment variable or fallback to the direct IP
-    const krokiBaseUrl = process.env.NEXT_PUBLIC_KROKI_URL || "http://43.201.227.158:8000";
+    let krokiBaseUrl = process.env.NEXT_PUBLIC_KROKI_URL || "http://43.201.227.158:8000";
+    
+    // Remove trailing slash from base URL to prevent double slashes
+    if (krokiBaseUrl.endsWith("/")) {
+      krokiBaseUrl = krokiBaseUrl.slice(0, -1);
+    }
+    
+    // Construct final target URL
     const targetUrl = `${krokiBaseUrl}/${pathStr}`;
+    
+    // Log target URL for debugging in Vercel logs
+    console.log("Kroki Proxy Target URL: ", targetUrl);
 
     const response = await fetch(targetUrl, {
       method: "GET",
     });
 
     if (!response.ok) {
-      return new Response(`Kroki server error: ${response.statusText}`, { status: response.status });
+      return NextResponse.json(
+        { error: `Kroki server error: ${response.statusText}`, status: response.status },
+        { status: response.status }
+      );
     }
 
     const contentType = response.headers.get("content-type") || "image/svg+xml";
@@ -31,7 +44,10 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error("[Kroki Proxy Error]", error);
-    return new Response("Internal Server Error proxying to Kroki", { status: 500 });
+    console.error("Kroki Proxy Error: ", error);
+    return NextResponse.json(
+      { error: "Internal Server Error proxying to Kroki", details: String(error) },
+      { status: 500 }
+    );
   }
 }
