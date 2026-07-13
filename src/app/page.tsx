@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { deflate } from "pako";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -443,6 +443,7 @@ export default function Home() {
   // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 1500px ───
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
   const [saveTikzCode, setSaveTikzCode] = useState(false);
+
   const handleDownloadHighRes = () => {
     const startTime = performance.now();
     if (!svgUrl) {
@@ -519,7 +520,11 @@ export default function Home() {
           outCtx.drawImage(fullCanvas, 0, 0);
         }
 
-        // ── 4단계: 크롭된 캔버스를 PNG로 저장 (기존 로직) ──────────────────────
+        // ── 4단계: 고화질 이미지(Base64) 생성 및 다운로드 ─────────────────
+        const pngData = outputCanvas.toDataURL("image/png");
+        toast.dismiss(toastId);
+
+        // ── 자동 다운로드 (기존 로직 유지) ─────────────────
         const now = new Date();
         const yy = String(now.getFullYear()).slice(-2);
         const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -528,7 +533,7 @@ export default function Home() {
         const min = String(now.getMinutes()).padStart(2, '0');
         const ss = String(now.getSeconds()).padStart(2, '0');
         const fileNameBase = `InfiniteMathlab_${yy}${mm}${dd}_${hh}${min}${ss}`;
-        const pngData = outputCanvas.toDataURL("image/png");
+        
         const a = document.createElement("a");
         a.href = pngData;
         a.download = `${fileNameBase}.png`;
@@ -536,21 +541,39 @@ export default function Home() {
         a.click();
         document.body.removeChild(a);
 
-        // ── 4-1단계: 클립보드에 PNG 복사 (Clipboard API) ─────────────────────
-        outputCanvas.toBlob(async (blob) => {
-          if (blob) {
-            try {
-              const clipboardItem = new ClipboardItem({ "image/png": blob });
-              await navigator.clipboard.write([clipboardItem]);
-              toast.dismiss(toastId);
-              toast.success(`✅ 이미지가 저장 및 복사되었습니다! HWP 문서에서 [Ctrl + V]를 누르세요. (${outputCanvas.width}×${outputCanvas.height}px)`, { duration: 5000 });
-            } catch (clipboardErr) {
-              console.error("[Clipboard Error]", clipboardErr);
-              toast.dismiss(toastId);
-              toast.warning(`✅ HWP 인쇄용 PNG 저장 완료! (클립보드 복사 실패. 브라우저 권한을 확인해주세요.)`);
-            }
+        // ── 4-1단계: DOM Selection을 이용한 스텔스 복사 (HWP 투명도 유지용) ─────────────────
+        const stealthImg = document.createElement('img');
+        stealthImg.src = pngData;
+        
+        const stealthDiv = document.createElement('div');
+        stealthDiv.contentEditable = "true";
+        stealthDiv.style.position = 'fixed';
+        stealthDiv.style.left = '-9999px';
+        stealthDiv.style.opacity = '0';
+        stealthDiv.style.pointerEvents = 'none';
+        stealthDiv.appendChild(stealthImg);
+        document.body.appendChild(stealthDiv);
+
+        const range = document.createRange();
+        range.selectNode(stealthImg);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+
+        try {
+          const success = document.execCommand('copy');
+          if (success) {
+            toast.success(`✅ 이미지 복사 완료! 한글(HWP) 파일에서 [Ctrl + V]를 누르세요.`, { duration: 3000 });
+          } else {
+            toast.warning(`✅ HWP 인쇄용 PNG 저장 완료! (자동 복사 실패)`, { duration: 3000 });
           }
-        }, "image/png");
+        } catch (err) {
+          console.error("[Stealth Copy Error]", err);
+          toast.warning(`✅ HWP 인쇄용 PNG 저장 완료! (자동 복사 실패)`, { duration: 3000 });
+        }
+
+        selection?.removeAllRanges();
+        document.body.removeChild(stealthDiv);
 
         // ── 5단계: TikZ 코드 저장 (체크 시) ──────────────────────────────────
         if (saveTikzCode) {
@@ -686,7 +709,7 @@ export default function Home() {
   //  3. node 선언 직후 [] 옵션 다음의 첫 {텍스트}만 라벨로 인식
   //  4. 빈 content 노드(점 마커) 필터링
   //  5. srcIndex(rawInput 내 고유 offset)로 매핑 무결성 보장
-  const scanNodes = () => {
+  const nodes = useMemo(() => {
     const matches: { full: string; options: string; content: string; index: number; srcIndex: number }[] = [];
 
     // \node, \coordinate, 또는 \draw path 안의 인라인 node 를 모두 탐색
@@ -771,8 +794,7 @@ export default function Home() {
       startRe.lastIndex = startIdx + full.length;
     }
     return matches;
-  };
-  const nodes = scanNodes();
+  }, [rawInput]);
 
   // ── [버그 수정] 노드 개수가 변할 때(유령 데이터) out-of-bounds 인덱스 정리 ──
   useEffect(() => {
@@ -1557,7 +1579,7 @@ export default function Home() {
       {/* ══════════════════════════════════════════════════════
           MAIN — Code Editor  |  Preview
       ══════════════════════════════════════════════════════ */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div className="flex-1 flex min-h-0">
 
         {/* ── LEFT: Code Editor ─────────────────────────────── */}
         <div className="w-[44%] shrink-0 flex flex-col border-r border-white/[0.05] bg-[#0c1018]">
@@ -1606,7 +1628,7 @@ export default function Home() {
         </div>
 
         {/* ── RIGHT: Live Preview ───────────────────────────── */}
-        <div className="flex-1 flex flex-col p-4 min-h-0 overflow-hidden bg-[#0d1117]">
+        <div className="flex-1 flex flex-col p-4 min-h-0 bg-[#0d1117]">
 
           {/* Preview Toolbar — 심플 단일 줄 */}
           <div className="flex items-center justify-between mb-3 shrink-0">
@@ -1669,7 +1691,11 @@ export default function Home() {
                 </label>
 
                 {/* ── HWP 인쇄용 PNG (1500px) ── */}
-                <div className="relative group">
+                <div className="relative group mt-2 sm:mt-0">
+                  {/* ✨ NEW 말풍선 (Badge) */}
+                  <div className="absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap bg-red-500 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full shadow-md animate-bounce z-[9999] pointer-events-none before:content-[''] before:absolute before:-bottom-1 before:left-1/2 before:-translate-x-1/2 before:border-4 before:border-transparent before:border-t-red-500">
+                    ✨ NEW: 클릭하고 HWP에 바로 Ctrl+V 하세요!
+                  </div>
                   <Button
                     id="btn-download-highres"
                     onClick={handleDownloadHighRes}
@@ -1680,7 +1706,7 @@ export default function Home() {
                     {isHighResDownloading
                       ? <Loader2 className="w-3 h-3 animate-spin" />
                       : <Download className="w-3 h-3" />}
-                    HWP 인쇄용 (고정배율)
+                    [📥저장 & 📋HWP 자동복사]
                   </Button>
                   {/* 툴팁 */}
                   <div
