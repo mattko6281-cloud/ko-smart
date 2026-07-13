@@ -519,7 +519,7 @@ export default function Home() {
           outCtx.drawImage(fullCanvas, 0, 0);
         }
 
-        // ── 4단계: 크롭된 캔버스를 PNG로 저장 ────────────────────────────────
+        // ── 4단계: 크롭된 캔버스를 PNG로 저장 (기존 로직) ──────────────────────
         const now = new Date();
         const yy = String(now.getFullYear()).slice(-2);
         const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -535,6 +535,22 @@ export default function Home() {
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+
+        // ── 4-1단계: 클립보드에 PNG 복사 (Clipboard API) ─────────────────────
+        outputCanvas.toBlob(async (blob) => {
+          if (blob) {
+            try {
+              const clipboardItem = new ClipboardItem({ "image/png": blob });
+              await navigator.clipboard.write([clipboardItem]);
+              toast.dismiss(toastId);
+              toast.success(`✅ 이미지가 저장 및 복사되었습니다! HWP 문서에서 [Ctrl + V]를 누르세요. (${outputCanvas.width}×${outputCanvas.height}px)`, { duration: 5000 });
+            } catch (clipboardErr) {
+              console.error("[Clipboard Error]", clipboardErr);
+              toast.dismiss(toastId);
+              toast.warning(`✅ HWP 인쇄용 PNG 저장 완료! (클립보드 복사 실패. 브라우저 권한을 확인해주세요.)`);
+            }
+          }
+        }, "image/png");
 
         // ── 5단계: TikZ 코드 저장 (체크 시) ──────────────────────────────────
         if (saveTikzCode) {
@@ -558,9 +574,6 @@ export default function Home() {
           durationMs,
           saveTikzCode // Use saveTikzCode just for display in message (TikZ 포함: O/X)
         );
-
-        toast.dismiss(toastId);
-        toast.success(`✅ HWP 인쇄용 PNG 저장 완료! (${outputCanvas.width}×${outputCanvas.height}px)`);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[High-res canvas]", err);
