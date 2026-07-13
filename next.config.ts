@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/api/kroki/:path*",
-        destination: "http://52.78.178.183:8000/:path*",
+        destination: `${process.env.NEXT_PUBLIC_KROKI_URL || "http://43.201.227.158:8000"}/:path*`,
       },
     ];
   },
