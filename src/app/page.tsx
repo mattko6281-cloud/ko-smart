@@ -388,6 +388,15 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [rawInput]);
 
+  // ── 렌더링 전처리 (Auto-Wrapping) 로직 ──────────────────────
+  const getProcessedInput = (code: string) => {
+    let finalCode = code;
+    if (!finalCode.includes("\\documentclass")) {
+      finalCode = `\\documentclass[tikz, border=2pt]{standalone}\n\\usetikzlibrary{arrows.meta}\n\\begin{document}\n${finalCode}\n\\end{document}`;
+    }
+    return finalCode;
+  };
+
   // ── SVG URL 설정 (빠르고 안전한 보디없는 방식) ────────────────────
   //  CORS 문제 없음: <img> 태그가 브라우저 수준에서 로드
   useEffect(() => {
@@ -399,7 +408,7 @@ export default function Home() {
       setIsRendering(true);
       setRenderError("");
       setImgRenderedH(0);
-      setSvgUrl(krokiUrl(debouncedInput, "svg", renderEngine));
+      setSvgUrl(krokiUrl(getProcessedInput(debouncedInput), "svg", renderEngine));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error("[Kroki encode error]", err);
@@ -421,7 +430,7 @@ export default function Home() {
   const handleDownloadPng = async () => {
     if (!debouncedInput.trim()) { toast.error("다운로드할 코드가 없습니다."); return; }
     setIsDownloading(true);
-    const url = krokiUrl(debouncedInput, "png", renderEngine);
+    const url = krokiUrl(getProcessedInput(debouncedInput), "png", renderEngine);
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
