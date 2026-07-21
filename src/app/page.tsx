@@ -392,7 +392,7 @@ export default function Home() {
   const getProcessedInput = (code: string) => {
     let finalCode = code;
     if (!finalCode.includes("\\documentclass")) {
-      finalCode = `\\documentclass[tikz, border=2pt]{standalone}\n\\usetikzlibrary{arrows.meta}\n\\begin{document}\n${finalCode}\n\\end{document}`;
+      finalCode = `\\documentclass[tikz, border=2pt]{standalone}\n\\usepackage{kotex}\n\\usetikzlibrary{arrows.meta}\n\\begin{document}\n${finalCode}\n\\end{document}`;
     }
     return finalCode;
   };
