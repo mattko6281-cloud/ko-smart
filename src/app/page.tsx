@@ -362,21 +362,29 @@ export default function Home() {
     return () => clearTimeout(t);
   }, [rawInput]);
 
-  // ── 렌더링 전처리 (Auto-Wrapping) 로직 ──────────────────────
-  const getProcessedInput = (code: string) => {
-    let finalCode = code;
-    if (!finalCode.includes("\\documentclass")) {
-      // 뼈대가 아예 없는 경우 템플릿으로 감싸기
-      finalCode = `\\documentclass[tikz, border=2pt]{standalone}\n\\usepackage{kotex}\n\\usetikzlibrary{arrows.meta}\n\\begin{document}\n${finalCode}\n\\end{document}`;
-    } else if (!finalCode.includes("kotex")) {
-      // 뼈대는 있지만 kotex가 없는 경우, \documentclass 선언부 바로 다음 줄에 강제 주입
-      finalCode = finalCode.replace(
-        /(\\documentclass(?:\[.*?\])?\{.*?\})/,
-        "$1\n\\usepackage{kotex}"
-      );
-    }
-    return finalCode;
-  };
+  // 렌더링 전처리 (Auto-Wrapping) 로직
+const getProcessedInput = (code: string) => {
+  let finalCode = code;
+  const bs = String.fromCharCode(92); // Vercel 컴파일러 버그 우회용 역슬래시 기호 생성
+
+  if (!finalCode.includes("documentclass")) {
+    // 뼈대가 아예 없는 경우 템플릿으로 감싸기
+    finalCode = bs + "documentclass[tikz, border=2pt]{standalone}\n" +
+                bs + "usepackage{kotex}\n" +
+                bs + "usetikzlibrary{arrows.meta}\n" +
+                bs + "begin{document}\n" +
+                finalCode + "\n" +
+                bs + "end{document}";
+  } else if (!finalCode.includes("kotex")) {
+    // 뼈대는 있지만 kotex가 없는 경우, \documentclass 선언부 바로 다음 줄에 강제 주입
+    finalCode = finalCode.replace(
+      /(\\documentclass(?:\[.*?\])?\{.*?\})/,
+      "$1\n" + bs + "usepackage{kotex}"
+    );
+  }
+  
+  return finalCode;
+};
 
   // ── SVG URL 설정 (빠르고 안전한 보디없는 방식) ────────────────────
   //  CORS 문제 없음: <img> 태그가 브라우저 수준에서 로드
