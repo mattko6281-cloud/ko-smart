@@ -392,7 +392,14 @@ export default function Home() {
   const getProcessedInput = (code: string) => {
     let finalCode = code;
     if (!finalCode.includes("\\documentclass")) {
+      // 뼈대가 아예 없는 경우 템플릿으로 감싸기
       finalCode = `\\documentclass[tikz, border=2pt]{standalone}\n\\usepackage{kotex}\n\\usetikzlibrary{arrows.meta}\n\\begin{document}\n${finalCode}\n\\end{document}`;
+    } else if (!finalCode.includes("kotex")) {
+      // 뼈대는 있지만 kotex가 없는 경우, \documentclass 선언부 바로 다음 줄에 강제 주입
+      finalCode = finalCode.replace(
+        /(\\documentclass(?:\[.*?\])?\{.*?\})/,
+        "$1\n\\usepackage{kotex}"
+      );
     }
     return finalCode;
   };
