@@ -372,8 +372,8 @@ const getProcessedInput = (code: string) => {
   if (!finalCode.includes("documentclass")) {
     // 뼈대가 아예 없는 경우 템플릿으로 감싸기
     finalCode = bs + "documentclass[tikz, border=2pt]{standalone}\n" +
-                bs + "usepackage{kotex}\n" +
-                bs + "usetikzlibrary{arrows.meta}\n" +
+                bs + "usepackage{kotex, amsmath}\n" +
+                bs + "usetikzlibrary{arrows.meta, calc, intersections}\n" +
                 bs + "begin{document}\n" +
                 finalCode + "\n" +
                 bs + "end{document}";
@@ -381,7 +381,7 @@ const getProcessedInput = (code: string) => {
     // 뼈대는 있지만 kotex가 없는 경우, \documentclass 선언부 바로 다음 줄에 강제 주입
     finalCode = finalCode.replace(
       /(\\documentclass(?:\[.*?\])?\{.*?\})/,
-      "$1\n" + bs + "usepackage{kotex}"
+      "$1\n" + bs + "usepackage{kotex, amsmath}"
     );
   }
   
