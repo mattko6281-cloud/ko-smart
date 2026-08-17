@@ -453,126 +453,165 @@ const getProcessedInput = (code: string) => {
     setIsHighResDownloading(true);
     const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
-    const imagePromise = new Promise<Blob>((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        try {
-          const FIXED_SCALE = 4.0;
-          const TARGET_W = Math.round(img.naturalWidth  * FIXED_SCALE) || 1200;
-          const TARGET_H = Math.round(img.naturalHeight * FIXED_SCALE) || Math.round(TARGET_W * 0.8);
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        // ── 고정 배율(×4.0) 렌더링 — SVG 원본 크기에 일정 배수를 곱해 해상도 결정 ──
+        //  이렇게 하면 넓은 그래프는 크게, 좌은 그래프는 작게 저장되더라도
+        //  'cm 당 픽셀 밀도(즉 폰트 체급)'는 항상 동일함
+        const FIXED_SCALE = 4.0;
+        const TARGET_W = Math.round(img.naturalWidth  * FIXED_SCALE) || 1200;
+        const TARGET_H = Math.round(img.naturalHeight * FIXED_SCALE) || Math.round(TARGET_W * 0.8);
 
-          const fullCanvas = document.createElement("canvas");
-          fullCanvas.width  = TARGET_W;
-          fullCanvas.height = TARGET_H;
-          const fullCtx = fullCanvas.getContext("2d")!;
-          fullCtx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
+        // ── 1단계: 풀 사이즈 캔버스에 그래프 렌더링 (투명 배경 유지) ──────────
+        const fullCanvas = document.createElement("canvas");
+        fullCanvas.width  = TARGET_W;
+        fullCanvas.height = TARGET_H;
+        const fullCtx = fullCanvas.getContext("2d")!;
+        // 흰 배경 fillRect 삭제 — 캔버스 기본값이 투명(alpha=0)이므로 별도 채우지 않음
+        fullCtx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
 
-          const imageData = fullCtx.getImageData(0, 0, TARGET_W, TARGET_H);
-          const data = imageData.data;
-          let minX = TARGET_W, minY = TARGET_H, maxX = 0, maxY = 0;
+        // ── 2단계: 픽셀 스캔으로 실제 콘텐츠 바운딩 박스 계산 ───────────────
+        const imageData = fullCtx.getImageData(0, 0, TARGET_W, TARGET_H);
+        const data = imageData.data; // [r,g,b,a, r,g,b,a, ...]
 
-          for (let y = 0; y < TARGET_H; y++) {
-            for (let x = 0; x < TARGET_W; x++) {
-              const idx = (y * TARGET_W + x) * 4;
-              if (data[idx + 3] === 0) continue;
-              if (x < minX) minX = x;
-              if (x > maxX) maxX = x;
-              if (y < minY) minY = y;
-              if (y > maxY) maxY = y;
-            }
+        let minX = TARGET_W, minY = TARGET_H, maxX = 0, maxY = 0;
+
+        for (let y = 0; y < TARGET_H; y++) {
+          for (let x = 0; x < TARGET_W; x++) {
+            const idx = (y * TARGET_W + x) * 4;
+            // 투명 픽셀만 배경으로 인식하고 무시 — alpha=0 기준
+            // (흰색 조건을 제거하여 SVG에 흰색 내용이 있어도 크롭에서 보존)
+            if (data[idx + 3] === 0) continue;
+
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
           }
-
-          const hasContent = maxX > minX && maxY > minY;
-          const MARGIN = 20;
-          const cropX = Math.max(0, minX - MARGIN);
-          const cropY = Math.max(0, minY - MARGIN);
-          const cropW = Math.min(TARGET_W, maxX + MARGIN + 1) - cropX;
-          const cropH = Math.min(TARGET_H, maxY + MARGIN + 1) - cropY;
-
-          const outputCanvas = document.createElement("canvas");
-          outputCanvas.width  = hasContent ? cropW : TARGET_W;
-          outputCanvas.height = hasContent ? cropH : TARGET_H;
-          const outCtx = outputCanvas.getContext("2d")!;
-
-          if (hasContent) {
-            outCtx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-          } else {
-            outCtx.drawImage(fullCanvas, 0, 0);
-          }
-
-          outputCanvas.toBlob((blob) => {
-            if (blob) {
-              const pngData = outputCanvas.toDataURL("image/png");
-              const now = new Date();
-              const yy = String(now.getFullYear()).slice(-2);
-              const mm = String(now.getMonth() + 1).padStart(2, '0');
-              const dd = String(now.getDate()).padStart(2, '0');
-              const hh = String(now.getHours()).padStart(2, '0');
-              const min = String(now.getMinutes()).padStart(2, '0');
-              const ss = String(now.getSeconds()).padStart(2, '0');
-              const fileNameBase = `InfiniteMathlab_${yy}${mm}${dd}_${hh}${min}${ss}`;
-              
-              const a = document.createElement("a");
-              a.href = pngData;
-              a.download = `${fileNameBase}.png`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-
-              if (saveTikzCode) {
-                const txtBlob = new Blob([rawInput], { type: "text/plain;charset=utf-8" });
-                const txtUrl = URL.createObjectURL(txtBlob);
-                const txtA = document.createElement("a");
-                txtA.href = txtUrl;
-                txtA.download = `${fileNameBase}.txt`;
-                document.body.appendChild(txtA);
-                txtA.click();
-                document.body.removeChild(txtA);
-                URL.revokeObjectURL(txtUrl);
-              }
-
-              const durationMs = performance.now() - startTime;
-              logUserAction("EXPORT_DOWNLOAD", session?.user?.email ?? "", rawInput, durationMs, saveTikzCode);
-
-              toast.dismiss(toastId);
-              toast.success(`✅ 저장 및 복사 완료! 한글(HWP) 파일에서 [Ctrl + V]를 누르세요.`, { duration: 3000 });
-              setIsHighResDownloading(false);
-              resolve(blob);
-            } else {
-              toast.dismiss(toastId);
-              setIsHighResDownloading(false);
-              toast.error("이미지 생성에 실패했습니다.");
-              reject(new Error("Blob failed"));
-            }
-          }, "image/png");
-        } catch (err: unknown) {
-          toast.dismiss(toastId);
-          setIsHighResDownloading(false);
-          toast.error("고화질 저장 실패: " + (err instanceof Error ? err.message : String(err)));
-          reject(err);
         }
-      };
-      img.onerror = () => {
-        toast.dismiss(toastId);
-        setIsHighResDownloading(false);
-        toast.error("SVG 로드 실패 — 네트워크 또는 CORS 문제");
-        reject(new Error("Image load failed"));
-      };
-      img.src = `${svgUrl}?t=${Date.now()}`;
-    });
 
-    try {
-      navigator.clipboard.write([
-        new window.ClipboardItem({
-          "image/png": imagePromise
-        })
-      ]);
-    } catch (err) {
-      console.error("[Clipboard API Error]", err);
+        // 콘텐츠가 전혀 없으면 원본 그대로 저장
+        const hasContent = maxX > minX && maxY > minY;
+
+        // ── 3단계: 안전 마진 20px 추가 후 크롭 캔버스 생성 ──────────────────
+        const MARGIN = 20;
+        const cropX = Math.max(0, minX - MARGIN);
+        const cropY = Math.max(0, minY - MARGIN);
+        const cropW = Math.min(TARGET_W, maxX + MARGIN + 1) - cropX;
+        const cropH = Math.min(TARGET_H, maxY + MARGIN + 1) - cropY;
+
+        const outputCanvas = document.createElement("canvas");
+        outputCanvas.width  = hasContent ? cropW : TARGET_W;
+        outputCanvas.height = hasContent ? cropH : TARGET_H;
+        const outCtx = outputCanvas.getContext("2d")!;
+        // 흰 배경 fillRect 삭제 — PNG 투명 배경 보장
+
+        if (hasContent) {
+          // 원본 풀 캔버스에서 크롭 영역만 새 캔버스로 복사
+          outCtx.drawImage(
+            fullCanvas,
+            cropX, cropY, cropW, cropH,   // 원본 소스 영역
+            0,     0,     cropW, cropH    // 출력 대상 영역
+          );
+        } else {
+          // fallback: 콘텐츠 감지 실패 시 원본 그대로
+          outCtx.drawImage(fullCanvas, 0, 0);
+        }
+
+        // ── 4단계: 고화질 이미지(Base64) 생성 및 다운로드 ─────────────────
+        const pngData = outputCanvas.toDataURL("image/png");
+        toast.dismiss(toastId);
+
+        // ── 자동 다운로드 (기존 로직 유지) ─────────────────
+        const now = new Date();
+        const yy = String(now.getFullYear()).slice(-2);
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        const hh = String(now.getHours()).padStart(2, '0');
+        const min = String(now.getMinutes()).padStart(2, '0');
+        const ss = String(now.getSeconds()).padStart(2, '0');
+        const fileNameBase = `InfiniteMathlab_${yy}${mm}${dd}_${hh}${min}${ss}`;
+        
+        const a = document.createElement("a");
+        a.href = pngData;
+        a.download = `${fileNameBase}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // ── 4-1단계: DOM Selection을 이용한 스텔스 복사 (HWP 투명도 유지용) ─────────────────
+        const stealthImg = document.createElement('img');
+        stealthImg.src = pngData;
+        
+        const stealthDiv = document.createElement('div');
+        stealthDiv.contentEditable = "true";
+        stealthDiv.style.position = 'fixed';
+        stealthDiv.style.left = '-9999px';
+        stealthDiv.style.opacity = '0';
+        stealthDiv.style.pointerEvents = 'none';
+        stealthDiv.appendChild(stealthImg);
+        document.body.appendChild(stealthDiv);
+
+        const range = document.createRange();
+        range.selectNode(stealthImg);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+
+        try {
+          const success = document.execCommand('copy');
+          if (success) {
+            toast.success(`✅ 이미지 복사 완료! 한글(HWP) 파일에서 [Ctrl + V]를 누르세요.`, { duration: 3000 });
+          } else {
+            toast.warning(`✅ HWP 인쇄용 PNG 저장 완료! (자동 복사 실패)`, { duration: 3000 });
+          }
+        } catch (err) {
+          console.error("[Stealth Copy Error]", err);
+          toast.warning(`✅ HWP 인쇄용 PNG 저장 완료! (자동 복사 실패)`, { duration: 3000 });
+        }
+
+        selection?.removeAllRanges();
+        document.body.removeChild(stealthDiv);
+
+        // ── 5단계: TikZ 코드 저장 (체크 시) ──────────────────────────────────
+        if (saveTikzCode) {
+          const blob = new Blob([rawInput], { type: "text/plain;charset=utf-8" });
+          const txtUrl = URL.createObjectURL(blob);
+          const txtA = document.createElement("a");
+          txtA.href = txtUrl;
+          txtA.download = `${fileNameBase}.txt`;
+          document.body.appendChild(txtA);
+          txtA.click();
+          document.body.removeChild(txtA);
+          URL.revokeObjectURL(txtUrl);
+        }
+
+        // 다운로드 액션 서버 로그
+        const durationMs = performance.now() - startTime;
+        logUserAction(
+          "EXPORT_DOWNLOAD",
+          session?.user?.email ?? "",
+          rawInput, // Always pass rawInput to ensure webhook attachment
+          durationMs,
+          saveTikzCode // Use saveTikzCode just for display in message (TikZ 포함: O/X)
+        );
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[High-res canvas]", err);
+        toast.dismiss(toastId);
+        toast.error("고화질 저장 실패: " + msg);
+      } finally {
+        setIsHighResDownloading(false);
+      }
+    };
+    img.onerror = () => {
       toast.dismiss(toastId);
-      toast.warning(`이미지 다운로드는 진행되나, 클립보드 자동 복사에 실패했습니다 (권한/지원 문제).`, { duration: 4000 });
-    }
+      toast.error("SVG 로드 실패 — 네트워크 또는 CORS 문제");
+      setIsHighResDownloading(false);
+    };
+    img.src = `${svgUrl}?t=${Date.now()}`;
   };
 
   // ── 평가원 표준 템플릿 로드 ────────────────────────────────
