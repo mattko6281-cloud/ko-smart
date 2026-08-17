@@ -557,10 +557,13 @@ const getProcessedInput = (code: string) => {
       img.src = `${svgUrl}?t=${Date.now()}`;
     });
 
+    const plainBlobPromise = htmlBlobPromise.then(() => new Blob(["[이미지 복사 완료]"], { type: "text/plain" }));
+
     try {
       navigator.clipboard.write([
         new window.ClipboardItem({
-          "text/html": htmlBlobPromise
+          "text/html": htmlBlobPromise,
+          "text/plain": plainBlobPromise
         })
       ]);
     } catch (err) {
