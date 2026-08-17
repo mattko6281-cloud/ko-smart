@@ -443,76 +443,6 @@ const getProcessedInput = (code: string) => {
   // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 1500px ───
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
   const [saveTikzCode, setSaveTikzCode] = useState(false);
-  const [cachedImageForCopy, setCachedImageForCopy] = useState<string | null>(null);
-  const [isPrebaking, setIsPrebaking] = useState(false);
-
-  // ── 백그라운드 사전 렌더링 (Pre-baking) ────────────────────────
-  useEffect(() => {
-    if (!svgUrl) {
-      setCachedImageForCopy(null);
-      return;
-    }
-    setIsPrebaking(true);
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const FIXED_SCALE = 4.0;
-        const TARGET_W = Math.round(img.naturalWidth  * FIXED_SCALE) || 1200;
-        const TARGET_H = Math.round(img.naturalHeight * FIXED_SCALE) || Math.round(TARGET_W * 0.8);
-
-        const fullCanvas = document.createElement("canvas");
-        fullCanvas.width  = TARGET_W;
-        fullCanvas.height = TARGET_H;
-        const fullCtx = fullCanvas.getContext("2d")!;
-        fullCtx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
-
-        const imageData = fullCtx.getImageData(0, 0, TARGET_W, TARGET_H);
-        const data = imageData.data;
-        let minX = TARGET_W, minY = TARGET_H, maxX = 0, maxY = 0;
-
-        for (let y = 0; y < TARGET_H; y++) {
-          for (let x = 0; x < TARGET_W; x++) {
-            const idx = (y * TARGET_W + x) * 4;
-            if (data[idx + 3] === 0) continue;
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
-
-        const hasContent = maxX > minX && maxY > minY;
-        const MARGIN = 20;
-        const cropX = Math.max(0, minX - MARGIN);
-        const cropY = Math.max(0, minY - MARGIN);
-        const cropW = Math.min(TARGET_W, maxX + MARGIN + 1) - cropX;
-        const cropH = Math.min(TARGET_H, maxY + MARGIN + 1) - cropY;
-
-        const outputCanvas = document.createElement("canvas");
-        outputCanvas.width  = hasContent ? cropW : TARGET_W;
-        outputCanvas.height = hasContent ? cropH : TARGET_H;
-        const outCtx = outputCanvas.getContext("2d")!;
-
-        if (hasContent) {
-          outCtx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-        } else {
-          outCtx.drawImage(fullCanvas, 0, 0);
-        }
-
-        const pngData = outputCanvas.toDataURL("image/png");
-        setCachedImageForCopy(pngData);
-      } catch (err) {
-        console.error("Prebaking failed", err);
-      } finally {
-        setIsPrebaking(false);
-      }
-    };
-    img.onerror = () => {
-      setIsPrebaking(false);
-    };
-    img.src = `${svgUrl}?t=${Date.now()}`;
-  }, [svgUrl]);
 
   const handleDownloadHighRes = () => {
     const startTime = performance.now();
@@ -520,81 +450,124 @@ const getProcessedInput = (code: string) => {
       toast.error("렌더링된 SVG가 없습니다. 코드를 먼저 렌더링하세요.");
       return;
     }
-    if (isPrebaking || !cachedImageForCopy) {
-      toast.error("이미지 고화질 변환 중입니다. 잠시 후 다시 눌러주세요.");
-      return;
-    }
-
     setIsHighResDownloading(true);
+    const toastId = toast.loading("⏳ 초고화질 렌더링 중...");
 
-    // ── 동기적 스텔스 복사 (HWP CF_HTML 메타데이터 확보) ─────────────────
-    const stealthImg = document.createElement('img');
-    stealthImg.src = cachedImageForCopy;
-    
-    const stealthDiv = document.createElement('div');
-    stealthDiv.contentEditable = "true";
-    stealthDiv.style.position = 'fixed';
-    stealthDiv.style.left = '-9999px';
-    stealthDiv.style.opacity = '0';
-    stealthDiv.style.pointerEvents = 'none';
-    stealthDiv.appendChild(stealthImg);
-    document.body.appendChild(stealthDiv);
+    const htmlBlobPromise = new Promise<Blob>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const FIXED_SCALE = 4.0;
+          const TARGET_W = Math.round(img.naturalWidth  * FIXED_SCALE) || 1200;
+          const TARGET_H = Math.round(img.naturalHeight * FIXED_SCALE) || Math.round(TARGET_W * 0.8);
 
-    const range = document.createRange();
-    range.selectNode(stealthImg);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+          const fullCanvas = document.createElement("canvas");
+          fullCanvas.width  = TARGET_W;
+          fullCanvas.height = TARGET_H;
+          const fullCtx = fullCanvas.getContext("2d")!;
+          fullCtx.drawImage(img, 0, 0, TARGET_W, TARGET_H);
+
+          const imageData = fullCtx.getImageData(0, 0, TARGET_W, TARGET_H);
+          const data = imageData.data;
+          let minX = TARGET_W, minY = TARGET_H, maxX = 0, maxY = 0;
+
+          for (let y = 0; y < TARGET_H; y++) {
+            for (let x = 0; x < TARGET_W; x++) {
+              const idx = (y * TARGET_W + x) * 4;
+              if (data[idx + 3] === 0) continue;
+              if (x < minX) minX = x;
+              if (x > maxX) maxX = x;
+              if (y < minY) minY = y;
+              if (y > maxY) maxY = y;
+            }
+          }
+
+          const hasContent = maxX > minX && maxY > minY;
+          const MARGIN = 20;
+          const cropX = Math.max(0, minX - MARGIN);
+          const cropY = Math.max(0, minY - MARGIN);
+          const cropW = Math.min(TARGET_W, maxX + MARGIN + 1) - cropX;
+          const cropH = Math.min(TARGET_H, maxY + MARGIN + 1) - cropY;
+
+          const outputCanvas = document.createElement("canvas");
+          outputCanvas.width  = hasContent ? cropW : TARGET_W;
+          outputCanvas.height = hasContent ? cropH : TARGET_H;
+          const outCtx = outputCanvas.getContext("2d")!;
+
+          if (hasContent) {
+            outCtx.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+          } else {
+            outCtx.drawImage(fullCanvas, 0, 0);
+          }
+
+          const pngData = outputCanvas.toDataURL("image/png");
+          
+          const now = new Date();
+          const yy = String(now.getFullYear()).slice(-2);
+          const mm = String(now.getMonth() + 1).padStart(2, '0');
+          const dd = String(now.getDate()).padStart(2, '0');
+          const hh = String(now.getHours()).padStart(2, '0');
+          const min = String(now.getMinutes()).padStart(2, '0');
+          const ss = String(now.getSeconds()).padStart(2, '0');
+          const fileNameBase = `InfiniteMathlab_${yy}${mm}${dd}_${hh}${min}${ss}`;
+          
+          const a = document.createElement("a");
+          a.href = pngData;
+          a.download = `${fileNameBase}.png`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+
+          if (saveTikzCode) {
+            const txtBlob = new Blob([rawInput], { type: "text/plain;charset=utf-8" });
+            const txtUrl = URL.createObjectURL(txtBlob);
+            const txtA = document.createElement("a");
+            txtA.href = txtUrl;
+            txtA.download = `${fileNameBase}.txt`;
+            document.body.appendChild(txtA);
+            txtA.click();
+            document.body.removeChild(txtA);
+            URL.revokeObjectURL(txtUrl);
+          }
+
+          const durationMs = performance.now() - startTime;
+          logUserAction("EXPORT_DOWNLOAD", session?.user?.email ?? "", rawInput, durationMs, saveTikzCode);
+
+          const htmlString = `<img src="${pngData}">`;
+          const htmlBlob = new Blob([htmlString], { type: "text/html" });
+          
+          toast.dismiss(toastId);
+          toast.success(`✅ 이미지 복사 완료! 한글(HWP) 파일에서 [Ctrl + V]를 누르고 '원본 형식 유지'를 선택하세요.`, { duration: 4500 });
+          setIsHighResDownloading(false);
+          resolve(htmlBlob);
+        } catch (err: unknown) {
+          toast.dismiss(toastId);
+          setIsHighResDownloading(false);
+          toast.error("고화질 저장 실패: " + (err instanceof Error ? err.message : String(err)));
+          reject(err);
+        }
+      };
+      img.onerror = () => {
+        toast.dismiss(toastId);
+        setIsHighResDownloading(false);
+        toast.error("SVG 로드 실패 — 네트워크 또는 CORS 문제");
+        reject(new Error("Image load failed"));
+      };
+      img.src = `${svgUrl}?t=${Date.now()}`;
+    });
 
     try {
-      const success = document.execCommand('copy');
-      if (success) {
-        toast.success(`✅ 이미지 복사 완료! 한글(HWP) 파일에서 [Ctrl + V]를 누르세요.`, { duration: 4500 });
-      } else {
-        toast.warning(`✅ 이미지 다운로드 완료! (클립보드 자동 복사 실패)`, { duration: 4000 });
-      }
+      navigator.clipboard.write([
+        new window.ClipboardItem({
+          "text/html": htmlBlobPromise
+        })
+      ]);
     } catch (err) {
-      console.error("[Stealth Copy Error]", err);
-      toast.warning(`✅ 이미지 다운로드 완료! (클립보드 권한 없음)`, { duration: 4000 });
+      console.error("[Clipboard API Error]", err);
+      toast.dismiss(toastId);
+      toast.warning(`이미지 다운로드는 진행되나, 클립보드 자동 복사에 실패했습니다 (권한/지원 문제).`, { duration: 4000 });
     }
-
-    selection?.removeAllRanges();
-    document.body.removeChild(stealthDiv);
-
-    // ── 고화질 이미지(Base64) 파일 다운로드 ─────────────────
-    const now = new Date();
-    const yy = String(now.getFullYear()).slice(-2);
-    const mm = String(now.getMonth() + 1).padStart(2, '0');
-    const dd = String(now.getDate()).padStart(2, '0');
-    const hh = String(now.getHours()).padStart(2, '0');
-    const min = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    const fileNameBase = `InfiniteMathlab_${yy}${mm}${dd}_${hh}${min}${ss}`;
-    
-    const a = document.createElement("a");
-    a.href = cachedImageForCopy;
-    a.download = `${fileNameBase}.png`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-
-    // ── TikZ 코드 저장 (체크 시) ──────────────────────────────────
-    if (saveTikzCode) {
-      const txtBlob = new Blob([rawInput], { type: "text/plain;charset=utf-8" });
-      const txtUrl = URL.createObjectURL(txtBlob);
-      const txtA = document.createElement("a");
-      txtA.href = txtUrl;
-      txtA.download = `${fileNameBase}.txt`;
-      document.body.appendChild(txtA);
-      txtA.click();
-      document.body.removeChild(txtA);
-      URL.revokeObjectURL(txtUrl);
-    }
-
-    const durationMs = performance.now() - startTime;
-    logUserAction("EXPORT_DOWNLOAD", session?.user?.email ?? "", rawInput, durationMs, saveTikzCode);
-
-    setIsHighResDownloading(false);
   };
 
   // ── 평가원 표준 템플릿 로드 ────────────────────────────────
