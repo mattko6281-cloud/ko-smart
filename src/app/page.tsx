@@ -373,7 +373,7 @@ const getProcessedInput = (code: string) => {
     // 뼈대가 아예 없는 경우 템플릿으로 감싸기
     finalCode = bs + "documentclass[tikz, border=2pt]{standalone}\n" +
                 bs + "usepackage{kotex, amsmath}\n" +
-                bs + "usetikzlibrary{arrows.meta, calc, intersections}\n" +
+                bs + "usetikzlibrary{arrows.meta, calc, intersections, patterns, decorations.pathmorphing}\n" +
                 bs + "begin{document}\n" +
                 finalCode + "\n" +
                 bs + "end{document}";
