@@ -50,7 +50,7 @@ const BASE_WIDTH = 720;
 // ─────────────────────────────────────────────────────────────
 const KICE_TEMPLATE = `\\documentclass[tikz, border=2pt]{standalone}
 % KICE Standard Style Guide Applied (평가원 기본 축)
-\\usetikzlibrary{arrows.meta}
+\\usetikzlibrary{arrows.meta, patterns, decorations.pathmorphing}
 
 \\begin{document}
 \\begin{tikzpicture}[>={Stealth[length=15pt, width=9pt]}, x=1.5cm, y=1.1cm, line width=1pt, every node/.style={scale=2.2, font=\\rm}, dashed/.style={dash pattern=on 6pt off 4pt}]
