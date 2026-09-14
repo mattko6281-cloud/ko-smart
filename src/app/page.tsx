@@ -387,7 +387,7 @@ const getProcessedInput = (code: string) => {
   // 기하 도형 정비율 자동 보정 (Auto-Proportion Correction)
   if (/circle\s*\(/.test(finalCode)) {
     finalCode = finalCode.replace(
-      /\\begin\{tikzpicture\}\[([^\]]+)\]/g,
+      /\\begin\{tikzpicture\}\[((?:[^\]\[]+|\[[^\]]*\])*)\]/g,
       (match, options) => {
         const xMatch = options.match(/\bx\s*=\s*([0-9.]+)([a-zA-Z]+)?/);
         const yMatch = options.match(/\by\s*=\s*([0-9.]+)([a-zA-Z]+)?/);
