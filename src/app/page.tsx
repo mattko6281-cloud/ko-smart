@@ -384,7 +384,30 @@ const getProcessedInput = (code: string) => {
       "$1\n" + bs + "usepackage{kotex, amsmath}"
     );
   }
-  
+  // 기하 도형 정비율 자동 보정 (Auto-Proportion Correction)
+  if (/circle\s*\(/.test(finalCode)) {
+    finalCode = finalCode.replace(
+      /\\begin\{tikzpicture\}\[([^\]]+)\]/g,
+      (match, options) => {
+        const xMatch = options.match(/\bx\s*=\s*([0-9.]+)([a-zA-Z]+)?/);
+        const yMatch = options.match(/\by\s*=\s*([0-9.]+)([a-zA-Z]+)?/);
+
+        if (xMatch && yMatch) {
+          const xVal = parseFloat(xMatch[1]);
+          const yVal = parseFloat(yMatch[1]);
+          const maxVal = Math.max(xVal, yVal);
+          
+          let newOptions = options;
+          newOptions = newOptions.replace(/\bx\s*=\s*[0-9.]+([a-zA-Z]+)?/, `x=${maxVal}${xMatch[2] || ''}`);
+          newOptions = newOptions.replace(/\by\s*=\s*[0-9.]+([a-zA-Z]+)?/, `y=${maxVal}${yMatch[2] || ''}`);
+
+          return `\\begin{tikzpicture}[${newOptions}]`;
+        }
+        return match;
+      }
+    );
+  }
+
   return finalCode;
 };
 
