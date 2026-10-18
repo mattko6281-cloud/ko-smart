@@ -465,7 +465,7 @@ const getProcessedInput = (code: string) => {
 
   // ── 초고화질 PNG: svgUrl + crossOrigin=anonymous → Canvas 1500px ───
   const [isHighResDownloading, setIsHighResDownloading] = useState(false);
-  const [saveTikzCode, setSaveTikzCode] = useState(false);
+  const [saveTikzCode, setSaveTikzCode] = useState(true);
 
   const handleDownloadHighRes = () => {
     const startTime = performance.now();
