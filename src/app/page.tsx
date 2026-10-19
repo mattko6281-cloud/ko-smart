@@ -10,7 +10,7 @@ import {
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
   RotateCcw, BookOpen, X, ClipboardCopy, Type, HelpCircle, Sliders,
-  GripHorizontal, GripVertical, Info
+  GripHorizontal, GripVertical, Info, Sparkles
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem,
@@ -22,6 +22,17 @@ import { logUserAction } from "@/actions/logger";
 import guide1 from "@/assets/guide1.png";
 import guide2 from "@/assets/guide2.png";
 import guide3 from "@/assets/guide3.png";
+import { SmartLabelBetaModal } from "@/components/SmartLabelBetaModal";
+import {
+  DEVELOPER_BETA_EMAIL,
+  SMART_LABEL_BACKUP_STORAGE_KEY,
+  shouldShowSmartLabelBetaUI,
+  applyApprovedProposal,
+  restoreOriginalFromBackup,
+  type SmartLabelBackupSnapshot,
+} from "@/lib/smart-label-beta/client-workflow";
+import type { SmartLabelBetaResponse } from "@/lib/smart-label-beta/kroki-recommend";
+
 
 // ─────────────────────────────────────────────────────────────
 //  Kroki GET URL — zlib deflate + base64url (CORS-free)
@@ -349,6 +360,128 @@ export default function Home() {
     setRawInput(value);
     localStorage.setItem(LS_KEY, value);
   }, []);
+
+  // ── 스마트 라벨 자동 정렬 (Beta) — 개발자 단독(mattko6281@gmail.com) 격리 상태 ──
+  const [serverBetaEnabled, setServerBetaEnabled] = useState(false);
+  const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
+  const [smartLabelProposal, setSmartLabelProposal] = useState<SmartLabelBetaResponse | null>(null);
+  const [smartLabelBackup, setSmartLabelBackup] = useState<SmartLabelBackupSnapshot | null>(null);
+  const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false);
+
+  // 마운트 시 독립 백업 복원
+  useEffect(() => {
+    try {
+      const rawBackup = localStorage.getItem(SMART_LABEL_BACKUP_STORAGE_KEY);
+      if (rawBackup) {
+        const parsed = JSON.parse(rawBackup);
+        if (parsed && typeof parsed.originalCode === "string" && typeof parsed.appliedRecommendedCode === "string") {
+          setSmartLabelBackup(parsed);
+        }
+      }
+    } catch {
+      // 손상된 백업 무시
+    }
+  }, []);
+
+  // 인증된 개발자 세션(mattko6281@gmail.com)일 때만 서버 측 베타 활성화 상태를 확인 (다른 사용자에게는 요청조차 보내지 않음)
+  useEffect(() => {
+    const email = session?.user?.email?.trim().toLowerCase();
+    if (status !== "authenticated" || email !== DEVELOPER_BETA_EMAIL) {
+      setServerBetaEnabled(false);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/smart-label/recommend", { method: "GET", cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled) {
+          setServerBetaEnabled(Boolean(data?.ok && data?.enabled && data?.authorized));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setServerBetaEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, session?.user?.email]);
+
+  const showSmartLabelBeta = shouldShowSmartLabelBetaUI({
+    sessionStatus: status,
+    sessionEmail: session?.user?.email,
+    serverBetaEnabled,
+  });
+
+  const handleRunSmartLabelBeta = async () => {
+    if (!showSmartLabelBeta || isSmartLabelLoading) return;
+    if (!rawInput.trim()) {
+      toast.error("TikZ 코드를 먼저 입력해 주세요.");
+      return;
+    }
+    const snapshotCode = rawInput;
+    setIsSmartLabelLoading(true);
+    try {
+      const res = await fetch("/api/smart-label/recommend", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tikz: snapshotCode }),
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => null);
+      if (!data) {
+        toast.error("스마트 라벨 응답을 해석할 수 없습니다. 원본 코드는 안전하게 유지됩니다.");
+        return;
+      }
+      if (res.status === 401 || res.status === 403 || res.status === 503 || res.status === 429) {
+        toast.error(data.message || data.error || "스마트 라벨 베타 요청이 거부되었습니다.");
+        return;
+      }
+      setSmartLabelProposal(data as SmartLabelBetaResponse);
+    } catch {
+      toast.error("스마트 라벨 서버 통신 중 오류가 발생했습니다. 기존 코드는 안전하게 유지됩니다.");
+    } finally {
+      setIsSmartLabelLoading(false);
+    }
+  };
+
+  const handleApproveSmartLabel = () => {
+    const result = applyApprovedProposal(smartLabelProposal, rawInput);
+    if (!result.applied || !result.backup) {
+      toast.error(result.error || "추천 결과를 적용할 수 없습니다.");
+      return;
+    }
+    setSmartLabelBackup(result.backup);
+    try {
+      localStorage.setItem(SMART_LABEL_BACKUP_STORAGE_KEY, JSON.stringify(result.backup));
+    } catch {
+      // storage quota 무시
+    }
+    handleRawInputChange(result.newRawInput);
+    setSmartLabelProposal(null);
+    toast.success("✅ 스마트 라벨 추천 위치가 적용되었습니다. (조이스틱으로 미세 조정 가능)");
+  };
+
+  const handleRestoreSmartLabel = (confirmedOverwrite = false) => {
+    const result = restoreOriginalFromBackup(smartLabelBackup, rawInput, { confirmedOverwrite });
+    if (result.requiresConfirmation) {
+      setIsRestoreConfirmOpen(true);
+      return;
+    }
+    if (!result.restored) {
+      toast.error(result.message);
+      return;
+    }
+    handleRawInputChange(result.newRawInput);
+    setIsRestoreConfirmOpen(false);
+    setSmartLabelBackup(null);
+    try {
+      localStorage.removeItem(SMART_LABEL_BACKUP_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    toast.success("↩ 스마트 라벨 적용 이전의 원본 TikZ 코드로 복원되었습니다.");
+  };
+
 
   // ── 초기화: 에디터를 빈 상태로 비움 (평가원 기본 축 로드는 별도 버튼) ──────────
   const handleResetCode = () => {
@@ -1617,6 +1750,35 @@ const getProcessedInput = (code: string) => {
               )}
             </div>
             <div className="flex items-center gap-2">
+              {/* 개발자 전용 스마트 라벨 자동 정렬 (Beta) & 1클릭 원본 복원 버튼 */}
+              {showSmartLabelBeta && (
+                <>
+                  {smartLabelBackup && (
+                    <button
+                      id="btn-smart-label-restore"
+                      onClick={() => handleRestoreSmartLabel(false)}
+                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150
+                        bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/50 hover:border-amber-500/70
+                        text-amber-300 hover:text-amber-200 shadow-sm shadow-amber-900/20"
+                      title="스마트 라벨 적용 이전의 원본 TikZ 코드로 복원합니다"
+                    >
+                      ↩ 원본 복원
+                    </button>
+                  )}
+                  <button
+                    id="btn-smart-label-beta"
+                    onClick={handleRunSmartLabelBeta}
+                    disabled={isSmartLabelLoading}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150
+                      bg-violet-950/70 hover:bg-violet-900/80 border border-violet-700/60 hover:border-violet-500/80
+                      text-violet-200 hover:text-white shadow-sm shadow-violet-900/30 disabled:opacity-50 disabled:cursor-wait"
+                    title="함수식 라벨 추천 위치를 계산하고 비교 미리보기를 엽니다 (개발자 전용 Beta)"
+                  >
+                    <Sparkles className={`w-3 h-3 text-violet-300 ${isSmartLabelLoading ? "animate-spin" : ""}`} />
+                    {isSmartLabelLoading ? "라벨 계산 중..." : "✨ 스마트 라벨 자동 정렬 (Beta)"}
+                  </button>
+                </>
+              )}
               {/* 초기화 버튼 */}
               <button
                 id="btn-reset-code"
@@ -3112,6 +3274,21 @@ const getProcessedInput = (code: string) => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          MODAL — 스마트 라벨 자동 정렬 (개발자 전용 Beta)
+      ══════════════════════════════════════════════════════ */}
+      {showSmartLabelBeta && (
+        <SmartLabelBetaModal
+          proposal={smartLabelProposal}
+          currentRawInput={rawInput}
+          onApproveApply={handleApproveSmartLabel}
+          onClose={() => setSmartLabelProposal(null)}
+          restoreConfirmOpen={isRestoreConfirmOpen}
+          onConfirmRestoreOverwrite={() => handleRestoreSmartLabel(true)}
+          onCancelRestoreConfirm={() => setIsRestoreConfirmOpen(false)}
+        />
       )}
 
     </main>

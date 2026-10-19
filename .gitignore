@@ -39,3 +39,20 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# smart-label experiment outputs, caches, samples, and local reports (only allow pure engine src/*.mjs)
+/experiments/*
+!/experiments/smart-label-engine/
+/experiments/smart-label-engine/*
+!/experiments/smart-label-engine/src/
+!/experiments/smart-label-prototype/
+/experiments/smart-label-prototype/*
+!/experiments/smart-label-prototype/src/
+!/experiments/smart-label-prototype-v02/
+/experiments/smart-label-prototype-v02/*
+!/experiments/smart-label-prototype-v02/src/
+!/experiments/smart-label-prototype-v021/
+/experiments/smart-label-prototype-v021/*
+!/experiments/smart-label-prototype-v021/src/
+/KO_SMART_*.md
+/.smart-label-beta-disabled
