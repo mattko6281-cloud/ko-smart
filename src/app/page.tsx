@@ -364,6 +364,7 @@ export default function Home() {
   // ── 스마트 라벨 자동 정렬 (Beta) — 개발자 단독(mattko6281@gmail.com) 격리 상태 ──
   const [serverBetaEnabled, setServerBetaEnabled] = useState(false);
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
+  const [applyAxisBeta, setApplyAxisBeta] = useState(false);
   const [smartLabelProposal, setSmartLabelProposal] = useState<SmartLabelBetaResponse | null>(null);
   const [smartLabelBackup, setSmartLabelBackup] = useState<SmartLabelBackupSnapshot | null>(null);
   const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false);
@@ -412,19 +413,20 @@ export default function Home() {
     serverBetaEnabled,
   });
 
-  const handleRunSmartLabelBeta = async () => {
+  const handleRunSmartLabelBeta = async (overrideApplyAxis?: boolean) => {
     if (!showSmartLabelBeta || isSmartLabelLoading) return;
     if (!rawInput.trim()) {
       toast.error("TikZ 코드를 먼저 입력해 주세요.");
       return;
     }
+    const useApplyAxis = typeof overrideApplyAxis === "boolean" ? overrideApplyAxis : applyAxisBeta;
     const snapshotCode = rawInput;
     setIsSmartLabelLoading(true);
     try {
       const res = await fetch("/api/smart-label/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tikz: snapshotCode }),
+        body: JSON.stringify({ tikz: snapshotCode, applyAxis: useApplyAxis }),
         cache: "no-store",
       });
       const data = await res.json().catch(() => null);
@@ -1765,9 +1767,24 @@ const getProcessedInput = (code: string) => {
                       ↩ 원본 복원
                     </button>
                   )}
+                  <label
+                    id="label-smart-label-apply-axis"
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight cursor-pointer select-none
+                      bg-zinc-900/80 hover:bg-zinc-800/80 border border-violet-800/50 text-violet-200"
+                    title="체크 시 함수식 라벨 정렬과 함께 필요한 경우 x축·y축 길이를 연장합니다 (기본값 OFF)"
+                  >
+                    <input
+                      id="chk-smart-label-apply-axis"
+                      type="checkbox"
+                      checked={applyAxisBeta}
+                      onChange={(e) => setApplyAxisBeta(e.target.checked)}
+                      className="h-3 w-3 rounded accent-violet-500 cursor-pointer"
+                    />
+                    <span>x축·y축 길이도 자동 조정하기</span>
+                  </label>
                   <button
                     id="btn-smart-label-beta"
-                    onClick={handleRunSmartLabelBeta}
+                    onClick={() => handleRunSmartLabelBeta()}
                     disabled={isSmartLabelLoading}
                     className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150
                       bg-violet-950/70 hover:bg-violet-900/80 border border-violet-700/60 hover:border-violet-500/80
@@ -3288,6 +3305,12 @@ const getProcessedInput = (code: string) => {
           restoreConfirmOpen={isRestoreConfirmOpen}
           onConfirmRestoreOverwrite={() => handleRestoreSmartLabel(true)}
           onCancelRestoreConfirm={() => setIsRestoreConfirmOpen(false)}
+          applyAxisOption={applyAxisBeta}
+          isRecomputing={isSmartLabelLoading}
+          onToggleApplyAxisOption={(next) => {
+            setApplyAxisBeta(next);
+            handleRunSmartLabelBeta(next);
+          }}
         />
       )}
 
