@@ -1,12 +1,15 @@
-// KO-SMART v0.2.1 개발자 전용 베타 — Kroki 비동기 렌더링 어댑터 및 권한·안전성·충돌 진단 게이트
+// KO-SMART v0.2.1 / v0.2.2-beta 개발자 전용 베타 — Kroki 비동기 렌더링 어댑터 및 권한·안전성·충돌 진단 게이트
 // 원칙:
 //  1) 기존 v0.1, v0.2, v0.2.1 알고리즘 및 smart-label-engine 코드는 단 한 줄도 수정하지 않고 그대로 import 하여 재사용한다.
-//  2) 기존 local-render.mjs(동기식 spawnSync) 대신 자체 Kroki 서버 HTTP(비동기 fetch)로 SVG를 받아
+//  2) 엔진 선택 옵션(engineVersion):
+//     - "v0.2.1" (기본 선택): 기존 운영 베타 엔진 그대로 실행
+//     - "v0.2.2-beta" (개선 베타): 동결 검증된 interim-v1(Unit 1 + Unit 2/2+ + Unit 3-A) 엔진 실행
+//  3) 기존 local-render.mjs(동기식 spawnSync) 대신 자체 Kroki 서버 HTTP(비동기 fetch)로 SVG를 받아
 //     요청 전용 임시 workRoot(<hash>/t.svg)에 스테이징한 뒤 buildScene / verifyOutputVariant 를 호출한다.
-//  3) Kroki 렌더링이 실패하거나 스테이징되지 않은 경우에는 buildScene 을 절대 호출하지 않아 로컬 latex 실행 폴백을 원천 차단한다.
-//  4) 한국어 포함 도형, 축(x, y) 미비 도형, 2차 검증(verify=true) 실패 도형은 모두 원본을 100% 유지한다.
-//  5) 축 길이 자동 조정(applyAxis)은 기본 OFF이며, ON일 때도 길이 연장만 수행하고 x, y, O 및 일반 노드·곡선 충돌 검증을 통과해야만 허용된다.
-//  6) 원본부터 존재하던 미해결 겹침과 자동 이동/축 조정으로 새로 발생한 겹침을 엄격히 구분하여 보고한다.
+//  4) Kroki 렌더링이 실패하거나 스테이징되지 않은 경우에는 buildScene 을 절대 호출하지 않아 로컬 latex 실행 폴백을 원천 차단한다.
+//  5) 한국어 포함 도형, 축(x, y) 미비 도형, 2차 검증(verify=true) 실패 도형은 모두 원본을 100% 유지한다.
+//  6) 축 길이 자동 조정(applyAxis)은 기본 OFF이며, ON일 때도 길이 연장만 수행하고 x, y, O 및 일반 노드·곡선 충돌 검증을 통과해야만 허용된다.
+//  7) 원본부터 존재하던 미해결 겹침과 자동 이동/축 조정으로 새로 발생한 겹침을 엄격히 구분하여 보고한다.
 
 import { createHash, randomUUID } from "node:crypto";
 import { deflateSync } from "node:zlib";
@@ -26,11 +29,29 @@ import {
 } from "../../../experiments/smart-label-prototype-v021/src/recommend.mjs";
 import { maskComments, extractTikzNodes } from "../../../experiments/smart-label-engine/src/tikz-nodes.mjs";
 import { compareCollisionDiagnostics } from "./collision-diagnostics.mjs";
+import {
+  ALGORITHM_VERSION_V022,
+  prepareSceneV022,
+  runPlanningV022,
+  compareCollisionDiagnosticsV022,
+  verifyOutputVariantV022,
+} from "./v022/v022-adapter.mjs";
 
 export const DEVELOPER_BETA_EMAIL = "mattko6281@gmail.com";
+export const DEFAULT_ENGINE_VERSION = "v0.2.1";
+export const SUPPORTED_ENGINE_VERSIONS = ["v0.2.1", "v0.2.2-beta"];
 export const MAX_TIKZ_INPUT_LENGTH = 15000;
 export const MAX_SAMPLES_VALUE = 500;
 export const DEFAULT_KROKI_TIMEOUT_MS = 6000;
+
+/**
+ * 요청된 엔진 버전을 안전하게 정규화한다. 미지정 또는 알 수 없는 값이면 기본값 "v0.2.1"을 반환한다.
+ * @param {any} engineVersion
+ * @returns {"v0.2.1" | "v0.2.2-beta"}
+ */
+export function normalizeEngineVersion(engineVersion) {
+  return engineVersion === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1";
+}
 
 // 위험 TeX 매크로 차단 정규식 (주석 제거 후 검사)
 const DANGEROUS_TEX_MACRO_RE =
@@ -424,8 +445,10 @@ export function acquireUserExecutionSlot(userKey = DEVELOPER_BETA_EMAIL) {
 
 /**
  * Option B 기반 스마트 라벨 베타 추천 파이프라인 실행기 (비동기)
- * - 기존 v0.2.1 의 buildScene, classifyFigure, planLabelsMultiEngine, shiftEdits, planAxes, axisEdits, applyEdits,
- *   checkPreservation, verifyOutputVariant 를 수정 없이 그대로 사용한다.
+ * - engineVersion:
+ *    * "v0.2.1" (기본 선택): 기존 v0.2.1 의 buildScene, classifyFigure, planLabelsMultiEngine, shiftEdits,
+ *      planAxes, axisEdits, applyEdits, checkPreservation, verifyOutputVariant 를 수정 없이 그대로 사용한다.
+ *    * "v0.2.2-beta" (개선 베타): 동결 검증된 interim-v1(Unit 1 + Unit 2/2+ + Unit 3-A)을 실행한다.
  * - 축 길이 조정 옵션(applyAxis)은 기본 OFF(false)이며, ON일 때도 길이 연장만 수행하고
  *   2차 Kroki 렌더링 및 x, y, O·일반 노드·곡선 충돌 검증을 통과해야만 적용이 허용된다.
  * - 원본부터 존재하던 미해결 겹침과 새로 발생한 겹침을 분리하여 collisionDiagnostics에 기록한다.
@@ -437,14 +460,19 @@ export function acquireUserExecutionSlot(userKey = DEVELOPER_BETA_EMAIL) {
  *   fetchImpl?: typeof fetch,
  *   params?: typeof PARAMS,
  *   verify?: boolean,
- *   applyAxis?: boolean
+ *   applyAxis?: boolean,
+ *   engineVersion?: "v0.2.1" | "v0.2.2-beta"
  * }} [opts]
  */
 export async function recommendSmartLabelBeta(rawInput, opts = {}) {
   const inputHash = computeInputHash(rawInput);
   const applyAxisRequested = Boolean(opts.applyAxis === true);
+  const engineVersion = normalizeEngineVersion(opts.engineVersion);
+  const isV022 = engineVersion === "v0.2.2-beta";
+
   const baseResponse = {
-    algorithmVersion: ALGORITHM_VERSION,
+    engineVersion,
+    algorithmVersion: isV022 ? ALGORITHM_VERSION_V022 : ALGORITHM_VERSION,
     ok: false,
     status: "failed",
     reasonCode: null,
@@ -566,8 +594,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     }
     baseResponse.warnings.push(...scene.warnings);
 
+    // v0.2.2-beta 선택 시 Unit 1 안정성 가드(n.at===null 예외 방지 및 불확실성 잠금) + Unit 2 확장 적용
+    if (isV022) {
+      prepareSceneV022(scene);
+    }
+
     // 원본 장면의 정밀 겹침·측정 누락 감사
-    const origDiag = compareCollisionDiagnostics(scene, scene, [], { axisChanged: false, params: P });
+    let origDiag = isV022
+      ? compareCollisionDiagnosticsV022(scene, scene, [], { axisChanged: false, params: P })
+      : compareCollisionDiagnostics(scene, scene, [], { axisChanged: false, params: P });
     baseResponse.collisionDiagnostics = origDiag;
 
     // 5) 그림 유형 확인: 반드시 x축과 y축이 모두 식별된 coordinateFunction(plot 함수 그래프)만 지원
@@ -586,37 +621,57 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       };
     }
 
-    // 6) 기존 v0.2.1 멀티 엔진 함수식 라벨 후보 평가 및 선택
-    //    - applyAxisRequested === false (기본 OFF): labelOnly 경로
-    //    - applyAxisRequested === true (ON): planAxes + planLabelsMultiEngine 반복 결합 경로
-    const plan0 = planLabelsMultiEngine(scene, P, null, "auto", MP);
-    let activePlan = plan0;
-    let axisPlan = planAxes(scene, plan0, P);
+    // 6) 선택된 엔진(v0.2.1 또는 v0.2.2-beta)에 따른 함수식 라벨 후보 평가 및 선택
+    let activePlan;
+    let axisPlan;
     let axisEditsToApply = [];
+    let activeShift;
+    let decisionsByNodeId = new Map();
 
-    if (applyAxisRequested) {
-      let iters = 1;
-      const sig = (p) =>
-        JSON.stringify((p.placements || []).map((q) => [q.id, q.action, q.selectedEngine, q.shift]));
-      while (iters < 3 && axisPlan.x && axisPlan.y) {
-        const { xU, yU } = scene.units;
-        const override = {
-          left: Math.min(...axisPlan.x.new) * xU,
-          right: Math.max(...axisPlan.x.new) * xU,
-          bottom: Math.min(...axisPlan.y.new) * yU,
-          top: Math.max(...axisPlan.y.new) * yU,
-        };
-        const next = planLabelsMultiEngine(scene, P, override, "auto", MP);
-        iters++;
-        const same = sig(next) === sig(activePlan);
-        activePlan = next;
-        axisPlan = planAxes(scene, activePlan, P);
-        if (same) break;
+    if (isV022) {
+      const v022Plan = runPlanningV022(scene, P, applyAxisRequested);
+      activePlan = v022Plan.activePlan;
+      axisPlan = v022Plan.axisPlan;
+      axisEditsToApply = v022Plan.axisEditsToApply;
+      activeShift = v022Plan.activeShift;
+      decisionsByNodeId = v022Plan.decisionsByNodeId;
+      // decisionsByNodeId 를 반영하여 원본 진단 사유(Unit 1 4대 미이동 사유 + Unit 3-A) 갱신
+      origDiag = compareCollisionDiagnosticsV022(scene, scene, [], {
+        axisChanged: false,
+        params: P,
+        decisionsByNodeId,
+      });
+      baseResponse.collisionDiagnostics = origDiag;
+    } else {
+      const plan0 = planLabelsMultiEngine(scene, P, null, "auto", MP);
+      activePlan = plan0;
+      axisPlan = planAxes(scene, plan0, P);
+
+      if (applyAxisRequested) {
+        let iters = 1;
+        const sig = (p) =>
+          JSON.stringify((p.placements || []).map((q) => [q.id, q.action, q.selectedEngine, q.shift]));
+        while (iters < 3 && axisPlan.x && axisPlan.y) {
+          const { xU, yU } = scene.units;
+          const override = {
+            left: Math.min(...axisPlan.x.new) * xU,
+            right: Math.max(...axisPlan.x.new) * xU,
+            bottom: Math.min(...axisPlan.y.new) * yU,
+            top: Math.max(...axisPlan.y.new) * yU,
+          };
+          const next = planLabelsMultiEngine(scene, P, override, "auto", MP);
+          iters++;
+          const same = sig(next) === sig(activePlan);
+          activePlan = next;
+          axisPlan = planAxes(scene, activePlan, P);
+          if (same) break;
+        }
+        axisEditsToApply = axisEdits(scene, axisPlan);
       }
-      axisEditsToApply = axisEdits(scene, axisPlan);
+
+      activeShift = shiftEdits(scene, activePlan, P);
     }
 
-    const activeShift = shiftEdits(scene, activePlan, P);
     const labelEditsOnEffective = activeShift.edits;
     const editsToApply = [...labelEditsOnEffective, ...axisEditsToApply];
 
@@ -694,7 +749,10 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         let holdReason = d.holdReason || null;
         let selectionReason = d.selectionReason || "";
         if (!autoMod && hasRemainingCollision) {
-          const warnSuffix = ` [⚠️ 미해결 기존 충돌: ${collisionDescriptions.join("; ")} — 안전한 자동 이동 후보가 없어 원본을 유지하므로 수동/조이스틱 조정 권장]`;
+          const warnSuffix =
+            d.nonMoveCode === "uncertain-match" || d.nonMoveCode === "parse-failure" || d.nonMoveCode === "fallback-anchor-unusable"
+              ? ` [⚠️ 미해결 기존 충돌: ${collisionDescriptions.join("; ")} — ${d.nonMoveCategory || "매칭/좌표 불확실"}로 인해 자동 이동을 보류하므로 수동/조이스틱 조정 권장]`
+              : ` [⚠️ 미해결 기존 충돌: ${collisionDescriptions.join("; ")} — 안전한 자동 이동 후보가 없어 원본을 유지하므로 수동/조이스틱 조정 권장]`;
           if (holdReason && !holdReason.includes("미해결 기존 충돌")) {
             holdReason += warnSuffix;
           }
@@ -708,8 +766,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           autoModified: autoMod,
           selectedEngine: d.selectedEngine || "original",
           agreedEngines: d.agreedEngines || [],
-          how: d.assignmentMethod || d.assignment?.how || null,
-          confirmedAssignment: Boolean(d.assignmentConfirmed ?? d.assignment?.confirmed),
+          how: d.assignmentMethod || d.assignment?.how || d.how || null,
+          confirmedAssignment: Boolean(d.assignmentConfirmed ?? d.assignment?.confirmed ?? d.confirmed),
           shift: d.selectedPosition?.shift || d.chosenShift || [0, 0],
           movedPt: d.movement?.movedDistancePt ?? d.movedPt ?? 0,
           nonMoveCategory: d.nonMoveCategory || null,
@@ -735,7 +793,18 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
 
       if (unresolvedCnt > 0) {
         unchangedReasonCode = "all-labels-kept-with-unresolved-collisions";
-        unchangedMsg = `안전하게 자동 이동할 수 있는 후보가 없어 원본 코드를 유지합니다. ⚠️ 원본부터 존재하던 미해결 충돌 ${unresolvedCnt}건이 남아 있습니다 (조이스틱/수동 조정 권장).`;
+        const hasUncertainHold = decisions0.some(
+          (d) =>
+            !d.autoModified &&
+            d.hasRemainingCollision &&
+            (d.nonMoveCode === "uncertain-match" ||
+              d.nonMoveCode === "parse-failure" ||
+              d.nonMoveCode === "fallback-anchor-unusable")
+        );
+        unchangedMsg =
+          isV022 && hasUncertainHold
+            ? `수식 매칭 또는 기호 좌표가 불확실한 항목을 안전 보류하여 원본 코드를 유지합니다. ⚠️ 원본부터 존재하던 미해결 충돌 ${unresolvedCnt}건이 남아 있습니다 (조이스틱/수동 조정 권장).`
+            : `안전하게 자동 이동할 수 있는 후보가 없어 원본 코드를 유지합니다. ⚠️ 원본부터 존재하던 미해결 충돌 ${unresolvedCnt}건이 남아 있습니다 (조이스틱/수동 조정 권장).`;
       } else if (unmeasuredCnt > 0) {
         unchangedMsg += ` (참고: SVG 측정 미확인 노드 ${unmeasuredCnt}건 존재)`;
       }
@@ -820,24 +889,41 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       .map((id) => origFNodes.findIndex((q) => q.id === id))
       .filter((idx) => idx >= 0);
 
-    const vVariant = verifyOutputVariant({
-      variant: anyAxisChanged ? "recommendedBody" : "labelOnlyBody",
-      origBody: effectiveBody,
-      origScene: scene,
-      candidateBody: candEffectiveBody,
-      edits: editsToApply,
-      movedFNodeIndices,
-      workRoot: tempWorkRoot,
-      P,
-      runRender: true,
-    });
+    const vVariant = isV022
+      ? verifyOutputVariantV022({
+          variant: anyAxisChanged ? "recommendedBody" : "labelOnlyBody",
+          origBody: effectiveBody,
+          origScene: scene,
+          candidateBody: candEffectiveBody,
+          edits: editsToApply,
+          movedFNodeIndices,
+          workRoot: tempWorkRoot,
+          P,
+        })
+      : verifyOutputVariant({
+          variant: anyAxisChanged ? "recommendedBody" : "labelOnlyBody",
+          origBody: effectiveBody,
+          origScene: scene,
+          candidateBody: candEffectiveBody,
+          edits: editsToApply,
+          movedFNodeIndices,
+          workRoot: tempWorkRoot,
+          P,
+          runRender: true,
+        });
 
     // 2차 렌더링된 장면(vVariant.scene)에 대해 x, y, O 및 모든 일반 노드·함수식 라벨의 정밀 전후 충돌 비교 수행
     const finalScene = vVariant.scene || scene;
-    const finalDiag = compareCollisionDiagnostics(scene, finalScene, movedNodeIds, {
-      axisChanged: anyAxisChanged,
-      params: P,
-    });
+    const finalDiag = isV022
+      ? compareCollisionDiagnosticsV022(scene, finalScene, movedNodeIds, {
+          axisChanged: anyAxisChanged,
+          params: P,
+          decisionsByNodeId,
+        })
+      : compareCollisionDiagnostics(scene, finalScene, movedNodeIds, {
+          axisChanged: anyAxisChanged,
+          params: P,
+        });
 
     const newCollisionIssues = finalDiag.newlyIntroducedCollisions.map(
       (c) => c.reason || c.description
@@ -937,7 +1023,18 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     const finalFnAuditById = new Map(
       (finalDiag.finalAudit?.functionLabelAudits || []).map((fa) => [fa.id, fa])
     );
-    const decisions = buildEnrichedDecisions(activePlan.labelDecisions, finalFnAuditById);
+    // v0.2.2-beta 에서는 노드 오프셋(@start)이 변경되어도 매칭되도록 라벨/순서 폴백 조회 지원
+    const getFinalAuditForDecision = (d) => {
+      if (finalFnAuditById.has(d.id)) return finalFnAuditById.get(d.id);
+      const byLabel = (finalDiag.finalAudit?.functionLabelAudits || []).find(
+        (fa) => fa.label === d.label
+      );
+      return byLabel || origFnAuditById.get(d.id);
+    };
+    const finalAuditLookupMap = new Map(
+      (activePlan.labelDecisions || []).map((d) => [d.id, getFinalAuditForDecision(d)])
+    );
+    const decisions = buildEnrichedDecisions(activePlan.labelDecisions, finalAuditLookupMap);
 
     const recommendedFullCode = prefix + finalBody + suffix;
     const recSvgDataUri = "data:image/svg+xml;base64," + Buffer.from(render2.svg, "utf8").toString("base64");
@@ -973,7 +1070,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         id: p.id,
         label: p.label,
         action: p.action,
-        selectedEngine: p.selectedEngine || "v0.2.1",
+        selectedEngine: p.selectedEngine || (isV022 ? "v0.2.2-beta" : "v0.2.1"),
         agreedEngines: p.agreedEngines || [],
         how: p.how,
         confirmedAssignment: !!p.confirmedAssignment,
@@ -1046,6 +1143,8 @@ export async function handleSmartLabelGet(deps) {
       email: authCheck.email,
       reason: serverFlag.reason,
       algorithmVersion: ALGORITHM_VERSION,
+      defaultEngineVersion: DEFAULT_ENGINE_VERSION,
+      availableEngines: SUPPORTED_ENGINE_VERSIONS,
     },
   };
 }
@@ -1107,6 +1206,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
   const rawTikz = typeof requestBody.tikz === "string" ? requestBody.tikz : "";
   const clientInputHash = typeof requestBody.inputHash === "string" ? requestBody.inputHash : null;
   const applyAxis = Boolean(requestBody.applyAxis === true);
+  const engineVersion = normalizeEngineVersion(requestBody.engineVersion);
   const serverInputHash = computeInputHash(rawTikz);
 
   if (clientInputHash && clientInputHash !== serverInputHash) {
@@ -1144,6 +1244,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
       fetchImpl: deps.fetchImpl,
       verify: true,
       applyAxis,
+      engineVersion,
     });
 
     const httpStatus =

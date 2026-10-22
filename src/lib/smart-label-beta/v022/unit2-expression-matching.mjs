@@ -1,0 +1,2331 @@
+// ============================================================================
+// KO-SMART 스마트 라벨 1차 중간 개선 — Unit 2 / 2+: 함수 표현식 및 매칭 범위 확장
+// ============================================================================
+// 세부 하위 단위(Sub-Units):
+//  - Sub-Unit 2a (u2a):
+//      * y=f(x), y=g(x) 단일 추상 함수 라벨 매칭 (복수 추상 라벨일 때는 자동 이동 차단)
+//      * y=f(1), y=f(a) 상수 함수값 수평선(degree=0) 전용 매칭
+//  - Sub-Unit 2b (u2b):
+//      * y=x+k, y=-x+a 등에서 생략된 1차항 계수(+1, -1) 및 2차항 계수(+1, -1) 인식
+//  - Sub-Unit 2c (u2c):
+//      * TikZ plot 수식의 pow(base, exp) 함수 파싱 및 정의역 가드(음수 밑 + 비정수 지수 -> NaN)
+//  - Sub-Unit 2d (u2d):
+//      * 지수·로그 함수 수치 파싱: plot 의 ln(u), exp(u) 및 라벨의 \ln, \log_b(...) 변환
+//      * 로그 진수(u > 0) 및 밑(b > 0, b != 1) 정의역 엄격 검사 (위반 시 NaN)
+//      * 지수 구조 템플릿(y = a^x + b 등, a > 0, a != 1) 매칭 및 \log, \ln 글리프 확인 확장
+//  - Sub-Unit 2e (u2e):
+//      * 삼각함수·pi 수치 파싱: plot 의 sin/cos/tan(TikZ 기본 degree 모드), deg(...), 접미사 r(라디안),
+//        라벨의 \sin, \cos, \tan(표준 라디안 모드), \pi, \sqrt{...}
+//      * 탄젠트 점근선(|cos| < 1e-3 -> NaN) 가드 및 동일 주기함수 다중 브랜치(tan x 등) 매칭
+//      * \sin, \cos, \tan, \pi, \alpha, \beta 등 확장 글리프 확인
+//      * \begin{scope} \clip (...) rectangle (...); \end{scope} 가시 영역 폴리라인 클리핑
+// ============================================================================
+
+import { minDistPolylines } from "../../../../experiments/smart-label-engine/src/geometry.mjs";
+import { compileExpr as v01CompileExpr, compileLabelFunction as v01CompileLabelFunction } from "../../../../experiments/smart-label-prototype/src/expr.mjs";
+import {
+  findBalancedBrace,
+  normalizeMathLabelWithStatus as v021NormalizeMathLabelWithStatus,
+  analyzeNumericLabelExpression as v021AnalyzeNumericLabelExpression,
+  analyzePlotMathStructure as v021AnalyzePlotMathStructure,
+  parseLabelStructureTemplate as v021ParseLabelStructureTemplate,
+  checkStructuralCompatibility as v021CheckStructuralCompatibility,
+} from "../../../../experiments/smart-label-prototype-v021/src/structural-match.mjs";
+import {
+  PARAMS,
+  classifyStrokeKind,
+  endInfo,
+  selectPreferredEnd,
+  evaluateKeep,
+  computeShiftForMove,
+   clearanceToStroke,
+  bboxGapRect,
+} from "../../../../experiments/smart-label-prototype-v021/src/algorithm.mjs";
+
+const EPS = 1e-4;
+const r2 = (n) => (typeof n === "number" && Number.isFinite(n) ? Math.round(n * 100) / 100 : n);
+
+export const DEFAULT_UNIT2_FLAGS = {
+  u2a: true, // y=f(x) 단일 추상 곡선 & y=f(1) 수평 상수선
+  u2b: true, // y=x+k 생략된 +1/-1 계수
+  u2c: true, // pow(base, exp) 파서
+  u2d: true, // 지수·로그(ln, \log_b, y=a^x+b) 파싱 및 매칭
+  u2e: true, // 삼각함수(sin, cos, tan, deg, r) 및 pi/sqrt 파싱·매칭 + scope clip 반영
+};
+
+function resolveFlags(flags = {}) {
+  return { ...DEFAULT_UNIT2_FLAGS, ...(flags || {}) };
+}
+
+// ============================================================================
+// 1. Sub-Unit 2c / 2d / 2e 통합 수식 토크나이저 & 파서 (eval/Function 미사용)
+// ============================================================================
+
+function safePow(base, exp) {
+  if (!Number.isFinite(base) || !Number.isFinite(exp)) return NaN;
+  if (base < 0 && Math.abs(exp - Math.round(exp)) > 1e-9) return NaN;
+  if (base === 0 && exp <= 0) return exp === 0 ? 1 : NaN;
+  return Math.pow(base, exp);
+}
+
+function callUnaryMathFn(fnName, val) {
+  if (!Number.isFinite(val)) return NaN;
+  switch (fnName) {
+    case "ln":
+    case "log":
+      // 진수 조건: val > 0
+      return val > 0 ? Math.log(val) : NaN;
+    case "exp":
+      return Math.exp(val);
+    case "sqrt":
+      return val >= 0 ? Math.sqrt(val) : NaN;
+    case "abs":
+      return Math.abs(val);
+    case "deg":
+      // TikZ deg(x): 라디안 -> 도(degree)
+      return (val * 180) / Math.PI;
+    case "rad":
+      // TikZ rad(x): 도(degree) -> 라디안
+      return (val * Math.PI) / 180;
+    case "sin":
+      // TikZ plot 기본 sin(d): degree 입력
+      return Math.sin((val * Math.PI) / 180);
+    case "cos":
+      // TikZ plot 기본 cos(d): degree 입력
+      return Math.cos((val * Math.PI) / 180);
+    case "tan": {
+      // TikZ plot 기본 tan(d): degree 입력 + 점근선 가드
+      const rad = (val * Math.PI) / 180;
+      const c = Math.cos(rad);
+      if (Math.abs(c) < 1e-3) return NaN;
+      return Math.sin(rad) / c;
+    }
+    case "sinr":
+      // TeX 라벨 표준 라디안 sin
+      return Math.sin(val);
+    case "cosr":
+      // TeX 라벨 표준 라디안 cos
+      return Math.cos(val);
+    case "tanr": {
+      // TeX 라벨 표준 라디안 tan + 점근선 가드
+      const c = Math.cos(val);
+      if (Math.abs(c) < 1e-3) return NaN;
+      return Math.sin(val) / c;
+    }
+    default:
+      return NaN;
+  }
+}
+
+/**
+ * Unit 2 확장 토크나이저:
+ * - u2c: pow(a, b) 및 쉼표(,) 토큰 지원
+ * - u2d: ln, exp 지원
+ * - u2e: pi 상수, sqrt, deg, rad, sin, cos, tan, sinr, cosr, tanr 및 접미사 r(라디안->도) 지원
+ */
+export function tokenizeExprUnit2(s, implicit = false, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (typeof s !== "string") return null;
+
+  const allowedFns = new Set();
+  if (F.u2c) allowedFns.add("pow");
+  if (F.u2d) {
+    allowedFns.add("ln");
+    allowedFns.add("log");
+    allowedFns.add("exp");
+  }
+  if (F.u2e) {
+    allowedFns.add("sqrt");
+    allowedFns.add("abs");
+    allowedFns.add("deg");
+    allowedFns.add("rad");
+    allowedFns.add("sin");
+    allowedFns.add("cos");
+    allowedFns.add("tan");
+    allowedFns.add("sinr");
+    allowedFns.add("cosr");
+    allowedFns.add("tanr");
+  }
+
+  // \x 를 변수 x 로 치환하되, 접미사 r (예: \x r, (2*\x) r)을 보존하기 위해 먼저 정리
+  const src = s.replace(/\\x\b/g, "x").replace(/\\pi\b/g, "pi").replace(/\s+/g, "");
+  const toks = [];
+  let i = 0;
+
+  while (i < src.length) {
+    const c = src[i];
+    if (/[0-9.]/.test(c)) {
+      let j = i;
+      while (j < src.length && /[0-9.]/.test(src[j])) j++;
+      const numVal = Number(src.slice(i, j));
+      if (!Number.isFinite(numVal)) return null;
+      toks.push({ t: "n", v: numVal });
+      i = j;
+    } else if (/[a-zA-Z]/.test(c)) {
+      let j = i;
+      while (j < src.length && /[a-zA-Z]/.test(src[j])) j++;
+      const word = src.slice(i, j);
+      if (word === "x") {
+        toks.push({ t: "x" });
+      } else if (F.u2e && word === "xr") {
+        // "\x r" 이 공백 제거로 "xr" 이 된 경우: x 뒤에 접미사 r 연산자
+        toks.push({ t: "x" });
+        toks.push({ t: "postfix_r" });
+      } else if (F.u2e && word === "r" && toks.length > 0 && (toks[toks.length - 1].t === "n" || toks[toks.length - 1].t === "x" || toks[toks.length - 1].t === ")")) {
+        toks.push({ t: "postfix_r" });
+      } else if (F.u2e && word === "pi") {
+        toks.push({ t: "n", v: Math.PI });
+      } else if (F.u2e && word === "pir") {
+        toks.push({ t: "n", v: Math.PI });
+        toks.push({ t: "postfix_r" });
+      } else if (allowedFns.has(word)) {
+        toks.push({ t: "fn", v: word });
+      } else {
+        return null; // 미지원 식별자 또는 기호 매개변수
+      }
+      i = j;
+    } else if ("+-*/^".includes(c)) {
+      toks.push({ t: "o", v: c });
+      i++;
+    } else if (c === "," && F.u2c) {
+      toks.push({ t: "," });
+      i++;
+    } else if ("({".includes(c)) {
+      toks.push({ t: "(" });
+      i++;
+    } else if (")}".includes(c)) {
+      toks.push({ t: ")" });
+      i++;
+    } else {
+      return null;
+    }
+  }
+
+  if (implicit) {
+    const out = [];
+    for (let k = 0; k < toks.length; k++) {
+      const a = toks[k];
+      const b = toks[k + 1];
+      out.push(a);
+      if (!b) continue;
+      const aEndsValue = a.t === "n" || a.t === "x" || a.t === ")" || a.t === "postfix_r";
+      const bStartsValue = b.t === "n" || b.t === "x" || b.t === "(" || b.t === "fn";
+      if (aEndsValue && bStartsValue && !(a.t === "n" && b.t === "n")) {
+        out.push({ t: "o", v: "*" });
+      }
+    }
+    return out;
+  }
+  return toks;
+}
+
+function parseTokensUnit2(toks) {
+  let p = 0;
+  const peek = () => toks[p];
+
+  function expr() {
+    let l = term();
+    while (peek() && peek().t === "o" && (peek().v === "+" || peek().v === "-")) {
+      const op = toks[p++].v;
+      const r = term();
+      const a = l;
+      l = op === "+" ? (x) => a(x) + r(x) : (x) => a(x) - r(x);
+    }
+    return l;
+  }
+
+  function term() {
+    let l = unary();
+    while (peek() && peek().t === "o" && (peek().v === "*" || peek().v === "/")) {
+      const op = toks[p++].v;
+      const r = unary();
+      const a = l;
+      l = op === "*" ? (x) => a(x) * r(x) : (x) => {
+        const den = r(x);
+        return Math.abs(den) < 1e-12 ? NaN : a(x) / den;
+      };
+    }
+    return l;
+  }
+
+  function unary() {
+    if (peek() && peek().t === "o" && (peek().v === "-" || peek().v === "+")) {
+      const op = toks[p++].v;
+      const u = unary();
+      return op === "-" ? (x) => -u(x) : u;
+    }
+    return power();
+  }
+
+  function power() {
+    const b = postfix();
+    if (peek() && peek().t === "o" && peek().v === "^") {
+      p++;
+      const e = unary();
+      return (x) => safePow(b(x), e(x));
+    }
+    return b;
+  }
+
+  function postfix() {
+    let atomFn = atom();
+    while (peek() && peek().t === "postfix_r") {
+      p++;
+      const prev = atomFn;
+      // TikZ 접미사 r: 라디안 값을 degree 로 변환
+      atomFn = (x) => (prev(x) * 180) / Math.PI;
+    }
+    return atomFn;
+  }
+
+  function atom() {
+    const t = toks[p++];
+    if (!t) throw new Error("eof");
+    if (t.t === "n") return () => t.v;
+    if (t.t === "x") return (x) => x;
+    if (t.t === "fn") {
+      const fnName = t.v;
+      if (!toks[p] || toks[p].t !== "(") throw new Error("fn expects (");
+      p++; // consume '('
+      const arg1 = expr();
+      if (fnName === "pow") {
+        if (!toks[p] || toks[p].t !== ",") throw new Error("pow expects ,");
+        p++; // consume ','
+        const arg2 = expr();
+        if (!toks[p] || toks[p].t !== ")") throw new Error("pow expects )");
+        p++; // consume ')'
+        return (x) => safePow(arg1(x), arg2(x));
+      }
+      if (!toks[p] || toks[p].t !== ")") throw new Error("fn expects )");
+      p++; // consume ')'
+      return (x) => callUnaryMathFn(fnName, arg1(x));
+    }
+    if (t.t === "(") {
+      const e = expr();
+      if (!toks[p] || toks[p].t !== ")") throw new Error("paren");
+      p++;
+      return e;
+    }
+    throw new Error("bad token");
+  }
+
+  const f = expr();
+  if (p !== toks.length) throw new Error("trailing");
+  return f;
+}
+
+/**
+ * [Unit 2] TikZ plot 수식 컴파일러 (Sub-Unit 2c/2d/2e 플래그 연동)
+ */
+export function compileExprUnit2(s, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (!F.u2c && !F.u2d && !F.u2e) {
+    return v01CompileExpr(s);
+  }
+  try {
+    const t = tokenizeExprUnit2(s, false, F);
+    return t ? parseTokensUnit2(t) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 상수 수식(예: {-pi/2}, {3*pi/2}, {sin(deg(2*pi/8))}, {-sqrt(3)})을 평가하여 수치 반환
+ */
+export function evalConstantMathExprUnit2(rawExpr, flags = DEFAULT_UNIT2_FLAGS) {
+  if (typeof rawExpr === "number") return Number.isFinite(rawExpr) ? rawExpr : null;
+  if (typeof rawExpr !== "string") return null;
+  let cleaned = rawExpr.trim();
+  if (cleaned.startsWith("{") && cleaned.endsWith("}")) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  if (!cleaned) return null;
+  if (/^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(cleaned)) return Number(cleaned);
+  // 변수 x 가 포함된 식은 상수가 아님
+  if (/\\x\b|\bx\b/.test(cleaned)) return null;
+  const fn = compileExprUnit2(cleaned, flags);
+  if (!fn) return null;
+  try {
+    const val = fn(0);
+    return Number.isFinite(val) ? val : null;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// 2. TeX 라벨 정규화 확장 (Sub-Unit 2d 로그/자연로그 & Sub-Unit 2e 삼각/pi/sqrt)
+// ============================================================================
+
+function findBalancedParen(s, openIdx) {
+  const openCh = s[openIdx];
+  const closeCh = openCh === "(" ? ")" : openCh === "{" ? "}" : null;
+  if (!closeCh) return -1;
+  let depth = 0;
+  for (let i = openIdx; i < s.length; i++) {
+    if (s[i] === "\\") {
+      i++;
+      continue;
+    }
+    if (s[i] === openCh) depth++;
+    else if (s[i] === closeCh) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function readTexGroupOrToken(s, startIdx) {
+  let i = startIdx;
+  while (i < s.length && /\s/.test(s[i])) i++;
+  if (i >= s.length) return null;
+  if (s[i] === "{" || s[i] === "(") {
+    const closeIdx = findBalancedParen(s, i);
+    if (closeIdx === -1) return null;
+    return { arg: s.slice(i + 1, closeIdx), nextIdx: closeIdx + 1, bracketed: true };
+  }
+  if (s[i] === "\\") {
+    const m = /^\\[a-zA-Z]+/.exec(s.slice(i));
+    if (!m) return null;
+    return { arg: m[0], nextIdx: i + m[0].length, bracketed: false };
+  }
+  return { arg: s[i], nextIdx: i + 1, bracketed: false };
+}
+
+/**
+ * \sin 2x, \tan x 처럼 괄호 없이 쓰인 단항 함수 인자를 읽어낸다 (최상위 + 또는 - 전까지).
+ */
+function readUnparenthesizedMathArg(s, startIdx) {
+  let i = startIdx;
+  while (i < s.length && /\s/.test(s[i])) i++;
+  if (i >= s.length) return null;
+  if (s[i] === "(" || s[i] === "{") {
+    return readTexGroupOrToken(s, i);
+  }
+  let start = i;
+  if (s[i] === "+" || s[i] === "-") i++;
+  let depth = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === "(" || ch === "{") depth++;
+    else if (ch === ")" || ch === "}") {
+      if (depth === 0) break;
+      depth--;
+    } else if (depth === 0 && (ch === "+" || ch === "-" || ch === "=")) {
+      break;
+    }
+    i++;
+  }
+  const arg = s.slice(start, i).trim();
+  if (!arg) return null;
+  return { arg, nextIdx: i, bracketed: false };
+}
+
+function unwrapFontCommandsUnit2(input) {
+  let s = input;
+  const cmdRe = /\\(?:mathrm|mathbf|mathit|mathsf|mathtt|textrm|textbf|textit|text|mbox)\b/;
+  let safety = 0;
+  while (safety++ < 50) {
+    const m = cmdRe.exec(s);
+    if (!m) break;
+    const argStart = m.index + m[0].length;
+    const parsed = readTexGroupOrToken(s, argStart);
+    if (!parsed) break;
+    s = s.slice(0, m.index) + parsed.arg + s.slice(parsed.nextIdx);
+  }
+  return s;
+}
+
+function replaceFractionsBalancedUnit2(input) {
+  let s = input;
+  const fracRe = /\\(?:d|t|c)?frac(?![a-zA-Z])/;
+  let safety = 0;
+  while (safety++ < 100) {
+    const m = fracRe.exec(s);
+    if (!m) break;
+    const afterCmd = m.index + m[0].length;
+    const numParsed = readTexGroupOrToken(s, afterCmd);
+    if (!numParsed) return { ok: false, text: s, error: "분수 명령의 분자 누락" };
+    const denParsed = readTexGroupOrToken(s, numParsed.nextIdx);
+    if (!denParsed) return { ok: false, text: s, error: "분수 명령의 분모 누락" };
+
+    const innerNum = replaceFractionsBalancedUnit2(numParsed.arg);
+    if (!innerNum.ok) return innerNum;
+    const innerDen = replaceFractionsBalancedUnit2(denParsed.arg);
+    if (!innerDen.ok) return innerDen;
+
+    const replacement = `((${innerNum.text})/(${innerDen.text}))`;
+    s = s.slice(0, m.index) + replacement + s.slice(denParsed.nextIdx);
+  }
+  return { ok: true, text: s, error: null };
+}
+
+function replaceSqrtBalancedUnit2(input) {
+  let s = input;
+  const sqrtRe = /\\sqrt(?![a-zA-Z])/;
+  let safety = 0;
+  while (safety++ < 50) {
+    const m = sqrtRe.exec(s);
+    if (!m) break;
+    const afterCmd = m.index + m[0].length;
+    const argParsed = readTexGroupOrToken(s, afterCmd);
+    if (!argParsed) return { ok: false, text: s, error: "\\sqrt 인자 누락" };
+    const inner = replaceSqrtBalancedUnit2(argParsed.arg);
+    if (!inner.ok) return inner;
+    s = s.slice(0, m.index) + `sqrt(${inner.text})` + s.slice(argParsed.nextIdx);
+  }
+  return { ok: true, text: s, error: null };
+}
+
+/**
+ * [Sub-Unit 2d] \log_{b}(arg), \log_b(arg), \log(arg), \ln(arg) 변환 및 밑 조건(b > 0, b != 1) 검증
+ */
+function replaceLogsBalancedUnit2(input) {
+  let s = input;
+  const logRe = /\\(log|ln)(?![a-zA-Z])/;
+  let safety = 0;
+  const logMeta = [];
+
+  while (safety++ < 50) {
+    const m = logRe.exec(s);
+    if (!m) break;
+    const cmdName = m[1];
+    let p = m.index + m[0].length;
+    while (p < s.length && /\s/.test(s[p])) p++;
+
+    let baseStr = cmdName === "ln" ? "e" : "10";
+    if (cmdName === "log" && s[p] === "_") {
+      p++; // consume '_'
+      const baseParsed = readTexGroupOrToken(s, p);
+      if (!baseParsed) return { ok: false, text: s, error: "\\log 밑(_) 인자 누락" };
+      baseStr = baseParsed.arg.trim();
+      p = baseParsed.nextIdx;
+    }
+
+    const argParsed = readUnparenthesizedMathArg(s, p);
+    if (!argParsed) return { ok: false, text: s, error: `\\${cmdName} 진수 인자 누락` };
+
+    // 수치형 밑인 경우 밑 조건(b > 0, b != 1) 즉시 검증
+    if (baseStr !== "e" && /^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(baseStr)) {
+      const bVal = Number(baseStr);
+      if (!(bVal > 0 && Math.abs(bVal - 1) > 1e-9)) {
+        return { ok: false, text: s, error: `로그 밑 조건 위반(base=${bVal}: 밑은 1이 아닌 양수여야 함)` };
+      }
+    }
+
+    let replacement;
+    if (cmdName === "ln" || baseStr === "e") {
+      replacement = `ln(${argParsed.arg})`;
+    } else {
+      replacement = `((ln(${argParsed.arg}))/(ln(${baseStr})))`;
+    }
+    logMeta.push({ cmd: cmdName, base: baseStr, arg: argParsed.arg });
+    s = s.slice(0, m.index) + replacement + s.slice(argParsed.nextIdx);
+  }
+
+  return { ok: true, text: s, error: null, logMeta };
+}
+
+/**
+ * [Sub-Unit 2e] \sin, \cos, \tan 변환 (TeX 라벨은 라디안 기준이므로 sinr, cosr, tanr 로 변환)
+ */
+function replaceTrigBalancedUnit2(input) {
+  let s = input;
+  const trigRe = /\\(sin|cos|tan)(?![a-zA-Z])/;
+  let safety = 0;
+  const trigMeta = [];
+
+  while (safety++ < 50) {
+    const m = trigRe.exec(s);
+    if (!m) break;
+    const fnName = m[1];
+    const p = m.index + m[0].length;
+    const argParsed = readUnparenthesizedMathArg(s, p);
+    if (!argParsed) return { ok: false, text: s, error: `\\${fnName} 인자 누락` };
+    const replacement = `${fnName}r(${argParsed.arg})`;
+    trigMeta.push({ fn: fnName, arg: argParsed.arg });
+    s = s.slice(0, m.index) + replacement + s.slice(argParsed.nextIdx);
+  }
+
+  return { ok: true, text: s, error: null, trigMeta };
+}
+
+function replaceSuperscriptsBalancedUnit2(input) {
+  let s = "";
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] === "^" && input[i + 1] === "{") {
+      const closeIdx = findBalancedBrace(input, i + 1);
+      if (closeIdx === -1) return { ok: false, text: input, error: "지수(^{...})의 중괄호가 닫히지 않음" };
+      const inner = replaceSuperscriptsBalancedUnit2(input.slice(i + 2, closeIdx));
+      if (!inner.ok) return inner;
+      s += `^(${inner.text})`;
+      i = closeIdx + 1;
+    } else {
+      s += input[i];
+      i++;
+    }
+  }
+  return { ok: true, text: s, error: null };
+}
+
+/**
+ * 예약 함수명(ln, log, exp, pow, sqrt, abs, deg, rad, sinr, cosr, tanr, sin, cos, tan, pi)을 보존하며
+ * 암묵 곱(*)을 삽입한다.
+ */
+export function insertImplicitMultiplicationUnit2(rhs) {
+  const tokenRe = /(sinr|cosr|tanr|sqrt|pow|exp|deg|rad|abs|sin|cos|tan|log|ln|pi|[0-9]+\.?[0-9]*|\.[0-9]+|[a-zA-Z]|['+\-*/^(),])/g;
+  const rawToks = rhs.match(tokenRe);
+  if (!rawToks || rawToks.join("") !== rhs) {
+    // 폴백
+    return rhs;
+  }
+
+  const fnNames = new Set(["sinr", "cosr", "tanr", "sqrt", "pow", "exp", "deg", "rad", "abs", "sin", "cos", "tan", "log", "ln"]);
+  const isValueToken = (t) => /^[0-9.]/.test(t) || t === "pi" || (/^[a-zA-Z]$/.test(t));
+
+  let out = "";
+  for (let i = 0; i < rawToks.length; i++) {
+    const a = rawToks[i];
+    const b = rawToks[i + 1];
+    out += a;
+    if (!b) continue;
+    const prev = rawToks[i - 1];
+
+    const aEndsVal = isValueToken(a) || a === ")" || a === "'";
+    const bStartsVal = isValueToken(b) || fnNames.has(b) || b === "(";
+
+    // 함수명 바로 뒤의 '(' 또는 도함수 기호 f'(x) 뒤의 '(' 는 함수 호출이므로 '*' 삽입 안 함
+    if (fnNames.has(a) && b === "(") continue;
+    if ((a === "'" || /^[fghFGH]$/.test(a)) && b === "(") continue;
+    if (/^[fghFGH]$/.test(a) && b === "'") continue;
+
+    if (aEndsVal && bStartsVal) {
+      if (a === ")" && /^[0-9.]/.test(b) && prev === "^") continue;
+      out += "*";
+    }
+  }
+  return out;
+}
+
+/**
+ * [Unit 2] TeX 라벨 정규화 (Sub-Unit 2d / 2e 플래그 반영)
+ */
+export function normalizeMathLabelWithStatusUnit2(rawLabel, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (!F.u2d && !F.u2e) {
+    return v021NormalizeMathLabelWithStatus(rawLabel);
+  }
+  if (!rawLabel || typeof rawLabel !== "string") {
+    return { ok: false, normalized: "", error: "빈 라벨 문자열" };
+  }
+
+  let s = String(rawLabel)
+    .replace(/\$/g, "")
+    .replace(/\u2212/g, "-")
+    .replace(/\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|rm|bf|it|normalfont)\b/g, "")
+    .replace(/\\(?:left|right|[bB]ig{1,2}l?|[bB]ig{1,2}r?|[bB]ig{1,2})\b/g, "")
+    .replace(/\\(?:cdot|times)\b/g, "*")
+    .replace(/\\(?:,|;|:|!|quad|qquad)\b/g, "")
+    .replace(/\\[ ,;!]/g, "");
+
+  s = unwrapFontCommandsUnit2(s);
+
+  if (F.u2e) {
+    s = s.replace(/\\pi(?![a-zA-Z])/g, "(pi)");
+    const sqrtRes = replaceSqrtBalancedUnit2(s);
+    if (!sqrtRes.ok) return { ok: false, normalized: sqrtRes.text, error: sqrtRes.error };
+    s = sqrtRes.text;
+  }
+
+  const fracRes = replaceFractionsBalancedUnit2(s);
+  if (!fracRes.ok) return { ok: false, normalized: fracRes.text, error: fracRes.error };
+  s = fracRes.text;
+
+  let logMeta = [];
+  if (F.u2d) {
+    const logRes = replaceLogsBalancedUnit2(s);
+    if (!logRes.ok) return { ok: false, normalized: logRes.text, error: logRes.error };
+    s = logRes.text;
+    logMeta = logRes.logMeta || [];
+  }
+
+  let trigMeta = [];
+  if (F.u2e) {
+    const trigRes = replaceTrigBalancedUnit2(s);
+    if (!trigRes.ok) return { ok: false, normalized: trigRes.text, error: trigRes.error };
+    s = trigRes.text;
+    trigMeta = trigRes.trigMeta || [];
+  }
+
+  const supRes = replaceSuperscriptsBalancedUnit2(s);
+  if (!supRes.ok) return { ok: false, normalized: supRes.text, error: supRes.error };
+  s = supRes.text.replace(/\s+/g, "");
+
+  const leftoverCmd = /\\[a-zA-Z]+/.exec(s);
+  if (leftoverCmd) {
+    return { ok: false, normalized: s, error: `지원되지 않는 TeX 명령어 포함(${leftoverCmd[0]})` };
+  }
+
+  let depth = 0;
+  let normParens = "";
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(" || ch === "{") {
+      depth++;
+      normParens += "(";
+    } else if (ch === ")" || ch === "}") {
+      depth--;
+      if (depth < 0) return { ok: false, normalized: s, error: "닫는 괄호/중괄호 개수가 맞지 않음" };
+      normParens += ")";
+    } else {
+      normParens += ch;
+    }
+  }
+  if (depth !== 0) {
+    return { ok: false, normalized: normParens, error: "여는 괄호/중괄호가 닫히지 않음" };
+  }
+
+  return { ok: true, normalized: normParens, error: null, logMeta, trigMeta };
+}
+
+/**
+ * 예약 함수명을 제외한 기호 매개변수 문자 추출
+ */
+function extractSymbolicVarsFromRhs(rhs) {
+  const stripped = rhs
+    .replace(/\b(?:sinr|cosr|tanr|sqrt|pow|exp|deg|rad|abs|sin|cos|tan|log|ln|pi)\b/g, "")
+    .replace(/x/g, "");
+  return [...new Set(stripped.match(/[a-zA-Z]/g) || [])];
+}
+
+/**
+ * [Unit 2] 수치 라벨 표현식 분석기
+ */
+export function analyzeNumericLabelExpressionUnit2(rawLabel, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (!F.u2c && !F.u2d && !F.u2e) {
+    return v021AnalyzeNumericLabelExpression(rawLabel);
+  }
+
+  const hasRawFrac = /\\(?:d|t|c)?frac\b/.test(String(rawLabel || ""));
+  const normStatus = normalizeMathLabelWithStatusUnit2(rawLabel, F);
+  if (!normStatus.ok) {
+    return {
+      parseOk: false,
+      isEquation: false,
+      lhs: null,
+      normalizedExpr: normStatus.normalized,
+      compiledExpr: null,
+      fn: null,
+      hasFractionOrDivision: hasRawFrac,
+      hasSymbolicParams: false,
+      parseError: normStatus.error,
+    };
+  }
+
+  const norm = normStatus.normalized;
+  const eqMatch = /^([xy])=(.+)$/.exec(norm);
+  if (!eqMatch) {
+    return {
+      parseOk: false,
+      isEquation: false,
+      lhs: null,
+      normalizedExpr: norm,
+      compiledExpr: null,
+      fn: null,
+      hasFractionOrDivision: hasRawFrac,
+      hasSymbolicParams: false,
+      parseError: "y=... 또는 x=... 형태의 방정식이 아님",
+    };
+  }
+
+  const lhs = eqMatch[1];
+  const rhs = eqMatch[2];
+  const hasDivision = hasRawFrac || rhs.includes("/");
+  const otherVars = extractSymbolicVarsFromRhs(rhs);
+  const hasSymbolicParams = otherVars.length > 0 || rhs.includes("'");
+
+  if (lhs === "x") {
+    const multRhs = insertImplicitMultiplicationUnit2(rhs);
+    if (!hasSymbolicParams && !/\bx\b/.test(multRhs)) {
+      const fnConst = compileExprUnit2(multRhs, F);
+      let val = null;
+      if (fnConst) {
+        try {
+          val = fnConst(0);
+        } catch {
+          val = null;
+        }
+      }
+      if (val !== null && Number.isFinite(val)) {
+        return {
+          parseOk: true,
+          isEquation: true,
+          lhs: "x",
+          constantX: val,
+          normalizedExpr: norm,
+          compiledExpr: multRhs,
+          fn: null,
+          hasFractionOrDivision: hasDivision,
+          hasSymbolicParams: false,
+          parseError: null,
+        };
+      }
+    }
+    return {
+      parseOk: hasSymbolicParams,
+      isEquation: true,
+      lhs: "x",
+      constantX: null,
+      normalizedExpr: norm,
+      compiledExpr: null,
+      fn: null,
+      hasFractionOrDivision: hasDivision,
+      hasSymbolicParams,
+      symbolicVars: otherVars,
+      parseError: hasSymbolicParams ? null : "x=... 우변의 수치 계산 실패",
+    };
+  }
+
+  // lhs === "y"
+  const multRhs = insertImplicitMultiplicationUnit2(rhs);
+  if (hasSymbolicParams) {
+    return {
+      parseOk: true,
+      isEquation: true,
+      lhs: "y",
+      normalizedExpr: norm,
+      compiledExpr: multRhs,
+      fn: null,
+      hasFractionOrDivision: hasDivision,
+      hasSymbolicParams: true,
+      symbolicVars: otherVars,
+      logMeta: normStatus.logMeta || [],
+      trigMeta: normStatus.trigMeta || [],
+      parseError: null,
+    };
+  }
+
+  const fn = compileExprUnit2(multRhs, F);
+  if (!fn) {
+    return {
+      parseOk: false,
+      isEquation: true,
+      lhs: "y",
+      normalizedExpr: norm,
+      compiledExpr: multRhs,
+      fn: null,
+      hasFractionOrDivision: hasDivision,
+      hasSymbolicParams: false,
+      parseError: `수치 함수식 컴파일 실패(${multRhs})`,
+    };
+  }
+
+  // 로그함수 등 정의역이 제한된 함수를 위해 넓은 프로브 점들 중 최소 2개 이상에서 유한값이면 유효로 판정
+  const probeXs = [-3.1, -1.3, -0.5, 0.2, 0.5, 1.1, 1.3, 2.3, 4.1, 6.2];
+  let finiteCount = 0;
+  for (const testX of probeXs) {
+    try {
+      const v = fn(testX);
+      if (Number.isFinite(v)) finiteCount++;
+    } catch {
+      // ignore
+    }
+  }
+  if (finiteCount < 2) {
+    return {
+      parseOk: false,
+      isEquation: true,
+      lhs: "y",
+      normalizedExpr: norm,
+      compiledExpr: multRhs,
+      fn: null,
+      hasFractionOrDivision: hasDivision,
+      hasSymbolicParams: false,
+      parseError: `수치 함수식 정의역 내 유한 평가점 부족(${multRhs})`,
+    };
+  }
+
+  return {
+    parseOk: true,
+    isEquation: true,
+    lhs: "y",
+    normalizedExpr: norm,
+    compiledExpr: multRhs,
+    fn,
+    hasFractionOrDivision: hasDivision,
+    hasSymbolicParams: false,
+    logMeta: normStatus.logMeta || [],
+    trigMeta: normStatus.trigMeta || [],
+    parseError: null,
+  };
+}
+
+export function compileNumericLabelFunctionUnit2(rawLabel, flags = DEFAULT_UNIT2_FLAGS) {
+  const res = analyzeNumericLabelExpressionUnit2(rawLabel, flags);
+  return res.parseOk && res.fn ? res.fn : null;
+}
+
+// ============================================================================
+// 3. Sub-Unit 2a / 2b / 2d / 2e 구조 템플릿 파싱 및 호환성 검증
+// ============================================================================
+
+function foldConstantNumericFractionsUnit2(s) {
+  return s.replace(/\(\(([-+]?(?:\d+\.?\d*|\.\d+))\)\/\(([-+]?(?:\d+\.?\d*|\.\d+))\)\)/g, (all, num, den) => {
+    const d = Number(den);
+    if (!Number.isFinite(d) || Math.abs(d) < 1e-12) return all;
+    const v = Number(num) / d;
+    return String(Math.round(v * 1e6) / 1e6);
+  });
+}
+
+/**
+ * plot 문장의 수학 구조 분석 (점근선 등으로 일부 샘플이 NaN 이어도 유효 샘플로 분석)
+ */
+export function analyzePlotMathStructureUnit2(stmt, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (!stmt || stmt.type !== "plot" || !Array.isArray(stmt.domain) || stmt.domain.length < 2) {
+    return null;
+  }
+  const fn = stmt.fn || compileExprUnit2(stmt.expr, F);
+  if (!fn) return null;
+
+  const baseStruct = v021AnalyzePlotMathStructure({ ...stmt, fn });
+  if (baseStruct) {
+    return { ...baseStruct, expr: stmt.expr || "", fn, domain: stmt.domain };
+  }
+
+  // 점근선 근처에서 일부 끝점이 NaN 인 경우 내부 7개 점으로 재시도
+  const [d0, d1] = stmt.domain;
+  const validPts = [];
+  for (let k = 1; k <= 7; k++) {
+    const x = d0 + ((d1 - d0) * k) / 8;
+    try {
+      const y = fn(x);
+      if (Number.isFinite(y) && Math.abs(y) < 1e5) validPts.push([x, y]);
+    } catch {
+      // ignore
+    }
+  }
+  if (validPts.length >= 4) {
+    return {
+      kind: "non-polynomial",
+      degree: null,
+      expr: stmt.expr || "",
+      fn,
+      domain: stmt.domain,
+      validSampleCount: validPts.length,
+    };
+  }
+  return null;
+}
+
+/**
+ * [Unit 2] 구조 템플릿 파서 (u2a, u2b, u2d, u2e 플래그 제어)
+ */
+export function parseLabelStructureTemplateUnit2(rawLabel, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+
+  // 수치형 함수(미지수 없음)는 expr-match 대상이므로 구조 템플릿에서 제외
+  if (compileNumericLabelFunctionUnit2(rawLabel, F)) return null;
+
+  // 1) 기존 v0.2.1 구조 템플릿 확인 + Sub-Unit 2b (+1/-1 생략 계수 보정)
+  const baseTpl = v021ParseLabelStructureTemplate(rawLabel);
+  if (baseTpl) {
+    if (F.u2b) {
+      const norm = v021NormalizeMathLabelWithStatus(rawLabel).normalized || "";
+      const rhs = norm.startsWith("y=") ? norm.slice(2) : "";
+      if (baseTpl.template === "linear-general" && baseTpl.fixedM === null) {
+        if (/^\+?x[-+]/.test(rhs)) {
+          return { ...baseTpl, fixedM: 1 };
+        }
+      }
+      if (baseTpl.template === "quad-general" && baseTpl.fixedA === null) {
+        if (/^\+?x\^2[-+]/.test(rhs)) {
+          return { ...baseTpl, fixedA: 1 };
+        }
+      }
+    }
+    return baseTpl;
+  }
+
+  const normStatus = normalizeMathLabelWithStatusUnit2(rawLabel, F);
+  if (!normStatus.ok || !normStatus.normalized) return null;
+  const norm = foldConstantNumericFractionsUnit2(normStatus.normalized).replace(/\^\(2\)/g, "^2");
+  if (!norm.startsWith("y=")) return null;
+  const rhs = norm.slice(2);
+
+  // 2) [Sub-Unit 2a] y = f(1), y = f(-2), y = f(a) 등 상수 함수값 수평선 (인자에 x 없음)
+  if (F.u2a) {
+    const mConstFnCall = /^([-+]?)([fghFGH])\(([^x()]+)\)$/.exec(rhs);
+    if (mConstFnCall) {
+      const sign = mConstFnCall[1] === "-" ? -1 : 1;
+      const fnName = mConstFnCall[2];
+      const argRaw = mConstFnCall[3];
+      const argNum = /^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(argRaw) ? Number(argRaw) : null;
+      return {
+        template: "horizontal-constant-fn",
+        desc: `상수 함수값 수평선(${norm})`,
+        degree: 0,
+        fnName,
+        fnSign: sign,
+        argRaw,
+        argNum,
+        requireHorizontalLine: true,
+      };
+    }
+
+    // y = f(x), y = g(x), y = h(x) 추상 함수 라벨 (도함수 f'(x)나 부호 변환 -f(x)는 구분 기록)
+    const mAbstractFn = /^([fghFGH])\(x\)$/.exec(rhs);
+    if (mAbstractFn) {
+      return {
+        template: "abstract-single-curve",
+        desc: `추상 함수 곡선(${norm})`,
+        degree: "non-constant-plot",
+        fnName: mAbstractFn[1],
+        isAbstractFunctionLabel: true,
+        requireUniqueNonConstantPlot: true,
+      };
+    }
+
+    // y = f'(x), y = -f'(x), y = -f(x) 등 파생 추상 함수 표기:
+    // 장면 내 추상 함수 라벨 개수 집계에 포함시키되 단독 자동 확정은 보류(ambiguous/uncertain)
+    const mDerivedAbstract = /^[-+]?([fghFGH])'?\(x\)$/.exec(rhs);
+    if (mDerivedAbstract) {
+      return {
+        template: "abstract-derived-hold",
+        desc: `파생/부호 추상 함수(${norm})`,
+        degree: "non-constant-plot",
+        fnName: mDerivedAbstract[1],
+        isAbstractFunctionLabel: true,
+        holdUncertain: true,
+      };
+    }
+  }
+
+  // 3) [Sub-Unit 2d] 지수함수 일반형: y = a^x + b, y = 2^x + b, y = a^(x-p) + q 등
+  if (F.u2d) {
+    const NUM = String.raw`(?:\d+\.?\d*|\.\d+)`;
+    const SYM = String.raw`[a-zA-Z]`;
+    // 형태 A: y = (base)^(x 또는 x±p) ± q (예: y=2^x+b, y=a^x+b, y=(0.5)^x+k)
+    const mExp = new RegExp(
+      String.raw`^(?:([-+]?(?:${NUM}|${SYM}))\*)?\(?(${NUM}|${SYM})\)?\^\(?x(?:([-+])(${NUM}|${SYM}))?\)?(?:([-+])(${NUM}|${SYM}))?$`
+    ).exec(rhs);
+    if (mExp) {
+      const coefRaw = mExp[1] || "";
+      const baseRaw = mExp[2];
+      const shiftSign = mExp[3] || null;
+      const shiftRaw = mExp[4] || null;
+      const constSign = mExp[5] || null;
+      const constRaw = mExp[6] || null;
+
+      const isNumericBase = /^(?:\d+\.?\d*|\.\d+)$/.test(baseRaw);
+      const fixedBase = isNumericBase ? Number(baseRaw) : null;
+      // 지수함수 밑 조건: a > 0 && a != 1
+      if (fixedBase !== null && !(fixedBase > 0 && Math.abs(fixedBase - 1) > 1e-9)) {
+        return null;
+      }
+
+      const fixedCoef =
+        coefRaw === "" || coefRaw === "+"
+          ? 1
+          : coefRaw === "-"
+            ? -1
+            : /^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(coefRaw)
+              ? Number(coefRaw)
+              : null;
+
+      const fixedShiftX =
+        shiftRaw === null
+          ? 0
+          : /^(?:\d+\.?\d*|\.\d+)$/.test(shiftRaw)
+            ? shiftSign === "-"
+              ? Number(shiftRaw)
+              : -Number(shiftRaw)
+            : null;
+
+      const fixedConst =
+        constRaw === null
+          ? 0
+          : /^(?:\d+\.?\d*|\.\d+)$/.test(constRaw)
+            ? constSign === "-"
+              ? -Number(constRaw)
+              : Number(constRaw)
+            : null;
+
+      return {
+        template: "exp-general",
+        desc: `지수함수(${norm})`,
+        degree: null,
+        fixedCoef,
+        fixedBase,
+        baseRaw,
+        fixedShiftX,
+        fixedConst,
+      };
+    }
+
+    // 형태 B: 로그함수 일반형 (기호 매개변수가 포함된 \log_a(x+p)+q 등)
+    if (normStatus.logMeta && normStatus.logMeta.length === 1) {
+      const lm = normStatus.logMeta[0];
+      const isNumBase = lm.base === "e" || /^(?:\d+\.?\d*|\.\d+)$/.test(lm.base);
+      const fixedBase = lm.base === "e" ? Math.E : isNumBase ? Number(lm.base) : null;
+      if (fixedBase !== null && !(fixedBase > 0 && Math.abs(fixedBase - 1) > 1e-9)) {
+        return null;
+      }
+      return {
+        template: "log-general",
+        desc: `로그함수(${norm})`,
+        degree: null,
+        fixedBase,
+        logMeta: lm,
+      };
+    }
+  }
+
+  // 4) [Sub-Unit 2e] 기호 매개변수가 포함된 삼각함수 일반형 (예: CASE-005 y=6\cos(a(x+\pi/6))+b)
+  if (F.u2e && normStatus.trigMeta && normStatus.trigMeta.length === 1) {
+    const tm = normStatus.trigMeta[0];
+    return {
+      template: "trig-general",
+      desc: `삼각함수(${norm})`,
+      degree: null,
+      trigFn: tm.fn, // 'sin' | 'cos' | 'tan'
+    };
+  }
+
+  return null;
+}
+
+/**
+ * [Unit 2] 구조 템플릿과 곡선의 수학적 호환성 검사
+ */
+export function checkStructuralCompatibilityUnit2(tpl, stroke, mathStruct, node, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (!tpl || !stroke) return { compatible: false, reason: "템플릿 또는 곡선 없음" };
+
+  if (tpl.template === "abstract-derived-hold") {
+    return { compatible: false, reason: "파생/부호 추상 함수는 단독 구조 매칭에서 보류" };
+  }
+
+  if (F.u2a && tpl.template === "horizontal-constant-fn") {
+    if (mathStruct) {
+      if (mathStruct.kind === "constant" && mathStruct.degree === 0) {
+        return {
+          compatible: true,
+          details: `수평 상수 함수(y=${mathStruct.c}, degree=0) 구조 일치`,
+        };
+      }
+      return {
+        compatible: false,
+        reason: `상수 함수(degree=0)가 아님(현재 ${mathStruct.kind}, degree=${mathStruct.degree})`,
+      };
+    }
+    const pts = stroke.pts || [];
+    if (pts.length === 2 || (pts.length >= 2 && (!stroke.stmt || stroke.stmt.type !== "plot"))) {
+      const dx = Math.abs(pts[pts.length - 1][0] - pts[0][0]);
+      const dy = Math.abs(pts[pts.length - 1][1] - pts[0][1]);
+      if (dy <= 1.0 && dx >= 5.0) {
+        return {
+          compatible: true,
+          details: `수평 보조선 선분(|dy|=${r2(dy)}pt) 구조 일치`,
+        };
+      }
+    }
+    return { compatible: false, reason: "수평선(degree=0)이 아님" };
+  }
+
+  if (F.u2a && tpl.template === "abstract-single-curve") {
+    if (!stroke.stmt || stroke.stmt.type !== "plot") {
+      return { compatible: false, reason: "plot 곡선이 아님" };
+    }
+    if (mathStruct && mathStruct.degree === 0) {
+      return { compatible: false, reason: "수평 상수선(degree=0)은 추상 함수 곡선 y=f(x) 대상에서 제외" };
+    }
+    return {
+      compatible: true,
+      isNonlinearCurve: Boolean(
+        classifyStrokeKind(stroke) === "functionCurve" &&
+          (!mathStruct || (mathStruct.degree !== 0 && mathStruct.degree !== 1))
+      ),
+      details: `비상수 plot 주요 곡선(${mathStruct ? `${mathStruct.kind}, degree=${mathStruct.degree}` : "plot"}) 후보`,
+    };
+  }
+
+  if (F.u2d && tpl.template === "exp-general") {
+    if (!stroke.stmt || stroke.stmt.type !== "plot" || !mathStruct || mathStruct.kind !== "non-polynomial") {
+      return { compatible: false, reason: "비다항(non-polynomial) plot 곡선이 아님" };
+    }
+    const fn = mathStruct.fn || stroke.stmt.fn;
+    const dom = mathStruct.domain || stroke.stmt.domain;
+    if (!fn || !Array.isArray(dom) || dom.length < 2) {
+      return { compatible: false, reason: "plot 함수 또는 정의역 없음" };
+    }
+
+    // 1) 만약 밑(fixedBase)과 평행이동(fixedShiftX), 계수(fixedCoef)가 알려져 있고 상수항만 미지수인 경우 (예: y = 2^x + b):
+    //    st.fn(x) - coef * base^(x - shiftX) 가 정의역 전체에서 상수인지 직접 검증!
+    if (tpl.fixedBase !== null && tpl.fixedCoef !== null && tpl.fixedShiftX !== null) {
+      const diffs = [];
+      for (let k = 0; k < 5; k++) {
+        const x = dom[0] + ((dom[1] - dom[0]) * (k + 0.5)) / 5;
+        const yPlot = fn(x);
+        const yExp = tpl.fixedCoef * safePow(tpl.fixedBase, x - tpl.fixedShiftX);
+        if (!Number.isFinite(yPlot) || !Number.isFinite(yExp)) {
+          return { compatible: false, reason: "지수함수 정의역 평가 중 비유한값 발생" };
+        }
+        diffs.push(yPlot - yExp);
+      }
+      const meanDiff = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+      const maxDev = Math.max(...diffs.map((d) => Math.abs(d - meanDiff)));
+      if (maxDev <= 1e-3) {
+        if (tpl.fixedConst !== null && Math.abs(meanDiff - tpl.fixedConst) > 1e-3) {
+          return { compatible: false, reason: `지수함수 상수항 불일치(요구 ${tpl.fixedConst}, 실제 ${r2(meanDiff)})` };
+        }
+        return {
+          compatible: true,
+          details: `지수함수 구조 일치(base=${tpl.fixedBase}, 추정 상수항=${r2(meanDiff)}, 편차=${r2(maxDev)})`,
+        };
+      }
+      return { compatible: false, reason: `지수함수 밑(${tpl.fixedBase}) 증가율 불일치(편차=${r2(maxDev)})` };
+    }
+
+    // 2) 일반 지수함수 증가율 검증: 등간격 4개 점에서 차분비 (y_{k+1}-y_k)/(y_k-y_{k-1}) = a^h > 0 일정 여부 확인
+    const h = (dom[1] - dom[0]) / 3;
+    if (h <= 1e-6) return { compatible: false, reason: "정의역 폭 부족" };
+    const ys = [0, 1, 2, 3].map((k) => fn(dom[0] + k * h));
+    if (ys.some((y) => !Number.isFinite(y))) return { compatible: false, reason: "비유한 샘플 존재" };
+    const d1 = ys[1] - ys[0];
+    const d2 = ys[2] - ys[1];
+    const d3 = ys[3] - ys[2];
+    if (Math.abs(d1) < 1e-6 || Math.abs(d2) < 1e-6) return { compatible: false, reason: "차분 변화량 부족" };
+    const r1 = d2 / d1;
+    const r2Ratio = d3 / d2;
+    if (!(r1 > 0 && Math.abs(r1 - 1) > 1e-3 && Math.abs(r1 - r2Ratio) <= 1e-2)) {
+      return { compatible: false, reason: "등비 차분 성질 불만족(지수함수가 아님)" };
+    }
+    const impliedBase = Math.pow(r1, 1 / h);
+    if (tpl.fixedBase !== null && Math.abs(impliedBase - tpl.fixedBase) > 2e-2) {
+      return { compatible: false, reason: `지수 밑 불일치(요구 ${tpl.fixedBase}, 곡선 ${r2(impliedBase)})` };
+    }
+    return {
+      compatible: true,
+      details: `지수함수 등비 차분 구조 일치(추정 밑 a=${r2(impliedBase)})`,
+    };
+  }
+
+  if (F.u2d && tpl.template === "log-general") {
+    if (!stroke.stmt || stroke.stmt.type !== "plot" || !mathStruct || mathStruct.kind !== "non-polynomial") {
+      return { compatible: false, reason: "비다항 plot 곡선이 아님" };
+    }
+    const exprStr = String(stroke.stmt.expr || "");
+    if (!/\b(?:ln|log)\b/.test(exprStr)) {
+      return { compatible: false, reason: "plot 식에 로그(ln/log)가 포함되지 않음" };
+    }
+    return {
+      compatible: true,
+      details: `로그함수 plot 식(${exprStr}) 구조 일치`,
+    };
+  }
+
+  if (F.u2e && tpl.template === "trig-general") {
+    if (!stroke.stmt || stroke.stmt.type !== "plot" || !mathStruct || mathStruct.kind !== "non-polynomial") {
+      return { compatible: false, reason: "비다항 plot 곡선이 아님" };
+    }
+    const exprStr = String(stroke.stmt.expr || "");
+    if (tpl.trigFn === "tan") {
+      if (!/\btan\b/.test(exprStr)) return { compatible: false, reason: "tan plot 식이 아님" };
+    } else {
+      if (!/\b(?:sin|cos)\b/.test(exprStr)) return { compatible: false, reason: "sin/cos plot 식이 아님" };
+    }
+    return {
+      compatible: true,
+      details: `삼각함수(${tpl.trigFn}) plot 식(${exprStr}) 구조 일치`,
+    };
+  }
+
+  return v021CheckStructuralCompatibility(tpl, stroke, mathStruct, node);
+}
+
+/**
+ * [Unit 2] 미배정 함수 라벨에 대한 구조 매칭 실행기
+ */
+export function runStructuralMatchingUnit2(scene, unclaimedNodes, claimedStrokeIndices, classifyStrokeKindFn, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  const results = new Map();
+  const strokes = Array.isArray(scene && scene.strokes) ? scene.strokes : [];
+
+  const plotCandidates = [];
+  for (const s of strokes) {
+    if (!s || s.kind === "axis" || claimedStrokeIndices.has(s.index)) continue;
+    const strokeKind = classifyStrokeKindFn(s);
+    const mathStruct = s.stmt && s.stmt.type === "plot" ? analyzePlotMathStructureUnit2(s.stmt, F) : null;
+    plotCandidates.push({ stroke: s, strokeKind, mathStruct });
+  }
+
+  // 장면 내 미배정 추상 함수 라벨(y=f(x), y=g(x), y=f'(x) 등) 총 개수 확인
+  // 안전 규칙: 추상 함수 라벨이 2개 이상이면(예: CASE-004 의 y=f(x), y=g(x)) 절대 자동 이동하지 않고 차단!
+  const nodeTplPairs = unclaimedNodes.map((n) => ({
+    node: n,
+    tpl: parseLabelStructureTemplateUnit2(n.label, F),
+  }));
+  const abstractLabelNodes = nodeTplPairs.filter((p) => p.tpl && p.tpl.isAbstractFunctionLabel);
+
+  const nodeAnalyses = nodeTplPairs.map(({ node: n, tpl }) => {
+    const anchor = n.at || n.inlineAnchor || n.anchor || (n.bbox ? [(n.bbox.x0 + n.bbox.x1) / 2, (n.bbox.y0 + n.bbox.y1) / 2] : null);
+    if (!tpl) {
+      return { node: n, tpl: null, compatible: [], anchor };
+    }
+
+    // 복수 추상 함수 라벨이 존재하면 모든 추상 함수 라벨을 ambiguous-structural 로 보류
+    if (tpl.isAbstractFunctionLabel && abstractLabelNodes.length >= 2) {
+      const nonConstPlots = plotCandidates.filter(
+        (c) => c.stroke.stmt && c.stroke.stmt.type === "plot" && (!c.mathStruct || c.mathStruct.degree !== 0)
+      );
+      return {
+        node: n,
+        tpl,
+        compatible: nonConstPlots.map((c) => ({
+          ...c,
+          details: "복수 추상 함수 라벨 존재로 인해 확정 보류",
+          distancePt: anchor
+            ? r2(minDistPolylines([{ pts: [anchor, anchor], closed: false }], [{ pts: c.stroke.pts, closed: false }]))
+            : null,
+        })),
+        forceAmbiguousReason: `미배정 추상 함수식 라벨이 ${abstractLabelNodes.length}개(${abstractLabelNodes.map((a) => a.node.trimmed).join(", ")}) 존재하여 대응 곡선을 안전하게 확정할 수 없음. 자동 이동 차단.`,
+        anchor,
+      };
+    }
+
+    if (tpl.holdUncertain) {
+      return { node: n, tpl: null, compatible: [], anchor };
+    }
+
+    const compatible = [];
+    for (const cand of plotCandidates) {
+      if (claimedStrokeIndices.has(cand.stroke.index)) continue;
+      if (
+        tpl.template !== "vertical-symbolic" &&
+        tpl.template !== "horizontal-constant-fn" &&
+        (!cand.stroke.stmt || cand.stroke.stmt.type !== "plot")
+      ) {
+        continue;
+      }
+      const chk = checkStructuralCompatibilityUnit2(tpl, cand.stroke, cand.mathStruct, n, F);
+      if (chk.compatible) {
+        const distPt = anchor
+          ? r2(minDistPolylines([{ pts: [anchor, anchor], closed: false }], [{ pts: cand.stroke.pts, closed: false }]))
+          : null;
+        compatible.push({ ...cand, isNonlinearCurve: chk.isNonlinearCurve, details: chk.details, distancePt: distPt });
+      }
+    }
+
+    // [Sub-Unit 2a 보조 규칙]
+    // 단일 추상 함수 라벨(y=f(x))인데 미배정 비상수 plot 이 여러 개인 경우(예: CASE-009 의 3차곡선 1개 + 접선 직선 3개):
+    // 그중 비선형 곡선(degree >= 2 또는 non-polynomial functionCurve)이 정확히 1개뿐이고 나머지가 모두 직선(degree=1)이면
+    // 유일한 비선형 메인 곡선으로 좁혀준다.
+    if (tpl.template === "abstract-single-curve" && compatible.length >= 2) {
+      const nonlinearOnly = compatible.filter((c) => c.isNonlinearCurve);
+      const allOthersLinear = compatible
+        .filter((c) => !c.isNonlinearCurve)
+        .every((c) => c.strokeKind === "generalLine" || (c.mathStruct && c.mathStruct.degree === 1));
+      if (nonlinearOnly.length === 1 && allOthersLinear) {
+        return {
+          node: n,
+          tpl,
+          compatible: [
+            {
+              ...nonlinearOnly[0],
+              details: `${nonlinearOnly[0].details} (나머지 미배정 plot 은 모두 직선이므로 유일한 비선형 메인 함수 곡선으로 확정)`,
+            },
+          ],
+          anchor,
+        };
+      }
+    }
+
+    return { node: n, tpl, compatible, anchor };
+  });
+
+  const strokeContenders = new Map();
+  for (const na of nodeAnalyses) {
+    if (!na.forceAmbiguousReason && na.compatible.length === 1) {
+      const idx = na.compatible[0].stroke.index;
+      strokeContenders.set(idx, (strokeContenders.get(idx) || 0) + 1);
+    }
+  }
+
+  for (const na of nodeAnalyses) {
+    const { node: n, tpl, compatible, forceAmbiguousReason } = na;
+    if (!tpl) continue;
+
+    if (forceAmbiguousReason) {
+      const sortedByDist = [...compatible].sort((a, b) => (a.distancePt ?? Infinity) - (b.distancePt ?? Infinity));
+      const nearest = sortedByDist[0] || null;
+      results.set(n.id, {
+        how: "ambiguous-structural",
+        stroke: nearest ? nearest.stroke : null,
+        strokeKind: nearest ? nearest.strokeKind : "unknown",
+        confirmed: false,
+        uncertain: true,
+        nonMoveCategory: "매칭 불확실",
+        nonMoveCode: "uncertain-match",
+        template: tpl.template,
+        templateDesc: tpl.desc,
+        candidateCount: compatible.length,
+        candidateStrokes: compatible.map((c) => c.stroke.index),
+        distancePt: nearest ? nearest.distancePt : null,
+        reason: forceAmbiguousReason,
+      });
+      continue;
+    }
+
+    if (compatible.length === 1) {
+      const match = compatible[0];
+      const contenders = strokeContenders.get(match.stroke.index) || 0;
+      if (contenders > 1) {
+        results.set(n.id, {
+          how: "ambiguous-structural",
+          stroke: match.stroke,
+          strokeKind: match.strokeKind,
+          confirmed: false,
+          uncertain: true,
+          nonMoveCategory: "매칭 불확실",
+          nonMoveCode: "uncertain-match",
+          template: tpl.template,
+          templateDesc: tpl.desc,
+          candidateCount: contenders,
+          candidateStrokes: [match.stroke.index],
+          reason: `동일한 ${tpl.desc} 곡선(#${match.stroke.index})에 대응 가능한 일반형 라벨이 ${contenders}개 존재하여 확정할 수 없음. 자동 이동 차단.`,
+        });
+        continue;
+      }
+
+      claimedStrokeIndices.add(match.stroke.index);
+      results.set(n.id, {
+        how: "structural-match",
+        stroke: match.stroke,
+        strokeKind: match.strokeKind,
+        confirmed: true,
+        uncertain: false,
+        nonMoveCategory: null,
+        nonMoveCode: null,
+        template: tpl.template,
+        templateDesc: tpl.desc,
+        mathStructure: match.mathStruct,
+        distancePt: match.distancePt,
+        reason: `${tpl.desc} 구조 분석 결과 미배정 곡선 중 유일한 후보(#${match.stroke.index}: ${match.details})로 확정됨`,
+      });
+    } else if (compatible.length >= 2) {
+      const sortedByDist = [...compatible].sort((a, b) => (a.distancePt ?? Infinity) - (b.distancePt ?? Infinity));
+      const nearest = sortedByDist[0];
+      results.set(n.id, {
+        how: "ambiguous-structural",
+        stroke: nearest.stroke,
+        strokeKind: nearest.strokeKind,
+        confirmed: false,
+        uncertain: true,
+        nonMoveCategory: "매칭 불확실",
+        nonMoveCode: "uncertain-match",
+        template: tpl.template,
+        templateDesc: tpl.desc,
+        candidateCount: compatible.length,
+        candidateStrokes: compatible.map((c) => c.stroke.index),
+        distancePt: nearest.distancePt,
+        reason: `${tpl.desc} 후보가 ${compatible.length}개 존재하여 대응 곡선을 확정할 수 없음. 자동 이동 차단.`,
+      });
+    }
+  }
+
+  return results;
+}
+
+// ============================================================================
+// 4. Scope \clip 가시 영역 폴리라인 클리핑 및 Scene 확장 (Sub-Unit 2d / 2e)
+// ============================================================================
+
+/**
+ * 선분 P0 -> P1 을 직사각형 [xMin, yMin, xMax, yMax] 내부로 Liang-Barsky 클리핑한다.
+ */
+function clipSegmentToRect(p0, p1, rect) {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = p1[0] - p0[0];
+  const dy = p1[1] - p0[1];
+  const checks = [
+    [-dx, p0[0] - rect.x0],
+    [dx, rect.x1 - p0[0]],
+    [-dy, p0[1] - rect.y0],
+    [dy, rect.y1 - p0[1]],
+  ];
+  for (const [p, q] of checks) {
+    if (Math.abs(p) < 1e-12) {
+      if (q < 0) return null;
+    } else {
+      const r = q / p;
+      if (p < 0) {
+        if (r > t1) return null;
+        if (r > t0) t0 = r;
+      } else {
+        if (r < t0) return null;
+        if (r < t1) t1 = r;
+      }
+    }
+  }
+  if (t0 > t1) return null;
+  return [
+    [r2(p0[0] + t0 * dx), r2(p0[1] + t0 * dy)],
+    [r2(p0[0] + t1 * dx), r2(p0[1] + t1 * dy)],
+  ];
+}
+
+/**
+ * 폴리라인 pts 를 직사각형 rect 내부로 클리핑한다.
+ */
+export function clipPolylineToRect(pts, rect) {
+  if (!Array.isArray(pts) || pts.length < 2 || !rect) return pts;
+  const out = [];
+  const pushPt = (pt) => {
+    if (out.length === 0) {
+      out.push(pt);
+      return;
+    }
+    const last = out[out.length - 1];
+    if (Math.hypot(last[0] - pt[0], last[1] - pt[1]) > 1e-3) {
+      out.push(pt);
+    }
+  };
+  for (let i = 0; i < pts.length - 1; i++) {
+    const seg = clipSegmentToRect(pts[i], pts[i + 1], rect);
+    if (seg) {
+      pushPt(seg[0]);
+      pushPt(seg[1]);
+    }
+  }
+  return out.length >= 2 ? out : pts;
+}
+
+/**
+ * TikZ 본문에서 \begin{scope} ... \clip (x0, y0) rectangle (x1, y1); ... \end{scope} 범위를 찾아
+ * 해당 scope 내부에 선언된 plot/draw 스트로크의 폴리라인(pts)을 가시 클립 영역으로 절단한다.
+ */
+export function applyScopeClippingToScene(scene) {
+  if (!scene || !scene.body || !scene.units || !scene.units.xU || !scene.units.yU) return scene;
+  const { xU, yU } = scene.units;
+  const body = scene.body;
+  const NUM = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)`;
+  const clipRe = new RegExp(
+    String.raw`\\clip\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*rectangle\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*;`,
+    "g"
+  );
+
+  // \begin{scope} ... \end{scope} 범위 추출
+  const scopes = [];
+  const scopeOpenRe = /\\begin\{scope\}/g;
+  const scopeCloseRe = /\\end\{scope\}/g;
+  const opens = [];
+  let m;
+  while ((m = scopeOpenRe.exec(body)) !== null) opens.push(m.index);
+  const closes = [];
+  while ((m = scopeCloseRe.exec(body)) !== null) closes.push(m.index + m[0].length);
+
+  // 단순 중첩/순차 매칭
+  for (let i = 0; i < Math.min(opens.length, closes.length); i++) {
+    scopes.push({ start: opens[i], end: closes[i] });
+  }
+
+  const clipRegions = [];
+  while ((m = clipRe.exec(body)) !== null) {
+    const cIdx = m.index;
+    const xa = Number(m[1]) * xU;
+    const ya = Number(m[2]) * yU;
+    const xb = Number(m[3]) * xU;
+    const yb = Number(m[4]) * yU;
+    const rect = {
+      x0: Math.min(xa, xb),
+      y0: Math.min(ya, yb),
+      x1: Math.max(xa, xb),
+      y1: Math.max(ya, yb),
+    };
+    const enclosingScope = scopes.find((sc) => cIdx >= sc.start && cIdx <= sc.end);
+    clipRegions.push({
+      clipIndex: cIdx,
+      rangeStart: cIdx,
+      rangeEnd: enclosingScope ? enclosingScope.end : body.length,
+      isScoped: Boolean(enclosingScope),
+      rect,
+    });
+  }
+
+  if (clipRegions.length === 0) return scene;
+
+  for (const s of scene.strokes || []) {
+    if (!s || s.kind === "axis" || !s.stmt || !Array.isArray(s.pts) || s.pts.length < 2) continue;
+    // \begin{scope} 내부의 \clip 만 곡선 가시 끝점 절단에 적용 (전역 뷰포트 \clip 은 여백용이므로 scope clip 우선)
+    const activeClips = clipRegions.filter(
+      (cr) => cr.isScoped && s.stmt.start >= cr.rangeStart && s.stmt.end <= cr.rangeEnd
+    );
+    if (activeClips.length === 0) continue;
+    let pts = s.pts;
+    for (const cr of activeClips) {
+      pts = clipPolylineToRect(pts, cr.rect);
+    }
+    if (pts.length >= 2) {
+      s.unclippedPts = s.unclippedPts || s.pts;
+      s.pts = pts;
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of pts) {
+        if (p[0] < x0) x0 = p[0];
+        if (p[1] < y0) y0 = p[1];
+        if (p[0] > x1) x1 = p[0];
+        if (p[1] > y1) y1 = p[1];
+      }
+      s.bbox = { x0, y0, x1, y1 };
+      s.clippedByScope = true;
+    }
+  }
+  return scene;
+}
+
+/**
+ * [Unit 2] buildScene 이후 장면(scene)에 Unit 2 의 파서·글리프 확인·클리핑을 주입한다.
+ */
+export function enhanceSceneWithUnit2(scene, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (!scene || !scene.ok) return scene;
+
+  // 1) plot 문장들의 수식 함수(st.fn)를 compileExprUnit2 로 재컴파일
+  for (const st of scene.stmts || []) {
+    if (st.type === "plot" && st.expr) {
+      st.fn = compileExprUnit2(st.expr, F);
+    }
+  }
+
+  // 2) \begin{scope} \clip 가시 영역 폴리라인 절단 적용
+  if (F.u2a || F.u2c || F.u2e) {
+    applyScopeClippingToScene(scene);
+  }
+
+  // 3) 확장 글리프 일치 확인 (\log, \ln, \sin, \cos, \tan, \pi, \sqrt 등)
+  const offset = scene.analysis && scene.analysis.labels ? 0 : 0;
+  const anLabels = (scene.analysis && scene.analysis.labels) || [];
+  const geomNodes = (scene.geom && scene.geom.nodes) || [];
+
+  for (const n of scene.nodes || []) {
+    if (n.usable) continue;
+    // Unit 1 의 fallbackAnchorFromBBox 잠금 노드는 절대 usable=true 로 풀지 않음!
+    if (n.fallbackAnchorFromBBox) continue;
+    if (!n.bbox || n.confidence !== "uncertain") continue;
+
+    const svgNode = n.svgIndex !== null && n.svgIndex !== undefined ? geomNodes[n.svgIndex] : null;
+    if (!svgNode || typeof svgNode.chars !== "string" || !n.label) continue;
+
+    let cleaned = n.label
+      .replace(/\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle|rm|bf|it|normalfont|mathrm|mathbf|mathit|left|right|[bB]ig{1,2}[lr]?|(?:d|t|c)?frac|cdot|times|,|;|:|!|quad|qquad)\b/g, "");
+
+    if (F.u2d) {
+      cleaned = cleaned.replace(/\\(log|ln)\b/g, "$1");
+    }
+    if (F.u2e) {
+      cleaned = cleaned
+        .replace(/\\(sin|cos|tan)\b/g, "$1")
+        .replace(/\\(?:pi|alpha|beta|gamma|theta|sqrt)\b/g, "");
+    }
+    cleaned = cleaned.replace(/[$^{}_\s']/g, "");
+
+    if (!/\\[a-zA-Z]+/.test(cleaned)) {
+      const expChars = (cleaned.match(/[A-Za-z0-9=+\-().,/]/g) || []).sort().join("");
+      const gotChars = (svgNode.chars.replace(/\u2212/g, "-").match(/[A-Za-z0-9=+\-().,/]/g) || []).sort().join("");
+      if (expChars.length > 0 && expChars === gotChars) {
+        const lab = anLabels.find((l) => l.id === n.id);
+        const m = lab ? lab.matching : null;
+        const orderEv = m && (m.evidence || []).find((e) => e.type === "order");
+        const posEv = m && (m.evidence || []).find((e) => e.type === "position");
+        if (n.kind !== "inline" && orderEv && orderEv.result === "consistent" && posEv && posEv.result === "within") {
+          n.usable = true;
+          n.usableBy = "unit2-extended-tex-glyph-confirmed";
+        } else if (n.kind === "inline" && n.stmt && n.stmt.path) {
+          const st = (scene.strokes || []).find((s) => s.index === n.stmt.path.index);
+          if (st) {
+            const dEnd = [st.pts[0], st.pts[st.pts.length - 1]].map((e) =>
+              Math.hypot(Math.max(n.bbox.x0 - e[0], 0, e[0] - n.bbox.x1), Math.max(n.bbox.y0 - e[1], 0, e[1] - n.bbox.y1))
+            );
+            if (Math.min(...dEnd) <= 25) {
+              n.usable = true;
+              n.usableBy = "unit2-inline-node-at-plot-end";
+            }
+          }
+        }
+      }
+    }
+  }
+
+  scene.compileExpr = (expr) => compileExprUnit2(expr, F);
+  scene.compileLabelFunction = (lab) => compileNumericLabelFunctionUnit2(lab, F);
+  return scene;
+}
+
+// ============================================================================
+// 5. Unit 2 곡선 배정(assignStrokesUnit2) 및 배치 계획(planLabelsUnit2)
+// ============================================================================
+
+/**
+ * [Unit 2] 라벨 → 곡선/선 배정
+ */
+export function assignStrokesUnit2(scene, targets, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  const res = new Map();
+  const claimed = new Set();
+  const numAnalyses = new Map();
+  const strokes = Array.isArray(scene && scene.strokes) ? scene.strokes : [];
+  const strokeOfPath = (p) => (p && p.index !== undefined ? strokes.find((s) => s && s.index === p.index) || null : null);
+
+  // ① 인라인 소속 경로 확인
+  for (const n of targets) {
+    if (n.kind === "inline" && n.stmt && n.stmt.path) {
+      const st = strokeOfPath(n.stmt.path);
+      if (st) {
+        const strokeKind = classifyStrokeKind(st);
+        res.set(n.id, {
+          how: "inline",
+          stroke: st,
+          strokeKind,
+          confirmed: true,
+          uncertain: false,
+          nonMoveCategory: null,
+          nonMoveCode: null,
+          reason: `인라인 노드로 곡선/선(#${st.index})에 직접 연결됨`,
+        });
+        claimed.add(st.index);
+      } else {
+        res.set(n.id, {
+          how: "inline-unlinked",
+          stroke: null,
+          strokeKind: "unknown",
+          confirmed: false,
+          uncertain: true,
+          nonMoveCategory: "매칭 불확실",
+          nonMoveCode: "uncertain-match",
+          reason: "인라인 문장의 SVG 경로를 찾지 못함",
+        });
+      }
+    }
+  }
+
+  // ② 수식과 곡선의 수치적 대응 확인 (expr-match / numeric-equivalent-match)
+  for (const n of targets) {
+    if (res.has(n.id)) continue;
+    const numAn = analyzeNumericLabelExpressionUnit2(n.label, F);
+    numAnalyses.set(n.id, numAn);
+    const f = numAn.fn;
+
+    if (f) {
+      const matches = [];
+      for (const st of scene.stmts || []) {
+        if (st.type === "plot" && st.fn && st.domain && st.path && !claimed.has(st.path.index)) {
+          const stroke = strokeOfPath(st.path);
+          if (!stroke) continue;
+          let validPts = 0;
+          let mismatch = false;
+          for (let k = 0; k < 7; k++) {
+            const x = st.domain[0] + ((st.domain[1] - st.domain[0]) * (k + 0.5)) / 7;
+            const yLab = f(x);
+            const yPlot = st.fn(x);
+            if (!Number.isFinite(yLab) || !Number.isFinite(yPlot)) continue;
+            validPts++;
+            if (!(Math.abs(yLab - yPlot) < 1e-4)) {
+              mismatch = true;
+              break;
+            }
+          }
+          if (!mismatch && validPts >= 4) matches.push(stroke);
+        }
+      }
+
+      if (matches.length === 1) {
+        const st = matches[0];
+        const plotExpr = st.stmt && st.stmt.expr ? st.stmt.expr : "";
+        const isNumericEquiv = Boolean(
+          numAn.hasFractionOrDivision ||
+            /\d+\.\d+/.test(numAn.normalizedExpr || "") ||
+            (plotExpr && (plotExpr.includes("/") || /\d+\.\d+/.test(plotExpr)))
+        );
+        const how = isNumericEquiv ? "numeric-equivalent-match" : "expr-match";
+        res.set(n.id, {
+          how,
+          stroke: st,
+          strokeKind: classifyStrokeKind(st),
+          confirmed: true,
+          uncertain: false,
+          normalizedExpr: numAn.compiledExpr || numAn.normalizedExpr || null,
+          plotExpr,
+          nonMoveCategory: null,
+          nonMoveCode: null,
+          reason: isNumericEquiv
+            ? `분수·소수 동치 수치 함수식(${numAn.compiledExpr || n.trimmed})이 유일한 plot 곡선(#${st.index}: ${plotExpr})과 수학적으로 일치하여 확정됨`
+            : `수치 함수식이 plot 곡선(#${st.index}: ${plotExpr})과 정확히 일치함`,
+        });
+        claimed.add(st.index);
+        continue;
+      } else if (matches.length >= 2) {
+        // [Sub-Unit 2e] 주기/점근선 함수(예: y=\tan x)가 동일한 plot 수식으로 서로 다른 정의역(disjoint domains)에
+        // 나뉘어 그려진 경우: 모든 브랜치가 같은 함수의 주기 가지이므로 가장 가까운 브랜치를 선택하고 모든 가지를 claimed 처리한다.
+        const normExpr0 = String(matches[0].stmt?.expr || "").replace(/\s+/g, "");
+        const allSamePlotExpr =
+          F.u2e &&
+          normExpr0.length > 0 &&
+          matches.every((mSt) => String(mSt.stmt?.expr || "").replace(/\s+/g, "") === normExpr0);
+
+        if (allSamePlotExpr) {
+          const anchor = n.at || n.inlineAnchor || n.anchor || (n.bbox ? [(n.bbox.x0 + n.bbox.x1) / 2, (n.bbox.y0 + n.bbox.y1) / 2] : null);
+          let chosen = matches[0];
+          if (anchor) {
+            let bestDist = Infinity;
+            for (const candSt of matches) {
+              const d = minDistPolylines([{ pts: [anchor, anchor], closed: false }], [{ pts: candSt.pts, closed: false }]);
+              if (d < bestDist) {
+                bestDist = d;
+                chosen = candSt;
+              }
+            }
+          }
+          for (const candSt of matches) claimed.add(candSt.index);
+          res.set(n.id, {
+            how: "expr-match",
+            stroke: chosen,
+            strokeKind: classifyStrokeKind(chosen),
+            confirmed: true,
+            uncertain: false,
+            normalizedExpr: numAn.compiledExpr || numAn.normalizedExpr || null,
+            plotExpr: chosen.stmt?.expr || "",
+            periodicBranches: matches.map((s) => s.index),
+            nonMoveCategory: null,
+            nonMoveCode: null,
+            reason: `동일 주기 함수식(${normExpr0})의 ${matches.length}개 정의역 가지(#${matches.map((s) => s.index).join(", #")}) 중 라벨과 가장 가까운 가지(#${chosen.index})로 확정됨`,
+          });
+          continue;
+        }
+
+        const st = matches[0];
+        res.set(n.id, {
+          how: "ambiguous-numeric-match",
+          stroke: st,
+          strokeKind: classifyStrokeKind(st),
+          confirmed: false,
+          uncertain: true,
+          candidateCount: matches.length,
+          candidateStrokes: matches.map((s) => s.index),
+          normalizedExpr: numAn.compiledExpr || numAn.normalizedExpr || null,
+          nonMoveCategory: "매칭 불확실",
+          nonMoveCode: "uncertain-match",
+          reason: `동일한 수치 함수식에 대응하는 곡선 후보가 ${matches.length}개(#${matches.map((s) => s.index).join(", #")}) 존재하여 확정할 수 없음. 자동 이동 차단.`,
+        });
+        continue;
+      }
+    }
+
+    // 수치형 수직선 라벨(예: x=-2, x=\frac{1}{2}, x=-\frac{\pi}{2})과 수직선 경로 일치 검사
+    const constX =
+      numAn.parseOk && numAn.lhs === "x" && typeof numAn.constantX === "number"
+        ? numAn.constantX
+        : (() => {
+            const clean = (n.trimmed || "").replace(/\s+/g, "");
+            const vm = /^x=([-+]?(?:\d+\.?\d*|\.\d+))$/.exec(clean);
+            return vm ? Number(vm[1]) : null;
+          })();
+    if (constX !== null && Number.isFinite(constX) && scene.units && scene.units.xU) {
+      const xPt = constX * scene.units.xU;
+      const vMatches = strokes.filter(
+        (s) => s.kind !== "axis" && !claimed.has(s.index) && classifyStrokeKind(s) === "verticalLine" && Math.abs(s.pts[0][0] - xPt) <= 1.5
+      );
+      if (vMatches.length === 1) {
+        const st = vMatches[0];
+        const isVertEquiv = Boolean(numAn.hasFractionOrDivision || /\d+\.\d+|pi/.test(numAn.normalizedExpr || ""));
+        res.set(n.id, {
+          how: isVertEquiv ? "numeric-equivalent-match" : "expr-match",
+          stroke: st,
+          strokeKind: "verticalLine",
+          confirmed: true,
+          uncertain: false,
+          normalizedExpr: `x=${r2(constX)}`,
+          nonMoveCategory: null,
+          nonMoveCode: null,
+          reason: isVertEquiv
+            ? `수치/기호 상수 수직선 방정식(x=${r2(constX)})이 유일한 수직선 경로(#${st.index})와 일치하여 확정됨`
+            : `수치 수직선 방정식이 수직선 경로(#${st.index})와 정확히 일치함`,
+        });
+        claimed.add(st.index);
+        continue;
+      } else if (vMatches.length >= 2) {
+        const st = vMatches[0];
+        res.set(n.id, {
+          how: "ambiguous-numeric-match",
+          stroke: st,
+          strokeKind: "verticalLine",
+          confirmed: false,
+          uncertain: true,
+          candidateCount: vMatches.length,
+          candidateStrokes: vMatches.map((s) => s.index),
+          nonMoveCategory: "매칭 불확실",
+          nonMoveCode: "uncertain-match",
+          reason: `동일한 수직선 방정식에 대응하는 수직선 경로가 ${vMatches.length}개 존재하여 확정할 수 없음. 자동 이동 차단.`,
+        });
+        continue;
+      }
+    }
+  }
+
+  // ③ 일반형/매개변수 수식의 수학적 구조 매칭 (structural-match / ambiguous-structural)
+  const unclaimedAfterExact = targets.filter((n) => !res.has(n.id) && (!numAnalyses.has(n.id) || numAnalyses.get(n.id).parseOk));
+  if (unclaimedAfterExact.length > 0) {
+    const structMap = runStructuralMatchingUnit2(scene, unclaimedAfterExact, claimed, classifyStrokeKind, F);
+    for (const [id, info] of structMap.entries()) {
+      res.set(id, {
+        ...info,
+        nonMoveCategory: info.confirmed ? null : "매칭 불확실",
+        nonMoveCode: info.confirmed ? null : "uncertain-match",
+      });
+    }
+  }
+
+  // ④ 여전히 미배정된 라벨: 수식 파싱 실패(parse-failure) 구분 및 최근접 추정(nearest-unclaimed)
+  const rest = targets.filter((n) => !res.has(n.id));
+  const pool = (plotOnly) =>
+    strokes.filter(
+      (s) => s && s.kind !== "axis" && Array.isArray(s.pts) && s.pts.length >= 2 && !claimed.has(s.index) && (!plotOnly || (s.stmt && s.stmt.type === "plot"))
+    );
+  for (const n of rest) {
+    const numAn = numAnalyses.get(n.id) || analyzeNumericLabelExpressionUnit2(n.label, F);
+    const a = n.at || n.inlineAnchor || n.anchor || (n.bbox ? [(n.bbox.x0 + n.bbox.x1) / 2, (n.bbox.y0 + n.bbox.y1) / 2] : null);
+    let cands = pool(true);
+    if (!cands.length) cands = pool(false);
+    let best = null;
+    if (a) {
+      for (const s of cands) {
+        const d = minDistPolylines([{ pts: [a, a], closed: false }], [{ pts: s.pts, closed: false }]);
+        if (!best || d < best.d) best = { d, s };
+      }
+    }
+    if (!numAn.parseOk) {
+      const strokeKind = best ? classifyStrokeKind(best.s) : "unknown";
+      res.set(n.id, {
+        how: "parse-failure",
+        stroke: best ? best.s : null,
+        strokeKind,
+        confirmed: false,
+        uncertain: true,
+        parseError: numAn.parseError,
+        nonMoveCategory: "수식 파싱 실패",
+        nonMoveCode: "parse-failure",
+        reason: `수식 파싱 실패(${numAn.parseError || "문법/명령 오류"})로 대응 그래프를 분석할 수 없음. 자동 이동 차단.`,
+      });
+      continue;
+    }
+    if (!a) {
+      res.set(n.id, {
+        how: "unmatched",
+        stroke: null,
+        strokeKind: "unknown",
+        confirmed: false,
+        uncertain: true,
+        nonMoveCategory: "매칭 불확실",
+        nonMoveCode: "uncertain-match",
+        reason: "기준 좌표 없음",
+      });
+      continue;
+    }
+    if (best) {
+      const strokeKind = classifyStrokeKind(best.s);
+      res.set(n.id, {
+        how: "nearest-unclaimed",
+        stroke: best.s,
+        strokeKind,
+        confirmed: false,
+        uncertain: true,
+        distancePt: r2(best.d),
+        nonMoveCategory: "매칭 불확실",
+        nonMoveCode: "uncertain-match",
+        reason: "수식 구조를 확정할 수 없어 최근접 미배정 곡선으로만 추정됨. 자동 이동 차단.",
+      });
+      claimed.add(best.s.index);
+    } else {
+      res.set(n.id, {
+        how: "unmatched",
+        stroke: null,
+        strokeKind: "unknown",
+        confirmed: false,
+        uncertain: true,
+        nonMoveCategory: "매칭 불확실",
+        nonMoveCode: "uncertain-match",
+        reason: "대응 가능한 미배정 곡선/선이 없음",
+      });
+    }
+  }
+  return res;
+}
+
+/**
+ * [Sub-Unit 2e] 주기 진동 삼각함수(sin, cos) 곡선 상단(극댓값 부근) 무충돌 배치 유지 판정:
+ * - sin, cos 곡선은 양 끝점 근처에 보조선/축 눈금이 밀집한 경우가 많아,
+ *   원본 라벨이 곡선 상단(yMax 부근)에 무충돌로 배치되어 있고 가장 가까운 곡선 점과도
+ *   적절히 인접(<= 12pt)해 있으면 원 위치를 유지한다 (예: CASE-005).
+ */
+function checkTrigCrestKeep(node, stroke, eval0, P = PARAMS) {
+  if (!stroke || !stroke.stmt || stroke.stmt.type !== "plot") return null;
+  const exprStr = String(stroke.stmt.expr || "");
+  if (!/\b(?:sin|cos)\b/.test(exprStr)) return null;
+
+  const clearanceOk = eval0.minOther >= P.cHard && eval0.own >= P.cOwn && eval0.labelGap >= P.mLabel;
+  if (!clearanceOk) return null;
+
+  const sBbox = stroke.bbox;
+  if (!sBbox) return null;
+  const b = node.bbox;
+  const cx = (b.x0 + b.x1) / 2;
+
+  // 라벨이 곡선의 가로 범위 내부에 있고, 라벨 하단(b.y0)이 곡선 최댓값(sBbox.y1) 부근(0pt ~ 10pt)에 위치하며
+  // 자기 곡선과의 실제 거리가 너무 멀지 않은(own <= 12pt) 경우에만 극댓값 상단 배치로 인정
+  const withinXSpan = cx >= sBbox.x0 && cx <= sBbox.x1;
+  const nearCrestY = b.y0 >= sBbox.y1 - 1.5 && b.y0 <= sBbox.y1 + 10.0;
+  const closeToCurve = eval0.own >= 0 && eval0.own <= 12.0;
+
+  if (withinXSpan && nearCrestY && closeToCurve) {
+    return {
+      keep: true,
+      currentEnd: 1,
+      preferredEnd: 1,
+      currentSide: "above",
+      endGapPt: r2(eval0.own),
+      alpha: 0,
+      beta: 0,
+      checks: { clearanceOk: true, endOk: true, proximityOk: true, directionOk: true, alignmentOk: true },
+      rejectReasons: [],
+    };
+  }
+  return null;
+}
+
+/**
+ * [Unit 2] 라벨 배치 계획기 (assignStrokesUnit2 + v0.2.1 후보 생성기 결합)
+ */
+export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  const plan = { placements: [], skipped: [], advisory: [], notes: [] };
+  const targets = scene.nodes.filter((n) => n.role === "function" && n.bbox);
+  const fixed = scene.nodes.filter((n) => n.bbox && n.role !== "function" && n.role !== "marker");
+  const assigned = assignStrokesUnit2(scene, targets, F);
+
+  const strokesEff = scene.strokes.map((s) => {
+    if (s.kind !== "axis" || !axisPt) return s;
+    const horizontal = Math.abs(s.pts[0][1] - s.pts[s.pts.length - 1][1]) < 1e-6;
+    return {
+      ...s,
+      pts: horizontal
+        ? [[axisPt.left, s.pts[0][1]], [axisPt.right, s.pts[0][1]]]
+        : [[s.pts[0][0], axisPt.bottom], [s.pts[0][0], axisPt.top]],
+    };
+  });
+
+  const placedBoxes = [];
+  let content = null;
+  const addC = (b) => {
+    content = content
+      ? { x0: Math.min(content.x0, b.x0), y0: Math.min(content.y0, b.y0), x1: Math.max(content.x1, b.x1), y1: Math.max(content.y1, b.y1) }
+      : { ...b };
+  };
+  for (const s of scene.strokes) if (s.kind !== "axis") for (const p of s.pts) addC({ x0: p[0], y0: p[1], x1: p[0], y1: p[1] });
+  for (const n of fixed) if (n.role !== "axisLabel" && n.role !== "origin") addC(n.bbox);
+
+  for (const n of targets) {
+    if (!n.usable) {
+      plan.skipped.push({
+        id: n.id,
+        label: n.label,
+        category: n.fallbackAnchorFromBBox ? "fallback-anchor-unusable" : "unusable-node",
+        reason: n.fallbackAnchorFromBBox
+          ? "기호 좌표(at) 미해석으로 대체 중심점(fallbackAnchor)이 주입되어 불확실성 잠금(usable=false) 유지"
+          : `노드 매칭이 confirmed 가 아님(${n.confidence})`,
+      });
+      placedBoxes.push(n.bbox);
+      continue;
+    }
+    if (!n.scale) {
+      plan.skipped.push({ id: n.id, label: n.label, category: "unknown-scale", reason: "노드 배율 불명" });
+      placedBoxes.push(n.bbox);
+      continue;
+    }
+    const a = assigned.get(n.id);
+    if (!a || !a.stroke) {
+      plan.skipped.push({ id: n.id, label: n.label, category: "unmatched-stroke", reason: (a && a.reason) || "대응 곡선/선을 찾지 못함" });
+      placedBoxes.push(n.bbox);
+      continue;
+    }
+
+    const s = a.stroke;
+    const strokeKind = a.strokeKind || classifyStrokeKind(s);
+    const w = n.bbox.x1 - n.bbox.x0, h = n.bbox.y1 - n.bbox.y0;
+    const others = strokesEff.filter((q) => q.index !== s.index);
+    const obsBoxes = [...fixed.map((q) => q.bbox), ...placedBoxes];
+    const ends = [endInfo(s, 0), endInfo(s, 1)];
+    const anchor0 = n.at || n.inlineAnchor || n.anchor || [(n.bbox.x0 + n.bbox.x1) / 2, (n.bbox.y0 + n.bbox.y1) / 2];
+    const preferredEnd = selectPreferredEnd(strokeKind, ends, anchor0);
+
+    const evalBox = (bb) => {
+      let minOther = Infinity;
+      for (const q of others) {
+        const c = clearanceToStroke(bb, q);
+        if (c < minOther) minOther = c;
+      }
+      const own = clearanceToStroke(bb, s);
+      let labelGap = Infinity;
+      for (const ob of obsBoxes) labelGap = Math.min(labelGap, bboxGapRect(bb, ob));
+      return { minOther, own, labelGap };
+    };
+
+    const e0 = evalBox(n.bbox);
+    let keepCheck = evaluateKeep(n.bbox, strokeKind, ends, preferredEnd, e0, P);
+    if (
+      !keepCheck.keep &&
+      n.kind === "inline" &&
+      keepCheck.checks?.clearanceOk &&
+      keepCheck.checks?.endOk &&
+      keepCheck.checks?.directionOk &&
+      keepCheck.checks?.alignmentOk &&
+      keepCheck.endGapPt <= (P.maxAllowedEndGap || 7.5)
+    ) {
+      keepCheck = { ...keepCheck, keep: true, rejectReasons: [] };
+    }
+    if (!keepCheck.keep && F.u2e) {
+      const crestKeep = checkTrigCrestKeep(n, s, e0, P);
+      if (crestKeep) keepCheck = crestKeep;
+    }
+
+    if (keepCheck.keep && (a.confirmed || !P.allowUncertainMove)) {
+      plan.placements.push({
+        id: n.id,
+        label: n.label,
+        action: "keep",
+        reason: `원 위치가 평가원 스타일에 부합(끝점/곡선 간격 ${keepCheck.endGapPt}pt, 방향 ${keepCheck.currentSide}, |α|=${Math.abs(keepCheck.alpha)}, 무충돌)`,
+        stroke: s.index,
+        strokeKind,
+        how: a.how,
+        confirmedAssignment: !!a.confirmed,
+        uncertainAssignment: !!a.uncertain,
+        assignmentReason: a.reason || null,
+        end: keepCheck.currentEnd,
+        preferredEnd,
+        side: keepCheck.currentSide,
+        alpha: keepCheck.alpha,
+        bbox: n.bbox,
+        from: n.bbox,
+        eval: e0,
+        keepCheck,
+      });
+      placedBoxes.push(n.bbox);
+      addC(n.bbox);
+      continue;
+    }
+
+    const gapOffsets = P.gapOffsets || [0];
+    const cands = [];
+    for (const ei of [0, 1]) {
+      const { point: E, t } = ends[ei];
+      const prefAbove = t[1] >= 0;
+      for (const side of ["above", "below"]) {
+        for (const gOff of gapOffsets) {
+          for (let al = -1; al <= 1.0001; al += P.alphaStep) {
+            const cx = E[0] + al * (w / 2);
+            const gap = (side === "above" ? P.gapAbove : P.gapBelow) + gOff;
+            const rawBb =
+              side === "above"
+                ? { x0: cx - w / 2, x1: cx + w / 2, y0: E[1] + gap, y1: E[1] + gap + h }
+                : { x0: cx - w / 2, x1: cx + w / 2, y1: E[1] - gap, y0: E[1] - gap - h };
+            const sh = computeShiftForMove(n, rawBb, P);
+            const bb = sh.actualBbox;
+            cands.push({ bb, ei, side, alpha: al, gapOffset: gOff, sideMismatch: (side === "above") !== prefAbove, shift: sh.newShift });
+          }
+        }
+      }
+      if (strokeKind !== "verticalLine" && Math.abs(t[1]) < P.horizTangentMax) {
+        for (const side of ["right", "left"]) {
+          for (let be = -1; be <= 1.0001; be += 0.25) {
+            const cy = E[1] + be * (h / 2);
+            const rawBb =
+              side === "right"
+                ? { x0: E[0] + P.gapSide, x1: E[0] + P.gapSide + w, y0: cy - h / 2, y1: cy + h / 2 }
+                : { x1: E[0] - P.gapSide, x0: E[0] - P.gapSide - w, y0: cy - h / 2, y1: cy + h / 2 };
+            const sh = computeShiftForMove(n, rawBb, P);
+            const bb = sh.actualBbox;
+            cands.push({ bb, ei, side, alpha: be, gapOffset: 0, sideMismatch: (side === "right") !== (t[0] >= 0), shift: sh.newShift });
+          }
+        }
+      }
+    }
+
+    let best = null;
+    const scored = [];
+    const baseC = content || { ...n.bbox };
+    for (const c of cands) {
+      const ev = evalBox(c.bb);
+      const hard = ev.minOther < P.cHard || ev.own < P.cOwn || ev.labelGap < P.mLabel;
+      const grow =
+        Math.max(baseC.x1, c.bb.x1) -
+        Math.min(baseC.x0, c.bb.x0) -
+        (baseC.x1 - baseC.x0) +
+        (Math.max(baseC.y1, c.bb.y1) - Math.min(baseC.y0, c.bb.y0) - (baseC.y1 - baseC.y0));
+      const clearPen = Math.max(0, P.cPref - Math.min(ev.minOther, ev.labelGap)) / P.cPref;
+      const ownPen = ev.own < (P.cOwnPref || 1.6) ? ((P.cOwnPref || 1.6) - ev.own) / (P.cOwnPref || 1.6) : 0;
+      const gapPen = (c.gapOffset || 0) * 0.35;
+      const cost =
+        P.wClear * clearPen * clearPen +
+        (P.wOwnPref || 3.5) * ownPen * ownPen +
+        (c.sideMismatch ? P.wSide : 0) +
+        (c.ei !== preferredEnd ? P.wEnd : 0) +
+        P.wAlpha * Math.abs(c.alpha) +
+        P.wGrow * (grow / 100) +
+        gapPen;
+      scored.push({ ...c, ev, hard, cost });
+      if (!hard && (!best || cost < best.cost)) best = { ...c, ev, cost };
+    }
+
+    if (!best) {
+      plan.skipped.push({
+        id: n.id,
+        label: n.label,
+        category: "no-safe-candidate",
+        strokeKind,
+        reason: `허용 간격을 만족하는 안전한 후보 없음 (cHard=${P.cHard}) — 원본 유지(수동 확인)`,
+      });
+      plan.placements.push({
+        id: n.id,
+        label: n.label,
+        action: "keep",
+        reason: "안전 후보 없음 — 원본 유지(수동 확인)",
+        stroke: s.index,
+        strokeKind,
+        how: a.how,
+        confirmedAssignment: !!a.confirmed,
+        uncertainAssignment: !!a.uncertain,
+        assignmentReason: a.reason || null,
+        bbox: n.bbox,
+        from: n.bbox,
+        eval: e0,
+        keepCheck,
+      });
+      placedBoxes.push(n.bbox);
+      addC(n.bbox);
+      continue;
+    }
+
+    if (a.uncertain && !P.allowUncertainMove) {
+      const advShift = computeShiftForMove(n, best.bb, P);
+      const advisoryObj = {
+        id: n.id,
+        label: n.label,
+        how: a.how,
+        stroke: s.index,
+        strokeKind,
+        end: best.ei,
+        preferredEnd,
+        side: best.side,
+        alpha: Math.round(best.alpha * 1000) / 1000,
+        cost: Math.round(best.cost * 100) / 100,
+        bbox: best.bb,
+        from: n.bbox,
+        shift: advShift.newShift,
+        neededMovePt: advShift.neededMovePt,
+        eval: best.ev,
+      };
+      plan.advisory.push(advisoryObj);
+      plan.skipped.push({
+        id: n.id,
+        label: n.label,
+        category: a.how === "ambiguous-structural" ? "ambiguous-structural-assignment" : "uncertain-stroke-assignment",
+        how: a.how,
+        stroke: s.index,
+        strokeKind,
+        reason: a.reason || `대응 곡선 불확실(${a.how}) — 자동 이동 차단`,
+        advisory: advisoryObj,
+      });
+      plan.placements.push({
+        id: n.id,
+        label: n.label,
+        action: "hold-uncertain",
+        reason: a.reason || `대응 곡선 미확정(${a.how})으로 자동 이동 차단`,
+        stroke: s.index,
+        strokeKind,
+        how: a.how,
+        confirmedAssignment: false,
+        uncertainAssignment: true,
+        assignmentReason: a.reason || null,
+        end: keepCheck.currentEnd,
+        preferredEnd,
+        side: keepCheck.currentSide,
+        alpha: keepCheck.alpha,
+        bbox: n.bbox,
+        from: n.bbox,
+        eval: e0,
+        keepCheck,
+        advisory: advisoryObj,
+      });
+      placedBoxes.push(n.bbox);
+      addC(n.bbox);
+      continue;
+    }
+
+    plan.placements.push({
+      id: n.id,
+      label: n.label,
+      action: "move",
+      reason: keepCheck.rejectReasons.length
+        ? `원 위치 미유지(${keepCheck.rejectReasons.join(", ")}) → 끝${best.ei}/${best.side} 이동`
+        : `끝${best.ei}/${best.side} 이동`,
+      stroke: s.index,
+      strokeKind,
+      how: a.how,
+      confirmedAssignment: !!a.confirmed,
+      uncertainAssignment: !!a.uncertain,
+      assignmentReason: a.reason || null,
+      end: best.ei,
+      preferredEnd,
+      side: best.side,
+      alpha: Math.round(best.alpha * 1000) / 1000,
+      gapOffset: best.gapOffset || 0,
+      cost: Math.round(best.cost * 100) / 100,
+      bbox: best.bb,
+      from: n.bbox,
+      eval: best.ev,
+      keepCheck,
+      candidates: scored.length,
+      feasible: scored.filter((q) => !q.hard).length,
+    });
+    placedBoxes.push(best.bb);
+    addC(best.bb);
+  }
+
+  plan.assignments = Object.fromEntries(
+    [...assigned.entries()].map(([k, v]) => [
+      k,
+      {
+        how: v.how,
+        stroke: v.stroke ? v.stroke.index : null,
+        strokeKind: v.strokeKind || "unknown",
+        confirmed: !!v.confirmed,
+        uncertain: !!v.uncertain,
+        normalizedExpr: v.normalizedExpr || null,
+        plotExpr: v.plotExpr || null,
+        parseError: v.parseError || null,
+        nonMoveCategory: v.nonMoveCategory || null,
+        nonMoveCode: v.nonMoveCode || null,
+        template: v.template || null,
+        templateDesc: v.templateDesc || null,
+        candidateCount: v.candidateCount || (v.stroke ? 1 : 0),
+        candidateStrokes: v.candidateStrokes || (v.stroke ? [v.stroke.index] : []),
+        reason: v.reason || null,
+      },
+    ])
+  );
+  return plan;
+}

@@ -2,7 +2,10 @@
 
 import React from "react";
 import { evaluateProposalApplicability } from "@/lib/smart-label-beta/client-workflow";
-import type { SmartLabelBetaResponse } from "@/lib/smart-label-beta/kroki-recommend";
+import type {
+  SmartLabelBetaResponse,
+  SmartLabelEngineVersion,
+} from "@/lib/smart-label-beta/kroki-recommend";
 
 interface SmartLabelBetaModalProps {
   proposal: SmartLabelBetaResponse | null;
@@ -14,6 +17,8 @@ interface SmartLabelBetaModalProps {
   onConfirmRestoreOverwrite: () => void;
   applyAxisOption?: boolean;
   onToggleApplyAxisOption?: (next: boolean) => void;
+  engineVersion?: SmartLabelEngineVersion;
+  onChangeEngineVersion?: (next: SmartLabelEngineVersion) => void;
   isRecomputing?: boolean;
 }
 
@@ -27,6 +32,8 @@ export function SmartLabelBetaModal({
   onConfirmRestoreOverwrite,
   applyAxisOption = false,
   onToggleApplyAxisOption,
+  engineVersion = "v0.2.1",
+  onChangeEngineVersion,
   isRecomputing = false,
 }: SmartLabelBetaModalProps) {
   if (restoreConfirmOpen) {
@@ -75,6 +82,8 @@ export function SmartLabelBetaModal({
   const applicability = evaluateProposalApplicability(proposal, currentRawInput);
   const isStale = currentRawInput !== proposal.originalCode;
   const diag = proposal.collisionDiagnostics;
+  const activeEngineVersion: SmartLabelEngineVersion =
+    proposal.engineVersion === "v0.2.2-beta" ? "v0.2.2-beta" : engineVersion;
   const hasUnresolvedIssues =
     Boolean(diag) &&
     (Boolean(diag?.hasUnresolvedCollisions) || !Boolean(diag?.measurementComplete));
@@ -117,15 +126,48 @@ export function SmartLabelBetaModal({
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-900 px-5 py-3.5 text-white">
           <div className="flex flex-wrap items-center gap-2.5">
             <span className="text-sm font-bold">✨ 스마트 라벨 자동 정렬 (Beta)</span>
-            <span className="rounded bg-indigo-500/30 border border-indigo-400/40 px-2 py-0.5 text-[11px] font-semibold text-indigo-200">
-              {proposal.algorithmVersion || "proto-0.2.1"} ·{" "}
-              {proposal.applyAxisRequested ? "label+axes" : "labelOnly"} · verify=true
+            <span
+              className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${
+                activeEngineVersion === "v0.2.2-beta"
+                  ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-200"
+                  : "bg-indigo-500/30 border-indigo-400/40 text-indigo-200"
+              }`}
+            >
+              {activeEngineVersion === "v0.2.2-beta"
+                ? "v0.2.2 Beta (interim-v1)"
+                : proposal.algorithmVersion || "proto-0.2.1"}{" "}
+              · {proposal.applyAxisRequested ? "label+axes" : "labelOnly"} · verify=true
             </span>
             <span className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
               개발자 전용
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {onChangeEngineVersion && (
+              <label
+                className="flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200"
+                data-testid="modal-select-engine-version"
+              >
+                <span className="text-slate-400">엔진:</span>
+                <select
+                  value={engineVersion}
+                  disabled={isRecomputing}
+                  onChange={(e) =>
+                    onChangeEngineVersion(
+                      e.target.value === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1"
+                    )
+                  }
+                  className="bg-transparent font-semibold text-white outline-none cursor-pointer"
+                >
+                  <option value="v0.2.1" className="bg-slate-900 text-slate-200">
+                    기존 v0.2.1 (기본)
+                  </option>
+                  <option value="v0.2.2-beta" className="bg-slate-900 text-emerald-300">
+                    개선 v0.2.2 Beta (interim-v1)
+                  </option>
+                </select>
+              </label>
+            )}
             {onToggleApplyAxisOption && (
               <label
                 className="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-indigo-400"
@@ -266,6 +308,12 @@ export function SmartLabelBetaModal({
                   >
                     미해결 충돌 (기존 존재): {diag.counts.preExistingUnresolved}건
                   </span>
+                  {typeof diag.counts.finalTrueInk === "number" && (
+                    <span className="rounded bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                      글자 침범(true-ink): {diag.counts.origTrueInk ?? 0}➔{diag.counts.finalTrueInk}건 · 박스 근접:{" "}
+                      {diag.counts.origBboxOnly ?? 0}➔{diag.counts.finalBboxOnly ?? 0}건
+                    </span>
+                  )}
                   {diag.counts.newlyIntroduced > 0 && (
                     <span className="rounded bg-rose-200 px-2 py-0.5 font-semibold text-rose-900">
                       차단된 신규 충돌: {diag.counts.newlyIntroduced}건
@@ -317,9 +365,16 @@ export function SmartLabelBetaModal({
                         </code>
                         <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
                           {item.autoMoveTarget
-                            ? "함수식 라벨 (안전 후보 없음 · 원본 위치 유지)"
+                            ? "함수식 라벨 (원본 위치 유지)"
                             : `일반 노드 (${item.nodeRole}) · 자동 이동 제외 대상`}
                         </span>
+                        {item.contactKind && (
+                          <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono text-slate-700">
+                            {item.contactKind === "true-ink-collision"
+                              ? "실제 글자 침범(true-ink)"
+                              : "박스 여백 근접(bbox-only)"}
+                          </span>
+                        )}
                       </div>
                       <div className="text-slate-700">
                         원인: {item.description} — {item.reason || "적용 후 조이스틱으로 미세 조정 권장"}
@@ -363,7 +418,7 @@ export function SmartLabelBetaModal({
                       <code className="mr-1.5 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] text-white">
                         {u.label}
                       </code>
-                      <span>{u.reasons.join(" · ")}</span>
+                      <span>{(u.reasons || [u.reason || ""]).join(" · ")}</span>
                     </div>
                   ))}
                 </div>

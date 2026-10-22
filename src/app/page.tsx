@@ -10,14 +10,14 @@ import {
   ChevronLeft, ChevronRight, MousePointer2,
   Download, Eye, Loader2, CloudCog, ZoomIn,
   RotateCcw, BookOpen, X, ClipboardCopy, Type, HelpCircle, Sliders,
-  GripHorizontal, GripVertical, Info, Sparkles
+  GripHorizontal, GripVertical, Info, Sparkles, LogOut
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { useSession, signIn as nextAuthSignIn } from "next-auth/react";
+import { useSession, signIn as nextAuthSignIn, signOut as nextAuthSignOut } from "next-auth/react";
 import { logUserAction } from "@/actions/logger";
 import guide1 from "@/assets/guide1.png";
 import guide2 from "@/assets/guide2.png";
@@ -31,7 +31,7 @@ import {
   restoreOriginalFromBackup,
   type SmartLabelBackupSnapshot,
 } from "@/lib/smart-label-beta/client-workflow";
-import type { SmartLabelBetaResponse } from "@/lib/smart-label-beta/kroki-recommend";
+import type { SmartLabelBetaResponse, SmartLabelEngineVersion } from "@/lib/smart-label-beta/kroki-recommend";
 
 
 // ─────────────────────────────────────────────────────────────
@@ -279,6 +279,7 @@ export default function Home() {
 
   // ── 에디터 진입 로그 — status=authenticated + email 확정 후 단 1회 ──
   const { data: session, status } = useSession();
+  const [isSigningInGoogle, setIsSigningInGoogle] = useState(false);
   useEffect(() => {
     if (status !== "authenticated") return;
     const email = session?.user?.email;
@@ -365,6 +366,7 @@ export default function Home() {
   const [serverBetaEnabled, setServerBetaEnabled] = useState(false);
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
   const [applyAxisBeta, setApplyAxisBeta] = useState(false);
+  const [engineVersionBeta, setEngineVersionBeta] = useState<SmartLabelEngineVersion>("v0.2.1");
   const [smartLabelProposal, setSmartLabelProposal] = useState<SmartLabelBetaResponse | null>(null);
   const [smartLabelBackup, setSmartLabelBackup] = useState<SmartLabelBackupSnapshot | null>(null);
   const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false);
@@ -413,20 +415,27 @@ export default function Home() {
     serverBetaEnabled,
   });
 
-  const handleRunSmartLabelBeta = async (overrideApplyAxis?: boolean) => {
+  const handleRunSmartLabelBeta = async (
+    overrideApplyAxis?: boolean,
+    overrideEngineVersion?: SmartLabelEngineVersion
+  ) => {
     if (!showSmartLabelBeta || isSmartLabelLoading) return;
     if (!rawInput.trim()) {
       toast.error("TikZ 코드를 먼저 입력해 주세요.");
       return;
     }
     const useApplyAxis = typeof overrideApplyAxis === "boolean" ? overrideApplyAxis : applyAxisBeta;
+    const useEngineVersion: SmartLabelEngineVersion =
+      overrideEngineVersion === "v0.2.2-beta" || overrideEngineVersion === "v0.2.1"
+        ? overrideEngineVersion
+        : engineVersionBeta;
     const snapshotCode = rawInput;
     setIsSmartLabelLoading(true);
     try {
       const res = await fetch("/api/smart-label/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tikz: snapshotCode, applyAxis: useApplyAxis }),
+        body: JSON.stringify({ tikz: snapshotCode, applyAxis: useApplyAxis, engineVersion: useEngineVersion }),
         cache: "no-store",
       });
       const data = await res.json().catch(() => null);
@@ -1457,11 +1466,24 @@ const getProcessedInput = (code: string) => {
   void BASE_WIDTH;
   void imgRenderedH;
 
-  // ── 잠금 화면 (unauthenticated) ─────────────────────────
-  // [DEV BYPASS] 로컬 개발 환경에서는 구글 로그인 세션 확인을 건너뜀
-  const isDev = process.env.NODE_ENV === "development";
+  // ── 로딩 스피너 (세션 확인 중) — 로컬(development)과 운영(production) 동일 적용 ──
+  if (status === "loading") {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-[#0d1117]">
+        <div className="flex flex-col items-center gap-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="" className="h-12 w-auto object-contain opacity-40 animate-pulse" />
+          <div className="flex items-center gap-2 text-[12px] text-zinc-400 font-medium">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+            <span>Google 인증 세션을 확인하는 중입니다...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  if (!isDev && status === "unauthenticated") {
+  // ── 잠금 화면 (unauthenticated) — 로컬(development)에서도 DEV BYPASS 없이 실제 Google 로그인 필수 ──
+  if (status !== "authenticated" || !session?.user?.email) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-[#0d1117] text-zinc-100 font-sans p-6">
         {/* 배경 그라디언트 효과 */}
@@ -1515,19 +1537,33 @@ const getProcessedInput = (code: string) => {
 
             {/* 구글 로그인 버튼 */}
             <button
-              onClick={() => nextAuthSignIn("google")}
+              id="btn-google-signin"
+              disabled={isSigningInGoogle}
+              onClick={() => {
+                setIsSigningInGoogle(true);
+                nextAuthSignIn("google");
+              }}
               className="w-full flex items-center justify-center gap-3 px-6 py-3.5 rounded-xl font-bold text-[14px] transition-all duration-200
                 bg-white hover:bg-zinc-100 text-zinc-900 shadow-lg shadow-black/30
-                hover:scale-[1.02] active:scale-[0.98] border border-zinc-200/20"
+                hover:scale-[1.02] active:scale-[0.98] border border-zinc-200/20 disabled:opacity-60 disabled:cursor-wait"
             >
-              {/* Google 로고 SVG */}
-              <svg className="w-5 h-5" viewBox="0 0 24 24">
-                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-              </svg>
-              구글 계정으로 로그인 (팀원 전용)
+              {isSigningInGoogle ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin text-zinc-700" />
+                  <span>Google 로그인 화면으로 이동 중...</span>
+                </>
+              ) : (
+                <>
+                  {/* Google 로고 SVG */}
+                  <svg className="w-5 h-5" viewBox="0 0 24 24">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                  </svg>
+                  <span>구글 계정으로 로그인 (팀원 전용)</span>
+                </>
+              )}
             </button>
 
             <p className="text-[10px] text-zinc-700">
@@ -1544,20 +1580,6 @@ const getProcessedInput = (code: string) => {
               <div className="text-[11px] font-bold text-zinc-500">고진일 팀장 개발</div>
             </div>
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── 로딩 스피너 (세션 확인 중) ───────────────────────
-  // [DEV BYPASS] 개발 환경에서는 로딩 상태도 건너뜀
-  if (!isDev && status === "loading") {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-[#0d1117]">
-        <div className="flex flex-col items-center gap-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" className="h-12 w-auto object-contain opacity-40 animate-pulse" />
-          <div className="text-[12px] text-zinc-600">Loading...</div>
         </div>
       </div>
     );
@@ -1695,17 +1717,65 @@ const getProcessedInput = (code: string) => {
           </button>
         </div>
 
-        {/* 헤더 우측: 개발자 프로필 + 복사 */}
-        <div className="ml-auto flex items-center gap-3">
-          <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-blue-950/50 to-zinc-900/60 border border-blue-800/30 shadow shadow-blue-900/20">
+        {/* 헤더 우측: 실제 로그인 세션 계정 + 로그아웃 버튼 & 제작자 크레딧 분리 */}
+        <div className="ml-auto flex items-center gap-2.5">
+          {/* 실제 인증된 세션 정보 및 로그아웃 버튼 */}
+          <div
+            id="header-authenticated-session"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900/80 border border-zinc-700/70 shadow-sm"
+          >
+            <span
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                  ? "bg-violet-400 shadow-[0_0_6px_rgba(167,139,250,0.8)]"
+                  : "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+              }`}
+            />
+            <div className="leading-tight">
+              <div className="flex items-center gap-1.5">
+                <span
+                  className={`text-[9px] font-bold tracking-tight uppercase ${
+                    session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                      ? "text-violet-300"
+                      : "text-emerald-300"
+                  }`}
+                >
+                  {session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                    ? "로그인됨 · 개발자(Beta)"
+                    : "로그인됨 · 팀원"}
+                </span>
+              </div>
+              <div id="header-session-email" className="text-[11px] font-mono font-semibold text-zinc-200">
+                {session?.user?.email}
+              </div>
+            </div>
+            <button
+              id="btn-auth-signout"
+              onClick={() => nextAuthSignOut({ callbackUrl: "/" })}
+              className="ml-1.5 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold
+                bg-zinc-800 hover:bg-red-950/70 border border-zinc-700 hover:border-red-700/60
+                text-zinc-300 hover:text-red-200 transition-all"
+              title="현재 Google 계정에서 로그아웃하고 로그인 화면으로 돌아갑니다"
+            >
+              <LogOut className="w-3 h-3" />
+              <span>로그아웃</span>
+            </button>
+          </div>
+
+          {/* 정적 시스템 제작자 크레딧 (실제 로그인 세션과 혼동 방지) */}
+          <div
+            className="hidden xl:flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-zinc-900/40 border border-zinc-800/60 opacity-80"
+            title="KO-SMART 시스템 제작자 크레딧 (현재 로그인 계정 정보는 좌측 배지를 확인하세요)"
+          >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/ko.png" alt="고진일 팀장"
-              className="w-8 h-8 rounded-full object-cover border-2 border-blue-400/50 shadow-md shadow-blue-500/20"
+              src="/ko.png"
+              alt="고진일 팀장"
+              className="w-6 h-6 rounded-full object-cover border border-blue-400/40"
             />
             <div className="leading-none">
-              <div className="text-[9px] text-blue-400/70 font-semibold tracking-wider uppercase">Lead Developer</div>
-              <div className="text-[12px] font-bold text-white">고진일 팀장</div>
+              <div className="text-[8px] text-zinc-500 font-semibold tracking-wider uppercase">System Creator</div>
+              <div className="text-[10.5px] font-bold text-zinc-400">고진일 팀장</div>
             </div>
           </div>
         </div>
@@ -1767,6 +1837,25 @@ const getProcessedInput = (code: string) => {
                       ↩ 원본 복원
                     </button>
                   )}
+                  <select
+                    id="sel-smart-label-engine"
+                    value={engineVersionBeta}
+                    onChange={(e) =>
+                      setEngineVersionBeta(
+                        e.target.value === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1"
+                      )
+                    }
+                    disabled={isSmartLabelLoading}
+                    className="px-2 py-1 rounded-md text-[10px] font-bold tracking-tight cursor-pointer bg-zinc-900/90 hover:bg-zinc-800/90 border border-violet-800/60 text-violet-200 outline-none"
+                    title="스마트 라벨 자동 정렬 엔진 버전 선택 (기본: 기존 v0.2.1 / 개선: v0.2.2 Beta interim-v1)"
+                  >
+                    <option value="v0.2.1" className="bg-zinc-900 text-zinc-200">
+                      기존 v0.2.1 (기본)
+                    </option>
+                    <option value="v0.2.2-beta" className="bg-zinc-900 text-emerald-300">
+                      개선 v0.2.2 Beta (interim-v1)
+                    </option>
+                  </select>
                   <label
                     id="label-smart-label-apply-axis"
                     className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight cursor-pointer select-none
@@ -3306,10 +3395,15 @@ const getProcessedInput = (code: string) => {
           onConfirmRestoreOverwrite={() => handleRestoreSmartLabel(true)}
           onCancelRestoreConfirm={() => setIsRestoreConfirmOpen(false)}
           applyAxisOption={applyAxisBeta}
+          engineVersion={engineVersionBeta}
           isRecomputing={isSmartLabelLoading}
           onToggleApplyAxisOption={(next) => {
             setApplyAxisBeta(next);
-            handleRunSmartLabelBeta(next);
+            handleRunSmartLabelBeta(next, engineVersionBeta);
+          }}
+          onChangeEngineVersion={(nextEngine) => {
+            setEngineVersionBeta(nextEngine);
+            handleRunSmartLabelBeta(applyAxisBeta, nextEngine);
           }}
         />
       )}
