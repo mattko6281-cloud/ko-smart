@@ -6,22 +6,39 @@ export const MAX_SAMPLES_VALUE: number;
 export const DEFAULT_KROKI_TIMEOUT_MS: number;
 
 export type SmartLabelEngineVersion = "v0.2.1" | "v0.2.2-beta";
+export type SmartLabelAccessRole = "developer" | "pilot" | "none";
 
 export function normalizeEngineVersion(engineVersion?: any): SmartLabelEngineVersion;
 
 export function computeInputHash(rawInput: string): string;
 
+export function parsePilotEmails(rawVal?: any): string[];
+
 export function isSmartLabelBetaServerEnabled(opts?: {
   env?: Record<string, string | undefined>;
 }): { enabled: boolean; reason: string };
 
-export function verifyDeveloperSession(session: any): {
+export function isUnit3BServerEnabled(opts?: {
+  env?: Record<string, string | undefined>;
+}): { enabled: boolean; reason: string };
+
+export function verifyDeveloperSession(
+  session: any,
+  opts?: { env?: Record<string, string | undefined> }
+): {
   allowed: boolean;
   httpStatus: number;
   code: string;
+  role: SmartLabelAccessRole;
   email?: string;
+  canSelectEngine?: boolean;
+  defaultEngineVersion?: SmartLabelEngineVersion;
+  defaultEnableUnit3B?: boolean;
+  defaultApplyAxis?: boolean;
   error?: string;
 };
+
+export const verifySmartLabelAccess: typeof verifyDeveloperSession;
 
 export function processInputLikeKoSmart(code: string): string;
 export function encodeKroki(text: string): string;
@@ -132,9 +149,40 @@ export interface CollisionDiagnosticsSummary {
   finalAudit?: any;
 }
 
+export interface SmartLabelTickDecisionSummary {
+  id: string;
+  label: string;
+  role: string;
+  tickAxis: "x" | "y";
+  axisKind?: "x-tick" | "y-tick";
+  tickPointPt: [number, number];
+  action: "keep" | "move-tick" | "hold-no-safe-tick-candidate";
+  nonMoveCode?: string;
+  nonMoveCategory?: string | null;
+  autoModified: boolean;
+  selectedEngine?: string;
+  tier?: number;
+  oldShift: [number, number];
+  origShift?: [number, number];
+  newShift: [number, number];
+  shift?: [number, number];
+  deltaShiftPt: [number, number];
+  origClearancePt: number;
+  finalClearancePt: number;
+  dTickPt?: number;
+  score?: number;
+  reason: string;
+  selectionReason?: string;
+  holdReason?: string | null;
+}
+
 export interface SmartLabelBetaProposal {
   engineVersion?: SmartLabelEngineVersion;
   algorithmVersion: string;
+  enableUnit3BRequested?: boolean;
+  unit3BEnabled?: boolean;
+  unit3BServerEnabled?: boolean;
+  unit3BDisabledReason?: string | null;
   ok: boolean;
   status: "recommended" | "unchanged" | "unsupported" | "reverted" | "failed";
   reasonCode: string | null;
@@ -149,8 +197,12 @@ export interface SmartLabelBetaProposal {
   recommendedCode: string;
   figureType: { type: string; hasAxes: boolean; reason: string } | null;
   movedCount: number;
+  fnMovedCount?: number;
+  tickMovedCount?: number;
+  tickHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
+  tickDecisions?: SmartLabelTickDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   preservation: any;
@@ -177,10 +229,12 @@ export function recommendSmartLabelBeta(
     krokiBaseUrl?: string;
     timeoutMs?: number;
     fetchImpl?: typeof fetch;
+    env?: Record<string, string | undefined>;
     params?: any;
     verify?: boolean;
     applyAxis?: boolean;
     engineVersion?: SmartLabelEngineVersion;
+    enableUnit3B?: boolean;
   }
 ): Promise<SmartLabelBetaProposal>;
 

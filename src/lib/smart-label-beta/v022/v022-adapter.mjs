@@ -34,6 +34,9 @@ import {
 import {
   compareCollisionDiagnosticsUnit3A,
 } from "./unit3a-overlap-diagnostics.mjs";
+import {
+  planAxisTickOverlapsUnit3B,
+} from "./unit3b-ticks.mjs";
 
 export const ALGORITHM_VERSION_V022 = "proto-0.2.2-beta";
 
@@ -192,9 +195,15 @@ export function buildV022LabelDecisions(scene, plan, shiftResult) {
 }
 
 /**
- * v0.2.2-beta 전용 라벨 배치 및(옵션 시) 축 연장 계획 실행기
+ * v0.2.2-beta 전용 라벨 배치 및(옵션 시) 축 연장 / Unit 3-B 눈금 겹침 보정 계획 실행기
  */
-export function runPlanningV022(scene, P = PARAMS, applyAxisRequested = false, flags = DEFAULT_UNIT2_FLAGS) {
+export function runPlanningV022(
+  scene,
+  P = PARAMS,
+  applyAxisRequested = false,
+  flags = DEFAULT_UNIT2_FLAGS,
+  enableUnit3B = false
+) {
   const plan0 = planLabelsUnit2(scene, P, null, flags);
   let activePlan = plan0;
   let axisPlan = planAxes(scene, plan0, P);
@@ -228,8 +237,25 @@ export function runPlanningV022(scene, P = PARAMS, applyAxisRequested = false, f
     activePlan,
     activeShift
   );
+
+  // Unit 3-B (Step 1: 좌표축 눈금 숫자 겹침 자동 해결) 독립 단계 실행
+  const tickPlan = enableUnit3B
+    ? planAxisTickOverlapsUnit3B(scene, activePlan, activeShift, axisEditsToApply)
+    : {
+        edits: [],
+        movedTicks: [],
+        heldTicks: [],
+        decisions: [],
+        decisionsByNodeId: new Map(),
+      };
+
+  for (const [tid, tdec] of tickPlan.decisionsByNodeId.entries()) {
+    decisionsByNodeId.set(tid, tdec);
+  }
+
   activePlan.labelDecisions = labelDecisions;
   activePlan.decisionsByNodeId = decisionsByNodeId;
+  activePlan.tickPlan = tickPlan;
 
   // placements 배열에도 shift 와 selectedEngine 보강
   const shiftById = new Map((activeShift.report || []).map((r) => [r.id, r]));
@@ -253,6 +279,7 @@ export function runPlanningV022(scene, P = PARAMS, applyAxisRequested = false, f
     axisPlan,
     axisEditsToApply,
     activeShift,
+    tickPlan,
     labelDecisions,
     decisionsByNodeId,
   };
@@ -290,8 +317,30 @@ export function compareCollisionDiagnosticsV022(
     (cmpU1.preExistingUnresolvedCollisions || []).map((c) => [c.key, c])
   );
 
+  // decisionsByNodeId 에서 라벨/ID 로 Unit 3-B 눈금 보류 사유 조회 헬퍼
+  const findDecisionForItem = (item) => {
+    if (item.nodeId && decisionsByNodeId.has(item.nodeId)) {
+      return decisionsByNodeId.get(item.nodeId);
+    }
+    for (const dec of decisionsByNodeId.values()) {
+      if (dec && dec.label === item.nodeLabel && dec.tickAxis) {
+        return dec;
+      }
+    }
+    return null;
+  };
+
   const enrichedPreExisting = (cmpU3A.preExistingUnresolvedCollisions || []).map((item) => {
     const u1Match = u1PreByKey.get(item.key);
+    const tickDec = item.nodeRole !== "function" ? findDecisionForItem(item) : null;
+    if (tickDec && tickDec.nonMoveCode === "no-safe-tick-candidate") {
+      return {
+        ...item,
+        status: "pre-existing-unresolved",
+        reasonCode: "no-safe-tick-candidate",
+        reason: tickDec.reason,
+      };
+    }
     return {
       ...item,
       status: "pre-existing-unresolved",

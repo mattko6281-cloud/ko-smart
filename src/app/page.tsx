@@ -26,12 +26,19 @@ import { SmartLabelBetaModal } from "@/components/SmartLabelBetaModal";
 import {
   DEVELOPER_BETA_EMAIL,
   SMART_LABEL_BACKUP_STORAGE_KEY,
+  resolveSmartLabelClientAccess,
   shouldShowSmartLabelBetaUI,
+  loadRememberedEngineVersion,
+  saveRememberedEngineVersion,
   applyApprovedProposal,
   restoreOriginalFromBackup,
   type SmartLabelBackupSnapshot,
 } from "@/lib/smart-label-beta/client-workflow";
-import type { SmartLabelBetaResponse, SmartLabelEngineVersion } from "@/lib/smart-label-beta/kroki-recommend";
+import type {
+  SmartLabelAccessRole,
+  SmartLabelBetaResponse,
+  SmartLabelEngineVersion,
+} from "@/lib/smart-label-beta/kroki-recommend";
 
 
 // ─────────────────────────────────────────────────────────────
@@ -362,10 +369,14 @@ export default function Home() {
     localStorage.setItem(LS_KEY, value);
   }, []);
 
-  // ── 스마트 라벨 자동 정렬 (Beta) — 개발자 단독(mattko6281@gmail.com) 격리 상태 ──
+  // ── 스마트 라벨 자동 정렬 (Beta) — 개발자 및 지정된 파일럿 팀원 서버 세션 권한 상태 ──
   const [serverBetaEnabled, setServerBetaEnabled] = useState(false);
+  const [serverAccessRole, setServerAccessRole] = useState<SmartLabelAccessRole>("none");
+  const [unit3BServerEnabled, setUnit3BServerEnabled] = useState(true);
+  const [unit3BDisabledReason, setUnit3BDisabledReason] = useState<string | null>(null);
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
   const [applyAxisBeta, setApplyAxisBeta] = useState(false);
+  const [enableUnit3BBeta, setEnableUnit3BBeta] = useState(false);
   const [engineVersionBeta, setEngineVersionBeta] = useState<SmartLabelEngineVersion>("v0.2.1");
   const [smartLabelProposal, setSmartLabelProposal] = useState<SmartLabelBetaResponse | null>(null);
   const [smartLabelBackup, setSmartLabelBackup] = useState<SmartLabelBackupSnapshot | null>(null);
@@ -386,38 +397,103 @@ export default function Home() {
     }
   }, []);
 
-  // 인증된 개발자 세션(mattko6281@gmail.com)일 때만 서버 측 베타 활성화 상태를 확인 (다른 사용자에게는 요청조차 보내지 않음)
+  // 인증된 세션일 때 서버 측 스마트 라벨 권한(developer / pilot / none) 및 Unit 3-B 활성화 상태를 확인
   useEffect(() => {
     const email = session?.user?.email?.trim().toLowerCase();
-    if (status !== "authenticated" || email !== DEVELOPER_BETA_EMAIL) {
+    if (status !== "authenticated" || !email) {
       setServerBetaEnabled(false);
+      setServerAccessRole("none");
+      setEnableUnit3BBeta(false);
+      setApplyAxisBeta(false);
       return;
     }
     let cancelled = false;
     fetch("/api/smart-label/recommend", { method: "GET", cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!cancelled) {
-          setServerBetaEnabled(Boolean(data?.ok && data?.enabled && data?.authorized));
+        if (cancelled) return;
+        const authorized = Boolean(data?.ok && data?.enabled && data?.authorized);
+        if (!authorized) {
+          setServerBetaEnabled(false);
+          setServerAccessRole("none");
+          setEnableUnit3BBeta(false);
+          setApplyAxisBeta(false);
+          return;
         }
+        const role: SmartLabelAccessRole = data.role === "pilot" ? "pilot" : "developer";
+        const u3bAllowed = data.unit3BServerEnabled !== false;
+        setServerBetaEnabled(true);
+        setServerAccessRole(role);
+        setUnit3BServerEnabled(u3bAllowed);
+        setUnit3BDisabledReason(data.unit3BDisabledReason || null);
+        // 개발자는 기본 ON(단 서버 비활성 시 OFF), 파일럿 팀원은 초기 기본 OFF
+        setEnableUnit3BBeta(u3bAllowed ? Boolean(data.defaultEnableUnit3B) : false);
+        setApplyAxisBeta(false);
       })
       .catch(() => {
-        if (!cancelled) setServerBetaEnabled(false);
+        if (!cancelled) {
+          setServerBetaEnabled(false);
+          setServerAccessRole("none");
+          setEnableUnit3BBeta(false);
+          setApplyAxisBeta(false);
+        }
       });
     return () => {
       cancelled = true;
     };
   }, [status, session?.user?.email]);
 
+  const smartLabelAccess = resolveSmartLabelClientAccess({
+    sessionStatus: status,
+    sessionEmail: session?.user?.email,
+    serverBetaEnabled,
+    serverRole: serverAccessRole,
+    unit3BServerEnabled,
+  });
   const showSmartLabelBeta = shouldShowSmartLabelBetaUI({
     sessionStatus: status,
     sessionEmail: session?.user?.email,
     serverBetaEnabled,
+    serverRole: serverAccessRole,
   });
+
+  // 개발자 전용 베타 활성화 시 localStorage에서 마지막 선택 엔진 복원 (파일럿 팀원은 v0.2.2-beta 고정)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const remembered = loadRememberedEngineVersion(window.localStorage, {
+      sessionStatus: status,
+      sessionEmail: session?.user?.email,
+      serverBetaEnabled,
+      serverRole: serverAccessRole,
+    });
+    setEngineVersionBeta(remembered);
+  }, [showSmartLabelBeta, status, session?.user?.email, serverBetaEnabled, serverAccessRole]);
+
+  const handleChangeEngineVersionBeta = useCallback(
+    (nextEngine: SmartLabelEngineVersion) => {
+      if (!smartLabelAccess.canSelectEngine) {
+        setEngineVersionBeta("v0.2.2-beta");
+        return;
+      }
+      const normalized: SmartLabelEngineVersion =
+        nextEngine === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1";
+      setEngineVersionBeta(normalized);
+      if (typeof window !== "undefined") {
+        saveRememberedEngineVersion(window.localStorage, normalized, {
+          sessionStatus: status,
+          sessionEmail: session?.user?.email,
+          serverBetaEnabled,
+          serverRole: serverAccessRole,
+        });
+      }
+    },
+    [smartLabelAccess.canSelectEngine, status, session?.user?.email, serverBetaEnabled, serverAccessRole]
+  );
 
   const handleRunSmartLabelBeta = async (
     overrideApplyAxis?: boolean,
-    overrideEngineVersion?: SmartLabelEngineVersion
+    overrideEngineVersion?: SmartLabelEngineVersion,
+    overrideEnableUnit3B?: boolean
   ) => {
     if (!showSmartLabelBeta || isSmartLabelLoading) return;
     if (!rawInput.trim()) {
@@ -425,17 +501,26 @@ export default function Home() {
       return;
     }
     const useApplyAxis = typeof overrideApplyAxis === "boolean" ? overrideApplyAxis : applyAxisBeta;
-    const useEngineVersion: SmartLabelEngineVersion =
-      overrideEngineVersion === "v0.2.2-beta" || overrideEngineVersion === "v0.2.1"
-        ? overrideEngineVersion
-        : engineVersionBeta;
+    const useEngineVersion: SmartLabelEngineVersion = !smartLabelAccess.canSelectEngine
+      ? "v0.2.2-beta"
+      : overrideEngineVersion === "v0.2.2-beta" || overrideEngineVersion === "v0.2.1"
+      ? overrideEngineVersion
+      : engineVersionBeta;
+    const rawEnableUnit3B =
+      typeof overrideEnableUnit3B === "boolean" ? overrideEnableUnit3B : enableUnit3BBeta;
+    const useEnableUnit3B = unit3BServerEnabled && useEngineVersion === "v0.2.2-beta" ? rawEnableUnit3B : false;
     const snapshotCode = rawInput;
     setIsSmartLabelLoading(true);
     try {
       const res = await fetch("/api/smart-label/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tikz: snapshotCode, applyAxis: useApplyAxis, engineVersion: useEngineVersion }),
+        body: JSON.stringify({
+          tikz: snapshotCode,
+          applyAxis: useApplyAxis,
+          engineVersion: useEngineVersion,
+          enableUnit3B: useEnableUnit3B,
+        }),
         cache: "no-store",
       });
       const data = await res.json().catch(() => null);
@@ -1742,6 +1827,8 @@ const getProcessedInput = (code: string) => {
                 >
                   {session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
                     ? "로그인됨 · 개발자(Beta)"
+                    : smartLabelAccess.role === "pilot"
+                    ? "로그인됨 · 파일럿(Beta)"
                     : "로그인됨 · 팀원"}
                 </span>
               </div>
@@ -1837,25 +1924,65 @@ const getProcessedInput = (code: string) => {
                       ↩ 원본 복원
                     </button>
                   )}
-                  <select
-                    id="sel-smart-label-engine"
-                    value={engineVersionBeta}
-                    onChange={(e) =>
-                      setEngineVersionBeta(
-                        e.target.value === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1"
-                      )
-                    }
-                    disabled={isSmartLabelLoading}
-                    className="px-2 py-1 rounded-md text-[10px] font-bold tracking-tight cursor-pointer bg-zinc-900/90 hover:bg-zinc-800/90 border border-violet-800/60 text-violet-200 outline-none"
-                    title="스마트 라벨 자동 정렬 엔진 버전 선택 (기본: 기존 v0.2.1 / 개선: v0.2.2 Beta interim-v1)"
-                  >
-                    <option value="v0.2.1" className="bg-zinc-900 text-zinc-200">
-                      기존 v0.2.1 (기본)
-                    </option>
-                    <option value="v0.2.2-beta" className="bg-zinc-900 text-emerald-300">
-                      개선 v0.2.2 Beta (interim-v1)
-                    </option>
-                  </select>
+                  {smartLabelAccess.canSelectEngine ? (
+                    <select
+                      id="sel-smart-label-engine"
+                      value={engineVersionBeta}
+                      onChange={(e) =>
+                        handleChangeEngineVersionBeta(
+                          e.target.value === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1"
+                        )
+                      }
+                      disabled={isSmartLabelLoading}
+                      className="px-2 py-1 rounded-md text-[10px] font-bold tracking-tight cursor-pointer bg-zinc-900/90 hover:bg-zinc-800/90 border border-violet-800/60 text-violet-200 outline-none"
+                      title="스마트 라벨 자동 정렬 엔진 버전 선택 (기본: 기존 v0.2.1 / 개선: v0.2.2 Beta interim-v1)"
+                    >
+                      <option value="v0.2.1" className="bg-zinc-900 text-zinc-200">
+                        기존 v0.2.1 (기본)
+                      </option>
+                      <option value="v0.2.2-beta" className="bg-zinc-900 text-emerald-300">
+                        개선 v0.2.2 Beta (interim-v1)
+                      </option>
+                    </select>
+                  ) : (
+                    <span
+                      id="badge-smart-label-engine-pilot"
+                      className="px-2 py-1 rounded-md text-[10px] font-bold tracking-tight bg-zinc-900/90 border border-emerald-800/60 text-emerald-300"
+                      title="파일럿 베타에서는 검증된 v0.2.2 Beta 엔진이 기본 적용됩니다"
+                    >
+                      v0.2.2 Beta
+                    </span>
+                  )}
+                  {(engineVersionBeta === "v0.2.2-beta" || !smartLabelAccess.canSelectEngine) && (
+                    <label
+                      id="label-smart-label-unit3b"
+                      className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight select-none border ${
+                        unit3BServerEnabled
+                          ? "cursor-pointer bg-zinc-900/80 hover:bg-zinc-800/80 border-emerald-800/60 text-emerald-200"
+                          : "cursor-not-allowed bg-zinc-900/50 border-zinc-700/60 text-zinc-500"
+                      }`}
+                      title={
+                        unit3BServerEnabled
+                          ? "체크 시 축 눈금 숫자(2, π, 6 등)와 선의 실제 글자 침범도 함께 자동 조정합니다 (파일럿 기본 OFF)"
+                          : unit3BDisabledReason || "서버 설정에 의해 Unit 3-B 눈금 자동 조정이 비활성화되어 있습니다"
+                      }
+                    >
+                      <input
+                        id="chk-smart-label-unit3b"
+                        type="checkbox"
+                        checked={unit3BServerEnabled ? enableUnit3BBeta : false}
+                        disabled={!unit3BServerEnabled || isSmartLabelLoading}
+                        onChange={(e) => {
+                          if (!unit3BServerEnabled) return;
+                          setEnableUnit3BBeta(e.target.checked);
+                        }}
+                        className="h-3 w-3 rounded accent-emerald-500 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <span>
+                        {unit3BServerEnabled ? "Unit 3-B 눈금 조정" : "Unit 3-B 눈금 조정 (비활성)"}
+                      </span>
+                    </label>
+                  )}
                   <label
                     id="label-smart-label-apply-axis"
                     className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight cursor-pointer select-none
@@ -3394,16 +3521,25 @@ const getProcessedInput = (code: string) => {
           restoreConfirmOpen={isRestoreConfirmOpen}
           onConfirmRestoreOverwrite={() => handleRestoreSmartLabel(true)}
           onCancelRestoreConfirm={() => setIsRestoreConfirmOpen(false)}
+          accessRole={smartLabelAccess.role}
+          canSelectEngine={smartLabelAccess.canSelectEngine}
+          unit3BServerEnabled={unit3BServerEnabled}
+          unit3BDisabledReason={unit3BDisabledReason}
           applyAxisOption={applyAxisBeta}
-          engineVersion={engineVersionBeta}
+          enableUnit3BOption={unit3BServerEnabled ? enableUnit3BBeta : false}
+          engineVersion={smartLabelAccess.canSelectEngine ? engineVersionBeta : "v0.2.2-beta"}
           isRecomputing={isSmartLabelLoading}
           onToggleApplyAxisOption={(next) => {
             setApplyAxisBeta(next);
-            handleRunSmartLabelBeta(next, engineVersionBeta);
+            handleRunSmartLabelBeta(next, engineVersionBeta, enableUnit3BBeta);
+          }}
+          onToggleEnableUnit3BOption={(next) => {
+            setEnableUnit3BBeta(next);
+            handleRunSmartLabelBeta(applyAxisBeta, engineVersionBeta, next);
           }}
           onChangeEngineVersion={(nextEngine) => {
-            setEngineVersionBeta(nextEngine);
-            handleRunSmartLabelBeta(applyAxisBeta, nextEngine);
+            handleChangeEngineVersionBeta(nextEngine);
+            handleRunSmartLabelBeta(applyAxisBeta, nextEngine, enableUnit3BBeta);
           }}
         />
       )}

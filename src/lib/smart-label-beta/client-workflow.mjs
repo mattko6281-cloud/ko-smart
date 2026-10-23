@@ -1,27 +1,105 @@
-// KO-SMART v0.2.1 베타 — 클라이언트 UI 권한 판정 및 추천 승인·독립 백업·원본 복원 순수 상태 전이 모듈
+// KO-SMART v0.2.1 / v0.2.2 베타 — 클라이언트 UI 권한 판정(개발자 vs 파일럿 팀원) 및 추천 승인·독립 백업·원본 복원 순수 상태 전이 모듈
 // (브라우저 UI 컴포넌트와 단위 테스트 양쪽에서 동일하게 재사용)
 
 export const DEVELOPER_BETA_EMAIL = "mattko6281@gmail.com";
 export const SMART_LABEL_BACKUP_STORAGE_KEY = "kosmart_smart_label_backup_v021";
+export const SMART_LABEL_ENGINE_STORAGE_KEY = "kosmart_smart_label_engine_version";
+export const DEFAULT_CLIENT_ENGINE_VERSION = "v0.2.1";
+export const SUPPORTED_CLIENT_ENGINE_VERSIONS = ["v0.2.1", "v0.2.2-beta"];
 
 /**
- * 클라이언트에서 베타 버튼 및 UI를 렌더링할지 판정한다.
- * - 반드시 인증 완료(status === "authenticated") 상태여야 하며
- * - 세션 이메일이 mattko6281@gmail.com 과 정확히 일치해야 하고
- * - 서버 측 베타 활성화 확인(serverBetaEnabled === true)이 완료된 경우에만 true 를 반환한다.
- * - 개발 모드(isDev) 우회는 절대 허용하지 않는다.
+ * 클라이언트에서 개발자(developer), 지정된 파일럿 팀원(pilot), 일반 팀원(none)의 스마트 라벨 권한 및 초기 설정을 판정한다.
+ * - 개발자(mattko6281@gmail.com): 엔진 선택 가능, Unit 3-B 초기 기본 ON, 축 길이 조정 기본 OFF
+ * - 파일럿 팀원(serverRole === "pilot" 또는 pilotEmails 포함): v0.2.2-beta 엔진 고정(엔진 선택 UI 숨김), Unit 3-B 초기 기본 OFF, 축 길이 조정 기본 OFF
+ * - 미지정 팀원 / 미인증 / 서버 비활성화: UI 숨김(showUI = false)
  *
  * @param {{
  *   sessionStatus: "authenticated" | "loading" | "unauthenticated" | string,
  *   sessionEmail?: string | null,
- *   serverBetaEnabled: boolean
+ *   serverBetaEnabled: boolean,
+ *   serverRole?: "developer" | "pilot" | "none" | string | null,
+ *   pilotEmails?: string[] | null,
+ *   unit3BServerEnabled?: boolean
  * }} params
  */
-export function shouldShowSmartLabelBetaUI({ sessionStatus, sessionEmail, serverBetaEnabled }) {
-  if (sessionStatus !== "authenticated") return false;
-  if (!serverBetaEnabled) return false;
-  if (!sessionEmail || typeof sessionEmail !== "string") return false;
-  return sessionEmail.trim().toLowerCase() === DEVELOPER_BETA_EMAIL;
+export function resolveSmartLabelClientAccess(params) {
+  const denied = {
+    showUI: false,
+    role: /** @type {"developer" | "pilot" | "none"} */ ("none"),
+    canSelectEngine: false,
+    effectiveEngineVersion: /** @type {"v0.2.1" | "v0.2.2-beta"} */ ("v0.2.1"),
+    defaultEnableUnit3B: false,
+    defaultApplyAxis: false,
+    unit3BServerEnabled: false,
+  };
+  if (!params || typeof params !== "object") return denied;
+  const {
+    sessionStatus,
+    sessionEmail,
+    serverBetaEnabled,
+    serverRole,
+    pilotEmails,
+    unit3BServerEnabled = true,
+  } = params;
+
+  if (sessionStatus !== "authenticated") return denied;
+  if (!serverBetaEnabled) return denied;
+  if (!sessionEmail || typeof sessionEmail !== "string") return denied;
+
+  const normalized = sessionEmail.trim().toLowerCase();
+  if (!normalized) return denied;
+
+  const u3bAllowed = unit3BServerEnabled !== false;
+
+  if (normalized === DEVELOPER_BETA_EMAIL) {
+    return {
+      showUI: true,
+      role: /** @type {"developer" | "pilot" | "none"} */ ("developer"),
+      canSelectEngine: true,
+      effectiveEngineVersion: /** @type {"v0.2.1" | "v0.2.2-beta"} */ ("v0.2.1"),
+      defaultEnableUnit3B: u3bAllowed ? true : false,
+      defaultApplyAxis: false,
+      unit3BServerEnabled: u3bAllowed,
+    };
+  }
+
+  const isPilotByServerRole = serverRole === "pilot";
+  const isPilotByList =
+    Array.isArray(pilotEmails) &&
+    pilotEmails.some(
+      (e) => typeof e === "string" && e.trim().toLowerCase() === normalized && normalized.includes("@")
+    );
+
+  if (isPilotByServerRole || isPilotByList) {
+    return {
+      showUI: true,
+      role: /** @type {"developer" | "pilot" | "none"} */ ("pilot"),
+      canSelectEngine: false,
+      effectiveEngineVersion: /** @type {"v0.2.1" | "v0.2.2-beta"} */ ("v0.2.2-beta"),
+      defaultEnableUnit3B: false,
+      defaultApplyAxis: false,
+      unit3BServerEnabled: u3bAllowed,
+    };
+  }
+
+  return denied;
+}
+
+/**
+ * 클라이언트에서 베타 버튼 및 UI를 렌더링할지 판정한다.
+ * - 인증 완료(status === "authenticated") + 서버 베타 활성화(serverBetaEnabled === true) 상태에서
+ *   개발자(mattko6281@gmail.com) 또는 서버가 승인한 파일럿 팀원(serverRole === "pilot" / pilotEmails)인 경우에만 true 를 반환한다.
+ *
+ * @param {{
+ *   sessionStatus: "authenticated" | "loading" | "unauthenticated" | string,
+ *   sessionEmail?: string | null,
+ *   serverBetaEnabled: boolean,
+ *   serverRole?: "developer" | "pilot" | "none" | string | null,
+ *   pilotEmails?: string[] | null
+ * }} params
+ */
+export function shouldShowSmartLabelBetaUI(params) {
+  return resolveSmartLabelClientAccess(params).showUI;
 }
 
 /**
@@ -140,4 +218,91 @@ export function restoreOriginalFromBackup(backup, currentRawInput, opts = {}) {
     message: "스마트 라벨 자동 정렬 이전의 원본 TikZ 코드로 복원되었습니다.",
     newRawInput: backup.originalCode,
   };
+}
+
+/**
+ * 클라이언트 엔진 버전 값을 정규화한다.
+ * 저장된 값이 없거나 유효하지 않은 값이면 기본값 "v0.2.1" 로 안전하게 복귀한다.
+ *
+ * @param {any} val
+ * @returns {"v0.2.1" | "v0.2.2-beta"}
+ */
+export function normalizeClientEngineVersion(val) {
+  if (typeof val === "string") {
+    const trimmed = val.trim().toLowerCase();
+    if (trimmed === "v0.2.2-beta" || trimmed === "v0.2.2" || trimmed === "0.2.2") {
+      return "v0.2.2-beta";
+    }
+  }
+  return DEFAULT_CLIENT_ENGINE_VERSION;
+}
+
+/**
+ * 브라우저 localStorage 에서 개발자가 마지막으로 선택한 스마트 라벨 엔진을 읽어온다.
+ * - 개발자(role === "developer")인 경우에만 localStorage 에서 저장된 엔진을 복원한다.
+ * - 파일럿 팀원(role === "pilot")인 경우 항상 고정 엔진 "v0.2.2-beta" 를 반환한다.
+ * - 권한이 없는 경우(role === "none") localStorage 에 어떤 값이 있더라도 읽지 않고 기본값 "v0.2.1" 을 반환한다.
+ *
+ * @param {{ getItem?: (key: string) => string | null } | null | undefined} storage
+ * @param {{
+ *   sessionStatus: string,
+ *   sessionEmail?: string | null,
+ *   serverBetaEnabled: boolean,
+ *   serverRole?: string | null,
+ *   pilotEmails?: string[] | null
+ * }} authParams
+ * @returns {"v0.2.1" | "v0.2.2-beta"}
+ */
+export function loadRememberedEngineVersion(storage, authParams) {
+  const access = resolveSmartLabelClientAccess(authParams);
+  if (!access.showUI) {
+    return DEFAULT_CLIENT_ENGINE_VERSION;
+  }
+  if (access.role === "pilot" || !access.canSelectEngine) {
+    return "v0.2.2-beta";
+  }
+  if (!storage || typeof storage.getItem !== "function") {
+    return DEFAULT_CLIENT_ENGINE_VERSION;
+  }
+  try {
+    const raw = storage.getItem(SMART_LABEL_ENGINE_STORAGE_KEY);
+    return normalizeClientEngineVersion(raw);
+  } catch {
+    return DEFAULT_CLIENT_ENGINE_VERSION;
+  }
+}
+
+/**
+ * 개발자가 선택한 스마트 라벨 엔진을 브라우저 localStorage 에 저장한다.
+ * - 개발자(role === "developer")가 아닌 경우 저장하지 않는다.
+ *
+ * @param {{ setItem?: (key: string, value: string) => void } | null | undefined} storage
+ * @param {any} engineVersion
+ * @param {{
+ *   sessionStatus: string,
+ *   sessionEmail?: string | null,
+ *   serverBetaEnabled: boolean,
+ *   serverRole?: string | null,
+ *   pilotEmails?: string[] | null
+ * }} authParams
+ * @returns {{ saved: boolean, engineVersion: "v0.2.1" | "v0.2.2-beta" }}
+ */
+export function saveRememberedEngineVersion(storage, engineVersion, authParams) {
+  const access = resolveSmartLabelClientAccess(authParams);
+  if (!access.showUI) {
+    return { saved: false, engineVersion: DEFAULT_CLIENT_ENGINE_VERSION };
+  }
+  if (access.role === "pilot" || !access.canSelectEngine) {
+    return { saved: false, engineVersion: "v0.2.2-beta" };
+  }
+  const normalized = normalizeClientEngineVersion(engineVersion);
+  if (!storage || typeof storage.setItem !== "function") {
+    return { saved: false, engineVersion: normalized };
+  }
+  try {
+    storage.setItem(SMART_LABEL_ENGINE_STORAGE_KEY, normalized);
+    return { saved: true, engineVersion: normalized };
+  } catch {
+    return { saved: false, engineVersion: normalized };
+  }
 }

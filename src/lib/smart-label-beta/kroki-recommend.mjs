@@ -102,35 +102,121 @@ export function isSmartLabelBetaServerEnabled(opts = {}) {
 }
 
 /**
- * NextAuth 서버 세션 객체를 검증하여 개발자 단독(mattko6281@gmail.com) 권한을 판정한다.
- * @param {any} session NextAuth auth() 반환 세션
+ * 환경변수 문자열(SMART_LABEL_PILOT_EMAILS)에서 파일럿 허용 이메일 목록을 안전하게 파싱한다.
+ * - 값이 없거나 빈 문자열이면 누구에게도 추가 개방되지 않도록 빈 배열([])을 반환한다.
+ * - 쉼표(,), 세미콜론(;), 공백으로 구분된 이메일을 소문자로 정규화하고 유효한 이메일(@ 포함)만 남긴다.
+ * @param {any} rawVal
+ * @returns {string[]}
  */
-export function verifyDeveloperSession(session) {
+export function parsePilotEmails(rawVal) {
+  if (!rawVal || typeof rawVal !== "string") return [];
+  const trimmed = rawVal.trim();
+  if (!trimmed) return [];
+  const parts = trimmed
+    .split(/[,;\s]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length >= 5 && s.includes("@") && !s.startsWith("@") && !s.endsWith("@") && s !== DEVELOPER_BETA_EMAIL);
+  return [...new Set(parts)];
+}
+
+/**
+ * Unit 3-B (축 눈금 숫자 겹침 자동 조정) 단독 활성화/비활성화 서버 설정을 확인한다.
+ * - 비활성화 시에도 기존 v0.2.2 함수식 라벨 정렬(Unit 1 + Unit 2/2+ + Unit 3-A)은 정상 유지된다.
+ * @param {{env?: Record<string, string|undefined>}} [opts]
+ */
+export function isUnit3BServerEnabled(opts = {}) {
+  const env = opts.env || process.env;
+  if (globalThis.__SMART_LABEL_UNIT3B_KILL_SWITCH__ === true) {
+    return {
+      enabled: false,
+      reason: "런타임 긴급 설정에 의해 Unit 3-B 눈금 겹침 자동 조정이 일시 비활성화되었습니다. (함수식 라벨 정렬은 정상 작동)",
+    };
+  }
+  const disableFlag = String(env.SMART_LABEL_DISABLE_UNIT3B || "").trim().toLowerCase();
+  if (disableFlag === "true" || disableFlag === "1") {
+    return {
+      enabled: false,
+      reason: "서버 설정(SMART_LABEL_DISABLE_UNIT3B)에 의해 Unit 3-B 눈금 겹침 자동 조정이 비활성화되었습니다. (함수식 라벨 정렬은 정상 작동)",
+    };
+  }
+  const enableFlag = String(env.ENABLE_SMART_LABEL_UNIT3B || "").trim().toLowerCase();
+  if (enableFlag === "false" || enableFlag === "0") {
+    return {
+      enabled: false,
+      reason: "서버 설정(ENABLE_SMART_LABEL_UNIT3B=false)에 의해 Unit 3-B 눈금 겹침 자동 조정이 비활성화되었습니다. (함수식 라벨 정렬은 정상 작동)",
+    };
+  }
+  try {
+    if (existsSync(join(process.cwd(), ".smart-label-unit3b-disabled"))) {
+      return {
+        enabled: false,
+        reason: "서버 비활성 파일(.smart-label-unit3b-disabled)이 감지되어 Unit 3-B 눈금 겹침 자동 조정이 비활성화되었습니다.",
+      };
+    }
+  } catch {
+    // 파일시스템 접근 불가 환경에서는 무시
+  }
+  return { enabled: true, reason: "Unit 3-B 활성화 가능" };
+}
+
+/**
+ * NextAuth 서버 세션 객체를 검증하여 개발자(developer) 또는 지정된 파일럿 팀원(pilot) 권한을 판정한다.
+ * - 개발자(mattko6281@gmail.com): role="developer", 엔진 선택 가능(기본 v0.2.1), Unit 3-B 기본 ON
+ * - 파일럿 팀원(SMART_LABEL_PILOT_EMAILS 에 명시된 계정): role="pilot", 엔진 v0.2.2-beta 고정, Unit 3-B 기본 OFF, 축 조정 기본 OFF
+ * - 미지정 팀원 또는 SMART_LABEL_PILOT_EMAILS 미설정 시: 403 FORBIDDEN 차단
+ * @param {any} session NextAuth auth() 반환 세션
+ * @param {{env?: Record<string, string|undefined>}} [opts]
+ */
+export function verifyDeveloperSession(session, opts = {}) {
+  const env = opts.env || process.env;
   const rawEmail = session?.user?.email;
   if (!rawEmail || typeof rawEmail !== "string" || !rawEmail.trim()) {
     return {
       allowed: false,
       httpStatus: 401,
       code: "UNAUTHORIZED",
+      role: "none",
       error: "인증되지 않은 요청입니다. Google 로그인이 필요합니다.",
     };
   }
   const normalized = rawEmail.trim().toLowerCase();
-  if (normalized !== DEVELOPER_BETA_EMAIL) {
+  if (normalized === DEVELOPER_BETA_EMAIL) {
     return {
-      allowed: false,
-      httpStatus: 403,
-      code: "FORBIDDEN",
-      error: "접근 권한이 없습니다. 스마트 라벨 베타는 개발자 전용 기능입니다.",
+      allowed: true,
+      httpStatus: 200,
+      code: "OK",
+      email: normalized,
+      role: "developer",
+      canSelectEngine: true,
+      defaultEngineVersion: DEFAULT_ENGINE_VERSION,
+      defaultEnableUnit3B: true,
+      defaultApplyAxis: false,
+    };
+  }
+  const pilotEmails = parsePilotEmails(env?.SMART_LABEL_PILOT_EMAILS);
+  if (pilotEmails.includes(normalized)) {
+    return {
+      allowed: true,
+      httpStatus: 200,
+      code: "OK",
+      email: normalized,
+      role: "pilot",
+      canSelectEngine: false,
+      defaultEngineVersion: "v0.2.2-beta",
+      defaultEnableUnit3B: false,
+      defaultApplyAxis: false,
     };
   }
   return {
-    allowed: true,
-    httpStatus: 200,
-    code: "OK",
-    email: normalized,
+    allowed: false,
+    httpStatus: 403,
+    code: "FORBIDDEN",
+    role: "none",
+    error: "접근 권한이 없습니다. 스마트 라벨 베타는 개발자 및 지정된 파일럿 팀원 전용 기능입니다.",
   };
 }
+
+export const verifySmartLabelAccess = verifyDeveloperSession;
 
 /**
  * KO-SMART 운영 앱의 getProcessedInput 과 동일한 래핑 및 Circle 정비율 보정을 수행한다.
@@ -469,10 +555,17 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
   const applyAxisRequested = Boolean(opts.applyAxis === true);
   const engineVersion = normalizeEngineVersion(opts.engineVersion);
   const isV022 = engineVersion === "v0.2.2-beta";
+  const unit3BServerStatus = isUnit3BServerEnabled({ env: opts.env });
+  const enableUnit3BRequested = isV022 && Boolean(opts.enableUnit3B === true);
+  const enableUnit3B = enableUnit3BRequested && unit3BServerStatus.enabled;
 
   const baseResponse = {
     engineVersion,
     algorithmVersion: isV022 ? ALGORITHM_VERSION_V022 : ALGORITHM_VERSION,
+    enableUnit3BRequested,
+    unit3BEnabled: enableUnit3B,
+    unit3BServerEnabled: unit3BServerStatus.enabled,
+    unit3BDisabledReason: unit3BServerStatus.enabled ? null : unit3BServerStatus.reason,
     ok: false,
     status: "failed",
     reasonCode: null,
@@ -498,8 +591,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     recommendedCode: String(rawInput ?? ""),
     figureType: null,
     movedCount: 0,
+    fnMovedCount: 0,
+    tickMovedCount: 0,
+    tickHeldCount: 0,
     heldCount: 0,
     labelDecisions: [],
+    tickDecisions: [],
     placements: [],
     shiftReport: [],
     preservation: null,
@@ -626,16 +723,18 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     let axisPlan;
     let axisEditsToApply = [];
     let activeShift;
+    let tickPlan = { edits: [], movedTicks: [], heldTicks: [], decisions: [] };
     let decisionsByNodeId = new Map();
 
     if (isV022) {
-      const v022Plan = runPlanningV022(scene, P, applyAxisRequested);
+      const v022Plan = runPlanningV022(scene, P, applyAxisRequested, undefined, enableUnit3B);
       activePlan = v022Plan.activePlan;
       axisPlan = v022Plan.axisPlan;
       axisEditsToApply = v022Plan.axisEditsToApply;
       activeShift = v022Plan.activeShift;
+      tickPlan = v022Plan.tickPlan || tickPlan;
       decisionsByNodeId = v022Plan.decisionsByNodeId;
-      // decisionsByNodeId 를 반영하여 원본 진단 사유(Unit 1 4대 미이동 사유 + Unit 3-A) 갱신
+      // decisionsByNodeId 를 반영하여 원본 진단 사유(Unit 1 4대 미이동 사유 + Unit 3-A + Unit 3-B) 갱신
       origDiag = compareCollisionDiagnosticsV022(scene, scene, [], {
         axisChanged: false,
         params: P,
@@ -673,7 +772,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     }
 
     const labelEditsOnEffective = activeShift.edits;
-    const editsToApply = [...labelEditsOnEffective, ...axisEditsToApply];
+    const tickEditsOnEffective = tickPlan.edits || [];
+    const editsToApply = [...labelEditsOnEffective, ...tickEditsOnEffective, ...axisEditsToApply];
 
     const xAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-x");
     const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
@@ -818,8 +918,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         canApply: false,
         verified: true,
         movedCount: 0,
+        fnMovedCount: 0,
+        tickMovedCount: 0,
+        tickHeldCount: (tickPlan.heldTicks || []).length,
         heldCount: decisions0.length,
         labelDecisions: decisions0,
+        tickDecisions: tickPlan.decisions || [],
         placements: activePlan.placements || [],
         shiftReport: activeShift.report || [],
         preservation: preservation0,
@@ -882,10 +986,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     }
 
     const origFNodes = scene.nodes.filter((n) => n.role === "function" && n.bbox);
-    const movedNodeIds = (activePlan.placements || [])
+    const movedFnNodeIds = (activePlan.placements || [])
       .filter((p) => p.action === "move")
       .map((p) => p.id);
-    const movedFNodeIndices = movedNodeIds
+    const movedTickNodeIds = (tickPlan.movedTicks || []).map((t) => t.id);
+    const movedNodeIds = [...movedFnNodeIds, ...movedTickNodeIds];
+    const movedFNodeIndices = movedFnNodeIds
       .map((id) => origFNodes.findIndex((q) => q.id === id))
       .filter((idx) => idx >= 0);
 
@@ -1038,11 +1144,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
 
     const recommendedFullCode = prefix + finalBody + suffix;
     const recSvgDataUri = "data:image/svg+xml;base64," + Buffer.from(render2.svg, "utf8").toString("base64");
-    const movedCount = decisions.filter((d) => d.autoModified).length;
-    const heldCount = decisions.length - movedCount;
+    const fnMovedCount = decisions.filter((d) => d.autoModified).length;
+    const tickMovedCount = (tickPlan.movedTicks || []).length;
+    const tickHeldCount = (tickPlan.heldTicks || []).length;
+    const movedCount = fnMovedCount + tickMovedCount;
+    const heldCount = decisions.length - fnMovedCount;
 
     const actionParts = [];
-    if (movedCount > 0) actionParts.push(`함수식 라벨 ${movedCount}개 추천 위치`);
+    if (fnMovedCount > 0) actionParts.push(`함수식 라벨 ${fnMovedCount}개 추천 위치`);
+    if (tickMovedCount > 0) actionParts.push(`축 눈금 숫자 ${tickMovedCount}개 겹침 자동 조정(Unit 3-B)`);
     if (anyAxisChanged) actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
     let successMsg = `${actionParts.join(" 및 ")}이(가) 2차 렌더링 및 안전성 검증을 통과했습니다.`;
 
@@ -1064,8 +1174,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       verified: true,
       recommendedCode: recommendedFullCode,
       movedCount,
+      fnMovedCount,
+      tickMovedCount,
+      tickHeldCount,
       heldCount,
       labelDecisions: decisions,
+      tickDecisions: tickPlan.decisions || [],
       placements: (activePlan.placements || []).map((p) => ({
         id: p.id,
         label: p.label,
@@ -1119,7 +1233,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
  * @param {{getSession: () => Promise<any>, env?: Record<string, string|undefined>}} deps
  */
 export async function handleSmartLabelGet(deps) {
-  const authCheck = verifyDeveloperSession(await deps.getSession());
+  const authCheck = verifyDeveloperSession(await deps.getSession(), { env: deps.env });
   if (!authCheck.allowed) {
     return {
       httpStatus: authCheck.httpStatus,
@@ -1127,6 +1241,7 @@ export async function handleSmartLabelGet(deps) {
         ok: false,
         enabled: false,
         authorized: false,
+        role: "none",
         code: authCheck.code,
         error: authCheck.error,
       },
@@ -1134,6 +1249,8 @@ export async function handleSmartLabelGet(deps) {
   }
 
   const serverFlag = isSmartLabelBetaServerEnabled({ env: deps.env });
+  const unit3BFlag = isUnit3BServerEnabled({ env: deps.env });
+  const isDeveloper = authCheck.role === "developer";
   return {
     httpStatus: 200,
     body: {
@@ -1141,10 +1258,16 @@ export async function handleSmartLabelGet(deps) {
       enabled: serverFlag.enabled,
       authorized: true,
       email: authCheck.email,
+      role: authCheck.role,
+      canSelectEngine: isDeveloper,
       reason: serverFlag.reason,
-      algorithmVersion: ALGORITHM_VERSION,
-      defaultEngineVersion: DEFAULT_ENGINE_VERSION,
-      availableEngines: SUPPORTED_ENGINE_VERSIONS,
+      algorithmVersion: isDeveloper ? ALGORITHM_VERSION : ALGORITHM_VERSION_V022,
+      defaultEngineVersion: authCheck.defaultEngineVersion,
+      availableEngines: isDeveloper ? SUPPORTED_ENGINE_VERSIONS : ["v0.2.2-beta"],
+      defaultEnableUnit3B: unit3BFlag.enabled ? authCheck.defaultEnableUnit3B : false,
+      defaultApplyAxis: false,
+      unit3BServerEnabled: unit3BFlag.enabled,
+      unit3BDisabledReason: unit3BFlag.enabled ? null : unit3BFlag.reason,
     },
   };
 }
@@ -1162,7 +1285,7 @@ export async function handleSmartLabelGet(deps) {
  */
 export async function handleSmartLabelPost(requestBody, deps) {
   const session = await deps.getSession();
-  const authCheck = verifyDeveloperSession(session);
+  const authCheck = verifyDeveloperSession(session, { env: deps.env });
   if (!authCheck.allowed) {
     return {
       httpStatus: authCheck.httpStatus,
@@ -1206,7 +1329,10 @@ export async function handleSmartLabelPost(requestBody, deps) {
   const rawTikz = typeof requestBody.tikz === "string" ? requestBody.tikz : "";
   const clientInputHash = typeof requestBody.inputHash === "string" ? requestBody.inputHash : null;
   const applyAxis = Boolean(requestBody.applyAxis === true);
-  const engineVersion = normalizeEngineVersion(requestBody.engineVersion);
+  // 파일럿 팀원(role === "pilot")은 요청 본문에 어떤 engineVersion 을 보내더라도 서버에서 v0.2.2-beta 로 강제 고정
+  const engineVersion =
+    authCheck.role === "pilot" ? "v0.2.2-beta" : normalizeEngineVersion(requestBody.engineVersion);
+  const enableUnit3B = Boolean(requestBody.enableUnit3B === true);
   const serverInputHash = computeInputHash(rawTikz);
 
   if (clientInputHash && clientInputHash !== serverInputHash) {
@@ -1242,9 +1368,11 @@ export async function handleSmartLabelPost(requestBody, deps) {
       krokiBaseUrl: deps.krokiBaseUrl,
       timeoutMs: deps.timeoutMs,
       fetchImpl: deps.fetchImpl,
+      env: deps.env,
       verify: true,
       applyAxis,
       engineVersion,
+      enableUnit3B,
     });
 
     const httpStatus =

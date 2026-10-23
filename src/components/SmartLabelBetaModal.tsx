@@ -3,6 +3,7 @@
 import React from "react";
 import { evaluateProposalApplicability } from "@/lib/smart-label-beta/client-workflow";
 import type {
+  SmartLabelAccessRole,
   SmartLabelBetaResponse,
   SmartLabelEngineVersion,
 } from "@/lib/smart-label-beta/kroki-recommend";
@@ -15,8 +16,14 @@ interface SmartLabelBetaModalProps {
   restoreConfirmOpen: boolean;
   onCancelRestoreConfirm: () => void;
   onConfirmRestoreOverwrite: () => void;
+  accessRole?: SmartLabelAccessRole;
+  canSelectEngine?: boolean;
+  unit3BServerEnabled?: boolean;
+  unit3BDisabledReason?: string | null;
   applyAxisOption?: boolean;
   onToggleApplyAxisOption?: (next: boolean) => void;
+  enableUnit3BOption?: boolean;
+  onToggleEnableUnit3BOption?: (next: boolean) => void;
   engineVersion?: SmartLabelEngineVersion;
   onChangeEngineVersion?: (next: SmartLabelEngineVersion) => void;
   isRecomputing?: boolean;
@@ -30,8 +37,14 @@ export function SmartLabelBetaModal({
   restoreConfirmOpen,
   onCancelRestoreConfirm,
   onConfirmRestoreOverwrite,
+  accessRole = "developer",
+  canSelectEngine = true,
+  unit3BServerEnabled = true,
+  unit3BDisabledReason = null,
   applyAxisOption = false,
   onToggleApplyAxisOption,
+  enableUnit3BOption = true,
+  onToggleEnableUnit3BOption,
   engineVersion = "v0.2.1",
   onChangeEngineVersion,
   isRecomputing = false,
@@ -84,6 +97,12 @@ export function SmartLabelBetaModal({
   const diag = proposal.collisionDiagnostics;
   const activeEngineVersion: SmartLabelEngineVersion =
     proposal.engineVersion === "v0.2.2-beta" ? "v0.2.2-beta" : engineVersion;
+  const effectiveUnit3BServerEnabled =
+    unit3BServerEnabled !== false && proposal.unit3BServerEnabled !== false;
+  const effectiveUnit3BDisabledReason =
+    proposal.unit3BDisabledReason ||
+    unit3BDisabledReason ||
+    "서버 설정에 의해 Unit 3-B 눈금 겹침 자동 조정이 비활성화되어 있습니다. (함수식 라벨 자동 정렬은 정상 작동)";
   const hasUnresolvedIssues =
     Boolean(diag) &&
     (Boolean(diag?.hasUnresolvedCollisions) || !Boolean(diag?.measurementComplete));
@@ -134,16 +153,21 @@ export function SmartLabelBetaModal({
               }`}
             >
               {activeEngineVersion === "v0.2.2-beta"
-                ? "v0.2.2 Beta (interim-v1)"
+                ? proposal.unit3BEnabled
+                  ? "v0.2.2 Beta (interim-v1 + Unit 3-B)"
+                  : "v0.2.2 Beta (interim-v1)"
                 : proposal.algorithmVersion || "proto-0.2.1"}{" "}
               · {proposal.applyAxisRequested ? "label+axes" : "labelOnly"} · verify=true
             </span>
-            <span className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">
-              개발자 전용
+            <span
+              className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300"
+              data-testid="modal-badge-access-role"
+            >
+              {accessRole === "pilot" ? "파일럿 팀원 베타" : "개발자 전용"}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            {onChangeEngineVersion && (
+            {canSelectEngine && onChangeEngineVersion ? (
               <label
                 className="flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200"
                 data-testid="modal-select-engine-version"
@@ -166,6 +190,44 @@ export function SmartLabelBetaModal({
                     개선 v0.2.2 Beta (interim-v1)
                   </option>
                 </select>
+              </label>
+            ) : (
+              <span
+                className="rounded-md border border-emerald-700/60 bg-slate-800/90 px-2.5 py-1 text-[11px] font-semibold text-emerald-300"
+                data-testid="modal-fixed-engine-badge"
+              >
+                엔진: v0.2.2 Beta (고정)
+              </span>
+            )}
+            {activeEngineVersion === "v0.2.2-beta" && onToggleEnableUnit3BOption && (
+              <label
+                className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium ${
+                  effectiveUnit3BServerEnabled
+                    ? "cursor-pointer border-emerald-700/70 bg-emerald-950/60 text-emerald-200 hover:border-emerald-400"
+                    : "cursor-not-allowed border-slate-700 bg-slate-800/60 text-slate-400"
+                }`}
+                title={
+                  effectiveUnit3BServerEnabled
+                    ? "체크 시 축 눈금 숫자(2, π, 6 등)와 그래프 선의 실제 글자 겹침도 함께 미세 조정합니다"
+                    : effectiveUnit3BDisabledReason
+                }
+                data-testid="modal-checkbox-enable-unit3b"
+              >
+                <input
+                  type="checkbox"
+                  checked={effectiveUnit3BServerEnabled ? enableUnit3BOption : false}
+                  disabled={isRecomputing || !effectiveUnit3BServerEnabled}
+                  onChange={(e) => {
+                    if (!effectiveUnit3BServerEnabled) return;
+                    onToggleEnableUnit3BOption(e.target.checked);
+                  }}
+                  className="h-3.5 w-3.5 rounded accent-emerald-500"
+                />
+                <span>
+                  {effectiveUnit3BServerEnabled
+                    ? "Unit 3-B 눈금 겹침 자동 조정"
+                    : "Unit 3-B 눈금 조정 (서버 비활성)"}
+                </span>
               </label>
             )}
             {onToggleApplyAxisOption && (
@@ -204,7 +266,11 @@ export function SmartLabelBetaModal({
             <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
               <span>[{statusLabel}]</span>
               <span className="text-[11px] font-normal">
-                이동 추천: {proposal.movedCount}개 · 원본 유지: {proposal.heldCount}개 · 축 조정:{" "}
+                이동 추천: {proposal.movedCount}개 (함수식 {proposal.fnMovedCount ?? proposal.movedCount}개
+                {typeof proposal.tickMovedCount === "number" && proposal.tickMovedCount > 0
+                  ? ` · 눈금 ${proposal.tickMovedCount}개`
+                  : ""}
+                ) · 원본 유지: {proposal.heldCount}개 · 축 조정:{" "}
                 {proposal.axisOption?.editsCount ?? 0}개 · 2차 검증:{" "}
                 {proposal.verified ? "통과 (Verified)" : "미적용"}
               </span>
@@ -213,6 +279,16 @@ export function SmartLabelBetaModal({
               {proposal.message}
             </p>
           </div>
+
+          {/* Unit 3-B 서버 비활성화 상태 안내 배너 */}
+          {activeEngineVersion === "v0.2.2-beta" && !effectiveUnit3BServerEnabled && (
+            <div
+              className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs font-medium text-amber-900"
+              data-testid="smart-label-unit3b-disabled-banner"
+            >
+              ℹ️ <strong>Unit 3-B 비활성 상태 안내:</strong> {effectiveUnit3BDisabledReason}
+            </div>
+          )}
 
           {/* 에디터 코드 중간 변경 경고 */}
           {isStale && (
@@ -533,6 +609,60 @@ export function SmartLabelBetaModal({
                           ⚠️ 감지된 기존 겹침: {dec.collisionDescriptions.join(" · ")}
                         </p>
                       )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Unit 3-B: 축 눈금 숫자(axis tick) 겹침 판단 리포트 */}
+          {proposal.tickDecisions && proposal.tickDecisions.length > 0 && (
+            <div
+              className="rounded-lg border border-emerald-200 bg-white p-3.5"
+              data-testid="smart-label-tick-decisions"
+            >
+              <h4 className="mb-2.5 text-xs font-bold text-slate-800">
+                🎯 Unit 3-B: 축 눈금 숫자 겹침 판단 및 조정 사유 ({proposal.tickDecisions.length}개)
+              </h4>
+              <div className="space-y-2">
+                {proposal.tickDecisions.map((tDec) => (
+                  <div
+                    key={tDec.id}
+                    data-testid="smart-label-tick-decision-item"
+                    className={`rounded-md border p-2.5 text-xs ${
+                      tDec.autoModified
+                        ? "border-emerald-200 bg-emerald-50/40"
+                        : "border-amber-300 bg-amber-50/50"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <code className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] font-mono text-white">
+                          {tDec.label}
+                        </code>
+                        <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-700">
+                          {tDec.axisKind === "x-tick" ? "x축 눈금" : "y축 눈금"}
+                        </span>
+                        {tDec.autoModified ? (
+                          <span className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            이동 추천: [{tDec.origShift?.[0] ?? 0}, {tDec.origShift?.[1] ?? 0}]pt ➔ [
+                            {tDec.shift?.[0] ?? 0}, {tDec.shift?.[1] ?? 0}]pt
+                          </span>
+                        ) : (
+                          <span className="rounded bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            보류 · 원본 유지 ({tDec.nonMoveCategory || "안전 후보 없음"})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                        <span>엔진: {tDec.selectedEngine}</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {tDec.autoModified
+                        ? tDec.selectionReason
+                        : tDec.holdReason || tDec.selectionReason}
+                    </p>
                   </div>
                 ))}
               </div>
