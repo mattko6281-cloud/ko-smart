@@ -702,8 +702,21 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       : compareCollisionDiagnostics(scene, scene, [], { axisChanged: false, params: P });
     baseResponse.collisionDiagnostics = origDiag;
 
-    // 5) 그림 유형 확인: 반드시 x축과 y축이 모두 식별된 coordinateFunction(plot 함수 그래프)만 지원
-    const fig = classifyFigure(scene);
+    // 5) 그림 유형 확인: 반드시 x축과 y축이 모두 식별된 coordinateFunction(plot 함수 그래프 또는 v0.2.2 축 평행 직선 그래프)만 지원
+    let fig = classifyFigure(scene);
+    if (
+      isV022 &&
+      fig.hasAxes &&
+      fig.type !== "coordinateFunction" &&
+      (scene.nodes || []).some((n) => n.role === "function") &&
+      (scene.strokes || []).some((s) => s.kind !== "axis")
+    ) {
+      fig = {
+        type: "coordinateFunction",
+        hasAxes: true,
+        reason: "x/y 축 식별 + 직선 방정식 라벨 그래프",
+      };
+    }
     baseResponse.figureType = fig;
     if (fig.type !== "coordinateFunction" || !fig.hasAxes) {
       return {
@@ -1184,6 +1197,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         id: p.id,
         label: p.label,
         action: p.action,
+        stroke: p.stroke ?? null,
+        strokeKind: p.strokeKind || null,
+        axisParallelKind: p.axisParallelKind || null,
+        side: p.side || null,
+        end: p.end ?? null,
+        alpha: p.alpha ?? null,
         selectedEngine: p.selectedEngine || (isV022 ? "v0.2.2-beta" : "v0.2.1"),
         agreedEngines: p.agreedEngines || [],
         how: p.how,

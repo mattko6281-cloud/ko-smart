@@ -38,9 +38,17 @@ import {
   selectPreferredEnd,
   evaluateKeep,
   computeShiftForMove,
-   clearanceToStroke,
+  clearanceToStroke,
   bboxGapRect,
 } from "../../../../experiments/smart-label-prototype-v021/src/algorithm.mjs";
+import {
+  extractNumericConstantY,
+  findMatchingHorizontalLineStrokesUnit3C,
+  findMatchingVerticalLineStrokesUnit3C,
+  classifyAxisParallelLineLabelUnit3C,
+  planHorizontalLineLabelUnit3C,
+  planVerticalLineLabelUnit3C,
+} from "./unit3c-axis-lines.mjs";
 
 const EPS = 1e-4;
 const r2 = (n) => (typeof n === "number" && Number.isFinite(n) ? Math.round(n * 100) / 100 : n);
@@ -51,6 +59,7 @@ export const DEFAULT_UNIT2_FLAGS = {
   u2c: true, // pow(base, exp) 파서
   u2d: true, // 지수·로그(ln, \log_b, y=a^x+b) 파싱 및 매칭
   u2e: true, // 삼각함수(sin, cos, tan, deg, r) 및 pi/sqrt 파싱·매칭 + scope clip 반영
+  u3c: true, // Unit 3-C: 수평선(y=상수) 우측 끝(node[right]) 및 수직선(x=상수) 하단/상단 끝 표준 배치
 };
 
 function resolveFlags(flags = {}) {
@@ -1824,6 +1833,46 @@ export function assignStrokesUnit2(scene, targets, flags = DEFAULT_UNIT2_FLAGS) 
         });
         continue;
       }
+
+      // [Unit 3-C] 수치 상수 수평선 방정식(예: y=4, y=6, y=1/4)이 plot 이 아닌 \draw (...) -- (...); 선분으로 그려진 경우
+      const constY = F.u3c ? extractNumericConstantY(numAn) : null;
+      if (constY !== null && Number.isFinite(constY) && scene.units && scene.units.yU) {
+        const hMatches = findMatchingHorizontalLineStrokesUnit3C(scene, constY, claimed);
+        if (hMatches.length === 1) {
+          const st = hMatches[0];
+          const isHorizEquiv = Boolean(numAn.hasFractionOrDivision || /\d+\.\d+|pi/.test(numAn.normalizedExpr || ""));
+          res.set(n.id, {
+            how: isHorizEquiv ? "numeric-equivalent-match" : "expr-match",
+            stroke: st,
+            strokeKind: classifyStrokeKind(st),
+            confirmed: true,
+            uncertain: false,
+            normalizedExpr: `y=${r2(constY)}`,
+            nonMoveCategory: null,
+            nonMoveCode: null,
+            reason: isHorizEquiv
+              ? `수치/기호 상수 수평선 방정식(y=${r2(constY)})이 유일한 수평선 선분(#${st.index})과 일치하여 확정됨`
+              : `수치 수평선 방정식(y=${r2(constY)})이 수평선 선분(#${st.index})과 정확히 일치함`,
+          });
+          claimed.add(st.index);
+          continue;
+        } else if (hMatches.length >= 2) {
+          const st = hMatches[0];
+          res.set(n.id, {
+            how: "ambiguous-numeric-match",
+            stroke: st,
+            strokeKind: classifyStrokeKind(st),
+            confirmed: false,
+            uncertain: true,
+            candidateCount: hMatches.length,
+            candidateStrokes: hMatches.map((s) => s.index),
+            nonMoveCategory: "매칭 불확실",
+            nonMoveCode: "uncertain-match",
+            reason: `동일한 수평선 방정식(y=${r2(constY)})에 대응하는 수평선 선분이 ${hMatches.length}개 존재하여 확정할 수 없음. 자동 이동 차단.`,
+          });
+          continue;
+        }
+      }
     }
 
     // 수치형 수직선 라벨(예: x=-2, x=\frac{1}{2}, x=-\frac{\pi}{2})과 수직선 경로 일치 검사
@@ -1837,9 +1886,11 @@ export function assignStrokesUnit2(scene, targets, flags = DEFAULT_UNIT2_FLAGS) 
           })();
     if (constX !== null && Number.isFinite(constX) && scene.units && scene.units.xU) {
       const xPt = constX * scene.units.xU;
-      const vMatches = strokes.filter(
-        (s) => s.kind !== "axis" && !claimed.has(s.index) && classifyStrokeKind(s) === "verticalLine" && Math.abs(s.pts[0][0] - xPt) <= 1.5
-      );
+      const vMatches = F.u3c
+        ? findMatchingVerticalLineStrokesUnit3C(scene, constX, claimed)
+        : strokes.filter(
+            (s) => s.kind !== "axis" && !claimed.has(s.index) && classifyStrokeKind(s) === "verticalLine" && Math.abs(s.pts[0][0] - xPt) <= 1.5
+          );
       if (vMatches.length === 1) {
         const st = vMatches[0];
         const isVertEquiv = Boolean(numAn.hasFractionOrDivision || /\d+\.\d+|pi/.test(numAn.normalizedExpr || ""));
@@ -2083,6 +2134,64 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       for (const ob of obsBoxes) labelGap = Math.min(labelGap, bboxGapRect(bb, ob));
       return { minOther, own, labelGap };
     };
+
+    // [Unit 3-C] 축 평행 직선 방정식 라벨(수평선 y=상수, 수직선 x=상수) 전용 교재 조판 규칙 적용
+    if (F.u3c && a.confirmed) {
+      const numAn3C = analyzeNumericLabelExpressionUnit2(n.label, F);
+      const structTpl3C = parseLabelStructureTemplateUnit2(n.label, F);
+      const axisParallelInfo = classifyAxisParallelLineLabelUnit3C(n, scene, a, numAn3C, structTpl3C);
+      if (axisParallelInfo) {
+        const axisParallelDecision =
+          axisParallelInfo.axisParallelKind === "horizontalLine"
+            ? planHorizontalLineLabelUnit3C({
+                node: n,
+                stroke: s,
+                assignment: a,
+                evalBox,
+                scene,
+                P,
+              })
+            : planVerticalLineLabelUnit3C({
+                node: n,
+                stroke: s,
+                assignment: a,
+                evalBox,
+                scene,
+                P,
+              });
+
+        if (axisParallelDecision) {
+          plan.placements.push({
+            id: n.id,
+            label: n.label,
+            action: axisParallelDecision.action,
+            reason: axisParallelDecision.reason,
+            stroke: s.index,
+            strokeKind,
+            axisParallelKind: axisParallelInfo.axisParallelKind,
+            how: a.how,
+            confirmedAssignment: !!a.confirmed,
+            uncertainAssignment: !!a.uncertain,
+            assignmentReason: a.reason || null,
+            end: axisParallelDecision.end,
+            preferredEnd: axisParallelDecision.preferredEnd,
+            side: axisParallelDecision.side,
+            alpha: axisParallelDecision.alpha,
+            gapOffset: axisParallelDecision.gapOffset || 0,
+            cost: axisParallelDecision.cost || 0,
+            bbox: axisParallelDecision.bbox,
+            from: n.bbox,
+            eval: axisParallelDecision.eval,
+            keepCheck: axisParallelDecision.keepCheck,
+            candidates: axisParallelDecision.candidates || 1,
+            feasible: axisParallelDecision.feasible || 1,
+          });
+          placedBoxes.push(axisParallelDecision.bbox);
+          addC(axisParallelDecision.bbox);
+          continue;
+        }
+      }
+    }
 
     const e0 = evalBox(n.bbox);
     let keepCheck = evaluateKeep(n.bbox, strokeKind, ends, preferredEnd, e0, P);
