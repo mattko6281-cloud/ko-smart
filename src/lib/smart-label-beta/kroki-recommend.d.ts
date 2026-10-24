@@ -176,6 +176,27 @@ export interface SmartLabelTickDecisionSummary {
   holdReason?: string | null;
 }
 
+export interface SmartLabelOriginDecisionSummary {
+  id: string;
+  label: string;
+  role: "origin";
+  action: "keep" | "move-origin" | "hold-no-safe-quadrant" | "hold-custom-origin-options";
+  nonMoveCode?: string | null;
+  nonMoveCategory?: string | null;
+  autoModified: boolean;
+  selectedEngine?: string;
+  priorityRank?: number;
+  origAnchor: string | null;
+  newAnchor: string | null;
+  origClearancePt?: number;
+  finalClearancePt?: number;
+  origNodeGapPt?: number;
+  finalNodeGapPt?: number;
+  reason: string;
+  selectionReason?: string;
+  holdReason?: string | null;
+}
+
 export interface SmartLabelBetaProposal {
   engineVersion?: SmartLabelEngineVersion;
   algorithmVersion: string;
@@ -200,9 +221,12 @@ export interface SmartLabelBetaProposal {
   fnMovedCount?: number;
   tickMovedCount?: number;
   tickHeldCount?: number;
+  originMovedCount?: number;
+  originHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
   tickDecisions?: SmartLabelTickDecisionSummary[];
+  originDecisions?: SmartLabelOriginDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   preservation: any;

@@ -17,6 +17,7 @@ import {
   planAxes,
   axisEdits,
   shiftEdits,
+  applyEdits,
 } from "../../../../experiments/smart-label-prototype-v021/src/algorithm.mjs";
 import { checkPreservation } from "../../../../experiments/smart-label-prototype-v021/src/recommend.mjs";
 import { minDistPolylines } from "../../../../experiments/smart-label-engine/src/geometry.mjs";
@@ -37,6 +38,10 @@ import {
 import {
   planAxisTickOverlapsUnit3B,
 } from "./unit3b-ticks.mjs";
+import {
+  planOriginNodeUnit3D,
+  parseStandardOriginOptionsUnit3D,
+} from "./unit3d-origin.mjs";
 
 export const ALGORITHM_VERSION_V022 = "proto-0.2.2-beta";
 
@@ -195,7 +200,7 @@ export function buildV022LabelDecisions(scene, plan, shiftResult) {
 }
 
 /**
- * v0.2.2-beta 전용 라벨 배치 및(옵션 시) 축 연장 / Unit 3-B 눈금 겹침 보정 계획 실행기
+ * v0.2.2-beta 전용 라벨 배치 및(옵션 시) 축 연장 / Unit 3-B 눈금 겹침 보정 / Unit 3-D-Origin 원점 배치 계획 실행기
  */
 export function runPlanningV022(
   scene,
@@ -253,9 +258,23 @@ export function runPlanningV022(
     decisionsByNodeId.set(tid, tdec);
   }
 
+  // Unit 3-D-Origin (표준 원점 O 노드 4방향 자동 배치 규칙) 독립 단계 실행
+  const originPlan = planOriginNodeUnit3D(
+    scene,
+    activePlan,
+    activeShift,
+    axisEditsToApply,
+    tickPlan
+  );
+
+  for (const [oid, odec] of originPlan.decisionsByNodeId.entries()) {
+    decisionsByNodeId.set(oid, odec);
+  }
+
   activePlan.labelDecisions = labelDecisions;
   activePlan.decisionsByNodeId = decisionsByNodeId;
   activePlan.tickPlan = tickPlan;
+  activePlan.originPlan = originPlan;
 
   // placements 배열에도 shift 와 selectedEngine 보강
   const shiftById = new Map((activeShift.report || []).map((r) => [r.id, r]));
@@ -280,6 +299,7 @@ export function runPlanningV022(
     axisEditsToApply,
     activeShift,
     tickPlan,
+    originPlan,
     labelDecisions,
     decisionsByNodeId,
   };
@@ -317,13 +337,13 @@ export function compareCollisionDiagnosticsV022(
     (cmpU1.preExistingUnresolvedCollisions || []).map((c) => [c.key, c])
   );
 
-  // decisionsByNodeId 에서 라벨/ID 로 Unit 3-B 눈금 보류 사유 조회 헬퍼
+  // decisionsByNodeId 에서 라벨/ID 로 Unit 3-B 눈금 및 Unit 3-D 원점 보류 사유 조회 헬퍼
   const findDecisionForItem = (item) => {
     if (item.nodeId && decisionsByNodeId.has(item.nodeId)) {
       return decisionsByNodeId.get(item.nodeId);
     }
     for (const dec of decisionsByNodeId.values()) {
-      if (dec && dec.label === item.nodeLabel && dec.tickAxis) {
+      if (dec && dec.label === item.nodeLabel && (dec.tickAxis || dec.role === "origin")) {
         return dec;
       }
     }
@@ -338,6 +358,14 @@ export function compareCollisionDiagnosticsV022(
         ...item,
         status: "pre-existing-unresolved",
         reasonCode: "no-safe-tick-candidate",
+        reason: tickDec.reason,
+      };
+    }
+    if (tickDec && tickDec.nonMoveCode === "no-safe-origin-quadrant") {
+      return {
+        ...item,
+        status: "pre-existing-unresolved",
+        reasonCode: "no-safe-origin-quadrant",
         reason: tickDec.reason,
       };
     }
@@ -411,13 +439,85 @@ export function compareCollisionDiagnosticsV022(
 }
 
 /**
- * 2차 렌더링된 장면(scene)에서 이동된 함수식 라벨들의 충돌 여부를 Unit 2 곡선 매칭 기준으로 검증한다.
+ * v0.2.2-beta 보존 검증기:
+ *  - 기존 checkPreservation 의 모든 불변성(수식, domain, samples, 선분, 마커, 전역 폰트/선 두께, 범위 밖 텍스트)을 검증하며,
+ *  - Unit 3-D-Origin 의 origin-anchor 편집(원점 O 옵션 내 4방향 앵커 토큰만 변경)을 추가로 허용·검증한다.
+ */
+export function checkPreservationV022(orig, rec, edits = []) {
+  const originEdits = (edits || []).filter((e) => e && e.kind === "origin-anchor");
+  if (originEdits.length === 0) {
+    return checkPreservation(orig, rec, edits);
+  }
+
+  const sortedAll = [...edits].sort((a, b) => a.start - b.start);
+  const originIssues = [];
+
+  for (let i = 1; i < sortedAll.length; i++) {
+    if (sortedAll[i].start < sortedAll[i - 1].end) {
+      originIssues.push("편집 범위 겹침 발생");
+    }
+  }
+
+  const normOriginOpts = (s) =>
+    String(s)
+      .replace(/\b(below\s+left|above\s+left|below\s+right|above\s+right)\b/g, "#ANCHOR#")
+      .replace(/[\s,\[\]]/g, "");
+
+  for (const oe of originEdits) {
+    const before = orig.slice(oe.start, oe.end);
+    const after = oe.replacement;
+    const beforeInner = before.replace(/^\s*\[/, "").replace(/\]\s*$/, "");
+    const afterInner = String(after).replace(/^\s*\[/, "").replace(/\]\s*$/, "");
+    const pBefore = parseStandardOriginOptionsUnit3D(beforeInner);
+    const pAfter = parseStandardOriginOptionsUnit3D(afterInner);
+    if (!pBefore.valid || !pAfter.valid || normOriginOpts(before) !== normOriginOpts(after)) {
+      originIssues.push(`원점 O 옵션이 4방향 앵커 외에도 변경됨: ${before} → ${after}`);
+    }
+  }
+
+  const sortedOrigin = [...originEdits].sort((a, b) => a.start - b.start);
+  const origWithOriginApplied = applyEdits(orig, sortedOrigin);
+
+  const nonOriginEditsMapped = (edits || [])
+    .filter((e) => e && e.kind !== "origin-anchor")
+    .map((e) => {
+      let delta = 0;
+      for (const oe of sortedOrigin) {
+        if (oe.end <= e.start) {
+          delta += oe.replacement.length - (oe.end - oe.start);
+        }
+      }
+      return {
+        ...e,
+        start: e.start + delta,
+        end: e.end + delta,
+      };
+    });
+
+  const basePres = checkPreservation(origWithOriginApplied, rec, nonOriginEditsMapped);
+  const allIssues = [...originIssues, ...(basePres.issues || [])];
+
+  return {
+    ok: allIssues.length === 0,
+    issues: allIssues,
+    editCount: edits.length,
+    checks: {
+      ...(basePres.checks || {}),
+      allowedEditSyntaxOnly:
+        Boolean(basePres.checks?.allowedEditSyntaxOnly) && originIssues.length === 0,
+    },
+  };
+}
+
+/**
+ * 2차 렌더링된 장면(scene)에서 이동된 함수식 라벨들 및 이동된 원점 O 노드의 충돌 여부를 검증한다.
  */
 export function verifyRenderedCollisionsV022(
   scene,
   movedFNodeIndices,
   P = PARAMS,
-  flags = DEFAULT_UNIT2_FLAGS
+  flags = DEFAULT_UNIT2_FLAGS,
+  movedOriginNodeIds = []
 ) {
   const fNodes = (scene?.nodes || []).filter((n) => n.role === "function" && n.bbox);
   const assigned = assignStrokesUnit2(scene, fNodes, flags);
@@ -507,6 +607,50 @@ export function verifyRenderedCollisionsV022(
     });
   }
 
+  // Unit 3-D-Origin 으로 이동된 원점 O 노드의 2차 렌더링 충돌 검사
+  if (Array.isArray(movedOriginNodeIds) && movedOriginNodeIds.length > 0) {
+    const renderedOrigins = (scene?.nodes || []).filter((n) => n.role === "origin" && n.bbox);
+    for (const oNode of renderedOrigins) {
+      const poly = [rectPoly(oNode.bbox)];
+      const nonAxisStrokes = (scene?.strokes || []).filter((s) => s.kind !== "axis");
+      const axisStrokes = (scene?.strokes || []).filter((s) => s.kind === "axis");
+      const minStroke = nonAxisStrokes.length
+        ? r2(
+            Math.min(
+              ...nonAxisStrokes.map(
+                (s) => minDistPolylines(poly, [{ pts: s.pts, closed: false }]) - (s.halfWidth || 0.5)
+              )
+            )
+          )
+        : 999;
+      const minAxis = axisStrokes.length
+        ? r2(
+            Math.min(
+              ...axisStrokes.map(
+                (s) => minDistPolylines(poly, [{ pts: s.pts, closed: false }]) - (s.halfWidth || 0.5)
+              )
+            )
+          )
+        : 999;
+      let minGap = Infinity;
+      for (const ob of allBoxes) {
+        if (ob.id === oNode.id) continue;
+        minGap = Math.min(minGap, bboxGapRect(oNode.bbox, ob.bbox));
+      }
+      minGap = Number.isFinite(minGap) ? r2(minGap) : 999;
+
+      if (minStroke < 1.0) {
+        issues.push(`이동된 원점 ${oNode.label} 이(가) 곡선/선분과 너무 가까움(minStroke=${minStroke}pt)`);
+      }
+      if (minAxis < 1.0) {
+        issues.push(`이동된 원점 ${oNode.label} 이(가) 좌표축과 너무 가까움(minAxis=${minAxis}pt)`);
+      }
+      if (minGap < 1.0) {
+        issues.push(`이동된 원점 ${oNode.label} 이(가) 다른 라벨과 너무 가까움(minGap=${minGap}pt)`);
+      }
+    }
+  }
+
   return {
     ok: issues.length === 0,
     issues,
@@ -525,11 +669,12 @@ export function verifyOutputVariantV022({
   candidateBody,
   edits,
   movedFNodeIndices,
+  movedOriginNodeIds = [],
   workRoot,
   P = PARAMS,
   flags = DEFAULT_UNIT2_FLAGS,
 }) {
-  const preservation = checkPreservation(origBody, candidateBody, edits);
+  const preservation = checkPreservationV022(origBody, candidateBody, edits);
   const out = {
     variant,
     editCount: edits.length,
@@ -574,7 +719,13 @@ export function verifyOutputVariantV022({
   }
 
   prepareSceneV022(sc, flags);
-  out.collisionCheck = verifyRenderedCollisionsV022(sc, movedFNodeIndices, P, flags);
+  out.collisionCheck = verifyRenderedCollisionsV022(
+    sc,
+    movedFNodeIndices,
+    P,
+    flags,
+    movedOriginNodeIds
+  );
   if (!out.collisionCheck.ok) {
     out.issues.push(...out.collisionCheck.issues);
     out.revertedToOriginal = true;

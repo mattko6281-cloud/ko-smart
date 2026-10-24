@@ -154,8 +154,8 @@ export function SmartLabelBetaModal({
             >
               {activeEngineVersion === "v0.2.2-beta"
                 ? proposal.unit3BEnabled
-                  ? "v0.2.2 Beta (interim-v1 + Unit 3-B)"
-                  : "v0.2.2 Beta (interim-v1)"
+                  ? "v0.2.2 Beta (interim-v1 + Unit 3-B/3-C/3-D)"
+                  : "v0.2.2 Beta (interim-v1 + Unit 3-C/3-D)"
                 : proposal.algorithmVersion || "proto-0.2.1"}{" "}
               · {proposal.applyAxisRequested ? "label+axes" : "labelOnly"} · verify=true
             </span>
@@ -269,6 +269,9 @@ export function SmartLabelBetaModal({
                 이동 추천: {proposal.movedCount}개 (함수식 {proposal.fnMovedCount ?? proposal.movedCount}개
                 {typeof proposal.tickMovedCount === "number" && proposal.tickMovedCount > 0
                   ? ` · 눈금 ${proposal.tickMovedCount}개`
+                  : ""}
+                {typeof proposal.originMovedCount === "number" && proposal.originMovedCount > 0
+                  ? ` · 원점 O ${proposal.originMovedCount}개`
                   : ""}
                 ) · 원본 유지: {proposal.heldCount}개 · 축 조정:{" "}
                 {proposal.axisOption?.editsCount ?? 0}개 · 2차 검증:{" "}
@@ -662,6 +665,65 @@ export function SmartLabelBetaModal({
                       {tDec.autoModified
                         ? tDec.selectionReason
                         : tDec.holdReason || tDec.selectionReason}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Unit 3-D-Origin: 원점 O 전용 4방향 배치 판단 리포트 */}
+          {proposal.originDecisions && proposal.originDecisions.length > 0 && (
+            <div
+              className="rounded-lg border border-indigo-200 bg-white p-3.5"
+              data-testid="smart-label-origin-decisions"
+            >
+              <h4 className="mb-2.5 text-xs font-bold text-slate-800">
+                🧭 Unit 3-D: 원점 O 4방향 자동 배치 판단 사유 ({proposal.originDecisions.length}개)
+              </h4>
+              <div className="space-y-2">
+                {proposal.originDecisions.map((oDec) => (
+                  <div
+                    key={oDec.id}
+                    data-testid="smart-label-origin-decision-item"
+                    className={`rounded-md border p-2.5 text-xs ${
+                      oDec.autoModified
+                        ? "border-emerald-200 bg-emerald-50/40"
+                        : oDec.action === "hold-no-safe-quadrant"
+                        ? "border-amber-300 bg-amber-50/50"
+                        : "border-slate-200 bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <code className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] font-mono text-white">
+                          {oDec.label}
+                        </code>
+                        <span className="rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800">
+                          원점 (0,0)
+                        </span>
+                        {oDec.autoModified ? (
+                          <span className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            방향 변경: [{oDec.origAnchor}] ➔ [{oDec.newAnchor}] ({oDec.priorityRank}순위)
+                          </span>
+                        ) : oDec.action === "hold-no-safe-quadrant" ? (
+                          <span className="rounded bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            보류 · 원본 유지 ({oDec.nonMoveCategory || "안전 사분면 없음"})
+                          </span>
+                        ) : (
+                          <span className="rounded bg-slate-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            원본 유지 ({oDec.origAnchor || oDec.nonMoveCategory || "무충돌"})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                        <span>엔진: {oDec.selectedEngine}</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {oDec.autoModified
+                        ? oDec.selectionReason
+                        : oDec.holdReason || oDec.selectionReason}
                     </p>
                   </div>
                 ))}

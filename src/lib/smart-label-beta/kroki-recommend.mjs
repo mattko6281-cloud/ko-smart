@@ -34,6 +34,7 @@ import {
   prepareSceneV022,
   runPlanningV022,
   compareCollisionDiagnosticsV022,
+  checkPreservationV022,
   verifyOutputVariantV022,
 } from "./v022/v022-adapter.mjs";
 
@@ -534,7 +535,7 @@ export function acquireUserExecutionSlot(userKey = DEVELOPER_BETA_EMAIL) {
  * - engineVersion:
  *    * "v0.2.1" (기본 선택): 기존 v0.2.1 의 buildScene, classifyFigure, planLabelsMultiEngine, shiftEdits,
  *      planAxes, axisEdits, applyEdits, checkPreservation, verifyOutputVariant 를 수정 없이 그대로 사용한다.
- *    * "v0.2.2-beta" (개선 베타): 동결 검증된 interim-v1(Unit 1 + Unit 2/2+ + Unit 3-A)을 실행한다.
+ *    * "v0.2.2-beta" (개선 베타): 동결 검증된 interim-v1(Unit 1 + Unit 2/2+ + Unit 3-A + Unit 3-B + Unit 3-C + Unit 3-D)을 실행한다.
  * - 축 길이 조정 옵션(applyAxis)은 기본 OFF(false)이며, ON일 때도 길이 연장만 수행하고
  *   2차 Kroki 렌더링 및 x, y, O·일반 노드·곡선 충돌 검증을 통과해야만 적용이 허용된다.
  * - 원본부터 존재하던 미해결 겹침과 새로 발생한 겹침을 분리하여 collisionDiagnostics에 기록한다.
@@ -594,9 +595,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     fnMovedCount: 0,
     tickMovedCount: 0,
     tickHeldCount: 0,
+    originMovedCount: 0,
+    originHeldCount: 0,
     heldCount: 0,
     labelDecisions: [],
     tickDecisions: [],
+    originDecisions: [],
     placements: [],
     shiftReport: [],
     preservation: null,
@@ -702,19 +706,19 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       : compareCollisionDiagnostics(scene, scene, [], { axisChanged: false, params: P });
     baseResponse.collisionDiagnostics = origDiag;
 
-    // 5) 그림 유형 확인: 반드시 x축과 y축이 모두 식별된 coordinateFunction(plot 함수 그래프 또는 v0.2.2 축 평행 직선 그래프)만 지원
+    // 5) 그림 유형 확인: 반드시 x축과 y축이 모두 식별된 coordinateFunction(plot 함수 그래프 또는 v0.2.2 축 평행 직선/원점 그래프)만 지원
     let fig = classifyFigure(scene);
     if (
       isV022 &&
       fig.hasAxes &&
       fig.type !== "coordinateFunction" &&
-      (scene.nodes || []).some((n) => n.role === "function") &&
+      (scene.nodes || []).some((n) => n.role === "function" || n.role === "origin") &&
       (scene.strokes || []).some((s) => s.kind !== "axis")
     ) {
       fig = {
         type: "coordinateFunction",
         hasAxes: true,
-        reason: "x/y 축 식별 + 직선 방정식 라벨 그래프",
+        reason: "x/y 축 식별 + 직선 방정식 라벨/원점 그래프",
       };
     }
     baseResponse.figureType = fig;
@@ -737,6 +741,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     let axisEditsToApply = [];
     let activeShift;
     let tickPlan = { edits: [], movedTicks: [], heldTicks: [], decisions: [] };
+    let originPlan = { edits: [], movedOrigins: [], heldOrigins: [], decisions: [] };
     let decisionsByNodeId = new Map();
 
     if (isV022) {
@@ -746,8 +751,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       axisEditsToApply = v022Plan.axisEditsToApply;
       activeShift = v022Plan.activeShift;
       tickPlan = v022Plan.tickPlan || tickPlan;
+      originPlan = v022Plan.originPlan || originPlan;
       decisionsByNodeId = v022Plan.decisionsByNodeId;
-      // decisionsByNodeId 를 반영하여 원본 진단 사유(Unit 1 4대 미이동 사유 + Unit 3-A + Unit 3-B) 갱신
+      // decisionsByNodeId 를 반영하여 원본 진단 사유(Unit 1 4대 미이동 사유 + Unit 3-A + Unit 3-B + Unit 3-D) 갱신
       origDiag = compareCollisionDiagnosticsV022(scene, scene, [], {
         axisChanged: false,
         params: P,
@@ -786,7 +792,13 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
 
     const labelEditsOnEffective = activeShift.edits;
     const tickEditsOnEffective = tickPlan.edits || [];
-    const editsToApply = [...labelEditsOnEffective, ...tickEditsOnEffective, ...axisEditsToApply];
+    const originEditsOnEffective = originPlan.edits || [];
+    const editsToApply = [
+      ...labelEditsOnEffective,
+      ...tickEditsOnEffective,
+      ...originEditsOnEffective,
+      ...axisEditsToApply,
+    ];
 
     const xAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-x");
     const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
@@ -934,9 +946,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         fnMovedCount: 0,
         tickMovedCount: 0,
         tickHeldCount: (tickPlan.heldTicks || []).length,
+        originMovedCount: 0,
+        originHeldCount: (originPlan.heldOrigins || []).length,
         heldCount: decisions0.length,
         labelDecisions: decisions0,
         tickDecisions: tickPlan.decisions || [],
+        originDecisions: originPlan.decisions || [],
         placements: activePlan.placements || [],
         shiftReport: activeShift.report || [],
         preservation: preservation0,
@@ -945,7 +960,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     }
 
     // 7) 1차 보존 검사 (수식, domain, samples, 선분, 점 마커, 전역 폰트·선 두께 불변 확인)
-    const prePreservation = checkPreservation(effectiveBody, candEffectiveBody, editsToApply);
+    const prePreservation = isV022
+      ? checkPreservationV022(effectiveBody, candEffectiveBody, editsToApply)
+      : checkPreservation(effectiveBody, candEffectiveBody, editsToApply);
     if (!prePreservation.ok) {
       if (anyAxisChanged) {
         axisOptionInfo.status = "blocked-unsafe";
@@ -1003,7 +1020,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       .filter((p) => p.action === "move")
       .map((p) => p.id);
     const movedTickNodeIds = (tickPlan.movedTicks || []).map((t) => t.id);
-    const movedNodeIds = [...movedFnNodeIds, ...movedTickNodeIds];
+    const movedOriginNodeIds = (originPlan.movedOrigins || []).map((o) => o.id);
+    const movedNodeIds = [...movedFnNodeIds, ...movedTickNodeIds, ...movedOriginNodeIds];
     const movedFNodeIndices = movedFnNodeIds
       .map((id) => origFNodes.findIndex((q) => q.id === id))
       .filter((idx) => idx >= 0);
@@ -1016,6 +1034,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           candidateBody: candEffectiveBody,
           edits: editsToApply,
           movedFNodeIndices,
+          movedOriginNodeIds,
           workRoot: tempWorkRoot,
           P,
         })
@@ -1113,7 +1132,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         end: e.end - headerDelta,
       }));
       finalBody = applyEdits(rawBody, rawEdits);
-      const rawPreservation = checkPreservation(rawBody, finalBody, rawEdits);
+      const rawPreservation = isV022
+        ? checkPreservationV022(rawBody, finalBody, rawEdits)
+        : checkPreservation(rawBody, finalBody, rawEdits);
       if (!rawPreservation.ok) {
         return {
           ...baseResponse,
@@ -1160,12 +1181,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     const fnMovedCount = decisions.filter((d) => d.autoModified).length;
     const tickMovedCount = (tickPlan.movedTicks || []).length;
     const tickHeldCount = (tickPlan.heldTicks || []).length;
-    const movedCount = fnMovedCount + tickMovedCount;
+    const originMovedCount = (originPlan.movedOrigins || []).length;
+    const originHeldCount = (originPlan.heldOrigins || []).length;
+    const movedCount = fnMovedCount + tickMovedCount + originMovedCount;
     const heldCount = decisions.length - fnMovedCount;
 
     const actionParts = [];
     if (fnMovedCount > 0) actionParts.push(`함수식 라벨 ${fnMovedCount}개 추천 위치`);
     if (tickMovedCount > 0) actionParts.push(`축 눈금 숫자 ${tickMovedCount}개 겹침 자동 조정(Unit 3-B)`);
+    if (originMovedCount > 0) actionParts.push(`원점 O ${originMovedCount}개 4방향 자동 배치(Unit 3-D)`);
     if (anyAxisChanged) actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
     let successMsg = `${actionParts.join(" 및 ")}이(가) 2차 렌더링 및 안전성 검증을 통과했습니다.`;
 
@@ -1190,9 +1214,12 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       fnMovedCount,
       tickMovedCount,
       tickHeldCount,
+      originMovedCount,
+      originHeldCount,
       heldCount,
       labelDecisions: decisions,
       tickDecisions: tickPlan.decisions || [],
+      originDecisions: originPlan.decisions || [],
       placements: (activePlan.placements || []).map((p) => ({
         id: p.id,
         label: p.label,
