@@ -207,7 +207,8 @@ export function runPlanningV022(
   P = PARAMS,
   applyAxisRequested = false,
   flags = DEFAULT_UNIT2_FLAGS,
-  enableUnit3B = false
+  enableUnit3B = false,
+  enableUnit3D = true
 ) {
   const plan0 = planLabelsUnit2(scene, P, null, flags);
   let activePlan = plan0;
@@ -258,14 +259,27 @@ export function runPlanningV022(
     decisionsByNodeId.set(tid, tdec);
   }
 
+  const shouldRunUnit3D =
+    enableUnit3D !== false &&
+    flags?.enableOriginPlacement !== false &&
+    flags?.u3d !== false;
+
   // Unit 3-D-Origin (표준 원점 O 노드 4방향 자동 배치 규칙) 독립 단계 실행
-  const originPlan = planOriginNodeUnit3D(
-    scene,
-    activePlan,
-    activeShift,
-    axisEditsToApply,
-    tickPlan
-  );
+  const originPlan = shouldRunUnit3D
+    ? planOriginNodeUnit3D(
+        scene,
+        activePlan,
+        activeShift,
+        axisEditsToApply,
+        tickPlan
+      )
+    : {
+        edits: [],
+        movedOrigins: [],
+        heldOrigins: [],
+        decisions: [],
+        decisionsByNodeId: new Map(),
+      };
 
   for (const [oid, odec] of originPlan.decisionsByNodeId.entries()) {
     decisionsByNodeId.set(oid, odec);

@@ -22,6 +22,10 @@ export function isUnit3BServerEnabled(opts?: {
   env?: Record<string, string | undefined>;
 }): { enabled: boolean; reason: string };
 
+export function isUnit3DServerEnabled(opts?: {
+  env?: Record<string, string | undefined>;
+}): { enabled: boolean; reason: string };
+
 export function verifyDeveloperSession(
   session: any,
   opts?: { env?: Record<string, string | undefined> }
@@ -204,6 +208,10 @@ export interface SmartLabelBetaProposal {
   unit3BEnabled?: boolean;
   unit3BServerEnabled?: boolean;
   unit3BDisabledReason?: string | null;
+  enableUnit3DRequested?: boolean;
+  unit3DEnabled?: boolean;
+  unit3DServerEnabled?: boolean;
+  unit3DDisabledReason?: string | null;
   ok: boolean;
   status: "recommended" | "unchanged" | "unsupported" | "reverted" | "failed";
   reasonCode: string | null;
@@ -259,6 +267,7 @@ export function recommendSmartLabelBeta(
     applyAxis?: boolean;
     engineVersion?: SmartLabelEngineVersion;
     enableUnit3B?: boolean;
+    enableUnit3D?: boolean;
   }
 ): Promise<SmartLabelBetaProposal>;
 

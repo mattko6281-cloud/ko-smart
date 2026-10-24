@@ -161,6 +161,28 @@ export function isUnit3BServerEnabled(opts = {}) {
 }
 
 /**
+ * Unit 3-D-Origin(표준 원점 O 4방향 자동 배치) 기능의 서버 측 활성화 여부를 확인한다.
+ * - 환경변수 SMART_LABEL_DISABLE_UNIT3D 가 정확히 "true" 이면 Unit 3-D 만 비활성화(기존 함수식·축·눈금 정렬은 정상 유지)
+ * - "false" 또는 미설정이면 Unit 3-D 정상 작동(기본값 ON)
+ * @param {{env?: Record<string, string|undefined>}} [opts]
+ */
+export function isUnit3DServerEnabled(opts = {}) {
+  const env = opts.env || process.env;
+  const rawDisable =
+    typeof env?.SMART_LABEL_DISABLE_UNIT3D === "string"
+      ? env.SMART_LABEL_DISABLE_UNIT3D.trim()
+      : "";
+  if (rawDisable === "true") {
+    return {
+      enabled: false,
+      reason:
+        "서버 설정(SMART_LABEL_DISABLE_UNIT3D=true)에 의해 Unit 3-D 원점 O 자동 배치가 비활성화되었습니다. (함수식 및 눈금 라벨 정렬은 정상 작동)",
+    };
+  }
+  return { enabled: true, reason: "Unit 3-D 활성화 가능" };
+}
+
+/**
  * NextAuth 서버 세션 객체를 검증하여 개발자(developer) 또는 지정된 파일럿 팀원(pilot) 권한을 판정한다.
  * - 개발자(mattko6281@gmail.com): role="developer", 엔진 선택 가능(기본 v0.2.1), Unit 3-B 기본 ON
  * - 파일럿 팀원(SMART_LABEL_PILOT_EMAILS 에 명시된 계정): role="pilot", 엔진 v0.2.2-beta 고정, Unit 3-B 기본 OFF, 축 조정 기본 OFF
@@ -559,6 +581,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
   const unit3BServerStatus = isUnit3BServerEnabled({ env: opts.env });
   const enableUnit3BRequested = isV022 && Boolean(opts.enableUnit3B === true);
   const enableUnit3B = enableUnit3BRequested && unit3BServerStatus.enabled;
+  const unit3DServerStatus = isUnit3DServerEnabled({ env: opts.env });
+  const enableUnit3DRequested = isV022 && opts.enableUnit3D !== false;
+  const enableUnit3D = enableUnit3DRequested && unit3DServerStatus.enabled;
 
   const baseResponse = {
     engineVersion,
@@ -567,6 +592,10 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     unit3BEnabled: enableUnit3B,
     unit3BServerEnabled: unit3BServerStatus.enabled,
     unit3BDisabledReason: unit3BServerStatus.enabled ? null : unit3BServerStatus.reason,
+    enableUnit3DRequested,
+    unit3DEnabled: enableUnit3D,
+    unit3DServerEnabled: unit3DServerStatus.enabled,
+    unit3DDisabledReason: unit3DServerStatus.enabled ? null : unit3DServerStatus.reason,
     ok: false,
     status: "failed",
     reasonCode: null,
@@ -712,7 +741,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       isV022 &&
       fig.hasAxes &&
       fig.type !== "coordinateFunction" &&
-      (scene.nodes || []).some((n) => n.role === "function" || n.role === "origin") &&
+      (scene.nodes || []).some(
+        (n) => n.role === "function" || (enableUnit3D && n.role === "origin")
+      ) &&
       (scene.strokes || []).some((s) => s.kind !== "axis")
     ) {
       fig = {
@@ -745,7 +776,14 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     let decisionsByNodeId = new Map();
 
     if (isV022) {
-      const v022Plan = runPlanningV022(scene, P, applyAxisRequested, undefined, enableUnit3B);
+      const v022Plan = runPlanningV022(
+        scene,
+        P,
+        applyAxisRequested,
+        { enableOriginPlacement: enableUnit3D },
+        enableUnit3B,
+        enableUnit3D
+      );
       activePlan = v022Plan.activePlan;
       axisPlan = v022Plan.axisPlan;
       axisEditsToApply = v022Plan.axisEditsToApply;
@@ -1296,6 +1334,7 @@ export async function handleSmartLabelGet(deps) {
 
   const serverFlag = isSmartLabelBetaServerEnabled({ env: deps.env });
   const unit3BFlag = isUnit3BServerEnabled({ env: deps.env });
+  const unit3DFlag = isUnit3DServerEnabled({ env: deps.env });
   const isDeveloper = authCheck.role === "developer";
   return {
     httpStatus: 200,
@@ -1314,6 +1353,8 @@ export async function handleSmartLabelGet(deps) {
       defaultApplyAxis: false,
       unit3BServerEnabled: unit3BFlag.enabled,
       unit3BDisabledReason: unit3BFlag.enabled ? null : unit3BFlag.reason,
+      unit3DServerEnabled: unit3DFlag.enabled,
+      unit3DDisabledReason: unit3DFlag.enabled ? null : unit3DFlag.reason,
     },
   };
 }
