@@ -42,6 +42,271 @@ import {
   planOriginNodeUnit3D,
   parseStandardOriginOptionsUnit3D,
 } from "./unit3d-origin.mjs";
+import { maskComments } from "../../../../experiments/smart-label-engine/src/tikz-nodes.mjs";
+import { compileExpr } from "../../../../experiments/smart-label-prototype/src/expr.mjs";
+
+export const AXIS_4DIR_PARAMS_V022 = {
+  posRightMarginPt: 16.0,
+  posTopMarginPt: 18.5,
+  negTargetMarginPt: 12.0,
+  negNearNodeMarginPt: 4.0,
+  negUnclippedPlotTriggerGapPt: 6.5,
+  negNodeNearTriggerGapPt: 3.5,
+  negNodeNearAxisBandPt: 30.0,
+  clipBoundaryTolPt: 2.5,
+};
+
+function evalTikzCoordV022(raw) {
+  const s = String(raw || "").trim().replace(/^\{+|\}+$/g, "").trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (Number.isFinite(n)) return n;
+  const fn = compileExpr(s);
+  if (!fn) return null;
+  const v = fn(0);
+  return Number.isFinite(v) ? v : null;
+}
+
+export function extractClipRectanglesPt(body, units) {
+  if (!body || !units || !units.xU || !units.yU) return [];
+  const { xU, yU } = units;
+  const masked = maskComments(String(body));
+  const clipRe = /\\clip\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)\s*rectangle\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)\s*;/g;
+  const rects = [];
+  for (const m of masked.matchAll(clipRe)) {
+    const cx0 = evalTikzCoordV022(m[1]);
+    const cy0 = evalTikzCoordV022(m[2]);
+    const cx1 = evalTikzCoordV022(m[3]);
+    const cy1 = evalTikzCoordV022(m[4]);
+    if (cx0 !== null && cy0 !== null && cx1 !== null && cy1 !== null) {
+      rects.push({
+        math: {
+          x0: Math.min(cx0, cx1),
+          y0: Math.min(cy0, cy1),
+          x1: Math.max(cx0, cx1),
+          y1: Math.max(cy0, cy1),
+        },
+        pt: {
+          x0: Math.min(cx0, cx1) * xU,
+          y0: Math.min(cy0, cy1) * yU,
+          x1: Math.max(cx0, cx1) * xU,
+          y1: Math.max(cy0, cy1) * yU,
+        },
+      });
+    }
+  }
+  return rects;
+}
+
+export function planAxesV022(scene, plan, P = PARAMS, opts = {}) {
+  const out = { x: null, y: null, content: null, notes: [], diagnostics: null };
+  if (!scene?.axes?.x || !scene?.axes?.y) {
+    out.notes.push("x/y 축을 모두 식별하지 못해 축 길이 추천 생략");
+    return out;
+  }
+
+  const { xU, yU } = scene.units;
+  const ax = scene.axes.x;
+  const ay = scene.axes.y;
+  const xl = Math.min(ax.from, ax.to) * xU;
+  const xr = Math.max(ax.from, ax.to) * xU;
+  const yb = Math.min(ay.from, ay.to) * yU;
+  const yt = Math.max(ay.from, ay.to) * yU;
+
+  const AP = { ...AXIS_4DIR_PARAMS_V022, ...(opts.axis4DirParams || {}) };
+  const ign = P.axisIgnoreEndWithin ?? 1.5;
+  const mRight = P.margins?.right ?? AP.posRightMarginPt;
+  const mTop = P.margins?.top ?? AP.posTopMarginPt;
+  const mNegTarget = AP.negTargetMarginPt;
+  const mNegNearNode = AP.negNearNodeMarginPt;
+
+  const clipRects = extractClipRectanglesPt(scene.body, scene.units);
+  const isClippedAtLeft = (xPt) =>
+    clipRects.some(
+      (c) =>
+        Math.abs(c.pt.x0 - xl) <= AP.clipBoundaryTolPt ||
+        (Math.abs(xPt - c.pt.x0) <= AP.clipBoundaryTolPt && c.pt.x0 >= xl - AP.clipBoundaryTolPt)
+    );
+  const isClippedAtBottom = (yPt) =>
+    clipRects.some(
+      (c) =>
+        Math.abs(c.pt.y0 - yb) <= AP.clipBoundaryTolPt ||
+        (Math.abs(yPt - c.pt.y0) <= AP.clipBoundaryTolPt && c.pt.y0 >= yb - AP.clipBoundaryTolPt)
+    );
+
+  let C = null;
+  const addC = (x0, y0, x1, y1) => {
+    C = C
+      ? {
+          x0: Math.min(C.x0, x0),
+          y0: Math.min(C.y0, y0),
+          x1: Math.max(C.x1, x1),
+          y1: Math.max(C.y1, y1),
+        }
+      : { x0, y0, x1, y1 };
+  };
+
+  const nearEnd = { right: false, left: false, top: false, bottom: false };
+  let strokeNeedRight = xr;
+  let strokeNeedTop = yt;
+  let strokeNeedLeft = xl;
+  let strokeNeedBottom = yb;
+
+  for (const s of scene.strokes || []) {
+    if (!s || s.kind === "axis" || !Array.isArray(s.pts) || s.pts.length === 0) continue;
+    let sx0 = Infinity;
+    let sy0 = Infinity;
+    let sx1 = -Infinity;
+    let sy1 = -Infinity;
+    for (const p of s.pts) {
+      addC(p[0], p[1], p[0], p[1]);
+      if (p[0] < sx0) sx0 = p[0];
+      if (p[0] > sx1) sx1 = p[0];
+      if (p[1] < sy0) sy0 = p[1];
+      if (p[1] > sy1) sy1 = p[1];
+    }
+
+    const p0 = s.pts[0];
+    const p1 = s.pts[s.pts.length - 1];
+    const touchesRight = Math.abs(p0[0] - xr) <= ign || Math.abs(p1[0] - xr) <= ign;
+    const touchesLeft = Math.abs(p0[0] - xl) <= ign || Math.abs(p1[0] - xl) <= ign;
+    const touchesTop = Math.abs(p0[1] - yt) <= ign || Math.abs(p1[1] - yt) <= ign;
+    const touchesBottom = Math.abs(p0[1] - yb) <= ign || Math.abs(p1[1] - yb) <= ign;
+
+    if (touchesRight) nearEnd.right = true;
+    if (touchesLeft) nearEnd.left = true;
+    if (touchesTop) nearEnd.top = true;
+    if (touchesBottom) nearEnd.bottom = true;
+
+    if (!touchesRight || sx1 > xr + ign) {
+      strokeNeedRight = Math.max(strokeNeedRight, sx1 + mRight);
+    }
+    if (!touchesTop || sy1 > yt + ign) {
+      strokeNeedTop = Math.max(strokeNeedTop, sy1 + mTop);
+    }
+
+    const isPlot = Boolean(s.stmt && (s.stmt.type === "plot" || s.stmt.isPlot));
+    const gapLeftPt = sx0 - xl;
+    if (gapLeftPt < -0.5) {
+      const marginL = gapLeftPt < -ign ? (P.margins?.left ?? mNegTarget) : mNegTarget;
+      strokeNeedLeft = Math.min(strokeNeedLeft, sx0 - marginL);
+    } else if (
+      isPlot &&
+      gapLeftPt < AP.negUnclippedPlotTriggerGapPt &&
+      !isClippedAtLeft(sx0)
+    ) {
+      strokeNeedLeft = Math.min(strokeNeedLeft, sx0 - mNegTarget);
+    }
+
+    const gapBottomPt = sy0 - yb;
+    if (gapBottomPt < -0.5) {
+      strokeNeedBottom = Math.min(strokeNeedBottom, sy0 - mNegTarget);
+    } else if (
+      isPlot &&
+      gapBottomPt < AP.negUnclippedPlotTriggerGapPt &&
+      !isClippedAtBottom(sy0)
+    ) {
+      strokeNeedBottom = Math.min(strokeNeedBottom, sy0 - mNegTarget);
+    }
+  }
+
+  const placedById = new Map((plan?.placements || []).map((p) => [p.id, p]));
+  const tickMoveById = new Map((opts.tickMoves || []).map((t) => [t.id, t]));
+  let nodeNeedRight = xr;
+  let nodeNeedTop = yt;
+  let nodeNeedLeft = xl;
+  let nodeNeedBottom = yb;
+
+  for (const n of scene.nodes || []) {
+    if (!n.bbox || ["axisLabel", "origin", "marker"].includes(n.role)) continue;
+    const pl = placedById.get(n.id);
+    const tk = tickMoveById.get(n.id);
+    const b =
+      pl && pl.action === "move" && pl.bbox
+        ? pl.bbox
+        : tk && tk.newBBox
+        ? tk.newBBox
+        : n.bbox;
+    addC(b.x0, b.y0, b.x1, b.y1);
+
+    nodeNeedRight = Math.max(nodeNeedRight, b.x1 + mRight);
+    nodeNeedTop = Math.max(nodeNeedTop, b.y1 + mTop);
+
+    const nodeGapLeftPt = b.x0 - xl;
+    const nearXAxis = b.y0 <= 8.0 && b.y1 >= -8.0;
+    if (nodeGapLeftPt < 0) {
+      nodeNeedLeft = Math.min(nodeNeedLeft, b.x0 - mNegTarget);
+    } else if (nearXAxis && nodeGapLeftPt < AP.negNodeNearTriggerGapPt) {
+      nodeNeedLeft = Math.min(nodeNeedLeft, b.x0 - mNegNearNode);
+    }
+
+    const nodeGapBottomPt = b.y0 - yb;
+    if (nodeGapBottomPt < 0) {
+      nodeNeedBottom = Math.min(nodeNeedBottom, b.y0 - mNegTarget);
+    } else if (nodeGapBottomPt < AP.negNodeNearTriggerGapPt) {
+      nodeNeedBottom = Math.min(nodeNeedBottom, b.y0 - mNegNearNode);
+    }
+  }
+
+  out.content = C;
+  if (!C) {
+    out.x = { old: [ax.from, ax.to], new: [ax.from, ax.to], nearEnd };
+    out.y = { old: [ay.from, ay.to], new: [ay.from, ay.to] };
+    out.xStmt = ax.stmt;
+    out.yStmt = ay.stmt;
+    return out;
+  }
+
+  const R = Math.max(xr, strokeNeedRight, nodeNeedRight);
+  const T = Math.max(yt, strokeNeedTop, nodeNeedTop);
+  const L = Math.min(xl, strokeNeedLeft, nodeNeedLeft);
+  const B = Math.min(yb, strokeNeedBottom, nodeNeedBottom);
+
+  const u1 = (v) => Math.round(v * 10) / 10;
+  const fwdX = ax.from <= ax.to;
+  const fwdY = ay.from <= ay.to;
+  const pickPos = (oldU, newPt, unit, same) => (same ? oldU : Math.max(oldU, u1(newPt / unit)));
+  const pickNeg = (oldU, newPt, unit, same) => (same ? oldU : Math.min(oldU, u1(newPt / unit)));
+
+  const xLeftU = pickNeg(fwdX ? ax.from : ax.to, L, xU, Math.abs(L - xl) < 1e-6);
+  const xRightU = pickPos(fwdX ? ax.to : ax.from, R, xU, Math.abs(R - xr) < 1e-6);
+  const yBotU = pickNeg(fwdY ? ay.from : ay.to, B, yU, Math.abs(B - yb) < 1e-6);
+  const yTopU = pickPos(fwdY ? ay.to : ay.from, T, yU, Math.abs(T - yt) < 1e-6);
+
+  out.x = {
+    old: [ax.from, ax.to],
+    new: fwdX ? [xLeftU, xRightU] : [xRightU, xLeftU],
+    nearEnd,
+  };
+  out.y = {
+    old: [ay.from, ay.to],
+    new: fwdY ? [yBotU, yTopU] : [yTopU, yBotU],
+  };
+  out.xStmt = ax.stmt;
+  out.yStmt = ay.stmt;
+  out.margins = {
+    right: mRight,
+    top: mTop,
+    left: mNegTarget,
+    bottom: mNegTarget,
+  };
+  out.diagnostics = {
+    clipRectsCount: clipRects.length,
+    strokeNeedMath: {
+      left: u1(strokeNeedLeft / xU),
+      right: u1(strokeNeedRight / xU),
+      bottom: u1(strokeNeedBottom / yU),
+      top: u1(strokeNeedTop / yU),
+    },
+    nodeNeedMath: {
+      left: u1(nodeNeedLeft / xU),
+      right: u1(nodeNeedRight / xU),
+      bottom: u1(nodeNeedBottom / yU),
+      top: u1(nodeNeedTop / yU),
+    },
+  };
+  return out;
+}
 
 export const ALGORITHM_VERSION_V022 = "proto-0.2.2-beta";
 
@@ -212,28 +477,13 @@ export function runPlanningV022(
 ) {
   const plan0 = planLabelsUnit2(scene, P, null, flags);
   let activePlan = plan0;
-  let axisPlan = planAxes(scene, plan0, P);
+  let axisPlan = planAxesV022(scene, activePlan, P);
   let axisEditsToApply = [];
 
   if (applyAxisRequested) {
-    let iters = 1;
-    const sig = (p) =>
-      JSON.stringify((p.placements || []).map((q) => [q.id, q.action, q.end, q.side, q.alpha]));
-    while (iters < 3 && axisPlan.x && axisPlan.y) {
-      const { xU, yU } = scene.units;
-      const override = {
-        left: Math.min(...axisPlan.x.new) * xU,
-        right: Math.max(...axisPlan.x.new) * xU,
-        bottom: Math.min(...axisPlan.y.new) * yU,
-        top: Math.max(...axisPlan.y.new) * yU,
-      };
-      const next = planLabelsUnit2(scene, P, override, flags);
-      iters++;
-      const same = sig(next) === sig(activePlan);
-      activePlan = next;
-      axisPlan = planAxes(scene, activePlan, P);
-      if (same) break;
-    }
+    // [공동 최적화]: 이미 늘어난 축을 다시 줄이는 방식이 아니라,
+    // 항상 동일한 원본 TikZ의 축 끝 좌표를 기준으로 각 라벨 후보의 필요 축 연장량과 연장 축 충돌 여부를
+    // planLabelsUnit2 내부에서 공동 평가하여 최종 후보를 선택한 뒤, 그 결과에 대해서만 축 연장을 1회 적용한다.
     axisEditsToApply = axisEdits(scene, axisPlan);
   }
 
@@ -257,6 +507,13 @@ export function runPlanningV022(
 
   for (const [tid, tdec] of tickPlan.decisionsByNodeId.entries()) {
     decisionsByNodeId.set(tid, tdec);
+  }
+
+  if (tickPlan.movedTicks && tickPlan.movedTicks.length > 0) {
+    axisPlan = planAxesV022(scene, activePlan, P, { tickMoves: tickPlan.movedTicks });
+    if (applyAxisRequested) {
+      axisEditsToApply = axisEdits(scene, axisPlan);
+    }
   }
 
   const shouldRunUnit3D =

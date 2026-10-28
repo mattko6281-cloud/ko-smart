@@ -60,6 +60,7 @@ export const DEFAULT_UNIT2_FLAGS = {
   u2d: true, // 지수·로그(ln, \log_b, y=a^x+b) 파싱 및 매칭
   u2e: true, // 삼각함수(sin, cos, tan, deg, r) 및 pi/sqrt 파싱·매칭 + scope clip 반영
   u3c: true, // Unit 3-C: 수평선(y=상수) 우측 끝(node[right]) 및 수직선(x=상수) 하단/상단 끝 표준 배치
+  enableJointAxisOpt: true, // 함수식 라벨 배치와 축 길이 연장량의 공동 최적화
 };
 
 function resolveFlags(flags = {}) {
@@ -1019,22 +1020,36 @@ export function parseLabelStructureTemplateUnit2(rawLabel, flags = DEFAULT_UNIT2
   if (F.u2d) {
     const NUM = String.raw`(?:\d+\.?\d*|\.\d+)`;
     const SYM = String.raw`[a-zA-Z]`;
-    // 형태 A: y = (base)^(x 또는 x±p) ± q (예: y=2^x+b, y=a^x+b, y=(0.5)^x+k)
+    // 형태 A: y = (base)^(x, -x, mx, mx±p) ± q (예: y=2^x+b, y=2^{-x}+b, y=a^{-x}+b, y=(0.5)^x+k)
     const mExp = new RegExp(
-      String.raw`^(?:([-+]?(?:${NUM}|${SYM}))\*)?\(?(${NUM}|${SYM})\)?\^\(?x(?:([-+])(${NUM}|${SYM}))?\)?(?:([-+])(${NUM}|${SYM}))?$`
+      String.raw`^(?:([-+]?(?:${NUM}|${SYM}))\*)?\(?(${NUM}|${SYM})\)?\^\(?([-+]?(?:${NUM}\*)?)x(?:([-+])(${NUM}|${SYM}))?\)?(?:([-+])(${NUM}|${SYM}))?$`
     ).exec(rhs);
     if (mExp) {
       const coefRaw = mExp[1] || "";
       const baseRaw = mExp[2];
-      const shiftSign = mExp[3] || null;
-      const shiftRaw = mExp[4] || null;
-      const constSign = mExp[5] || null;
-      const constRaw = mExp[6] || null;
+      const expSlopeRaw = mExp[3] || "";
+      const shiftSign = mExp[4] || null;
+      const shiftRaw = mExp[5] || null;
+      const constSign = mExp[6] || null;
+      const constRaw = mExp[7] || null;
 
       const isNumericBase = /^(?:\d+\.?\d*|\.\d+)$/.test(baseRaw);
       const fixedBase = isNumericBase ? Number(baseRaw) : null;
       // 지수함수 밑 조건: a > 0 && a != 1
       if (fixedBase !== null && !(fixedBase > 0 && Math.abs(fixedBase - 1) > 1e-9)) {
+        return null;
+      }
+
+      const expSlopeCleaned = expSlopeRaw.replace(/\*$/, "");
+      const fixedExpSlope =
+        expSlopeCleaned === "" || expSlopeCleaned === "+"
+          ? 1
+          : expSlopeCleaned === "-"
+            ? -1
+            : /^[-+]?(?:\d+\.?\d*|\.\d+)$/.test(expSlopeCleaned)
+              ? Number(expSlopeCleaned)
+              : null;
+      if (fixedExpSlope !== null && Math.abs(fixedExpSlope) < 1e-9) {
         return null;
       }
 
@@ -1072,6 +1087,7 @@ export function parseLabelStructureTemplateUnit2(rawLabel, flags = DEFAULT_UNIT2
         fixedCoef,
         fixedBase,
         baseRaw,
+        fixedExpSlope,
         fixedShiftX,
         fixedConst,
       };
@@ -1174,14 +1190,16 @@ export function checkStructuralCompatibilityUnit2(tpl, stroke, mathStruct, node,
       return { compatible: false, reason: "plot 함수 또는 정의역 없음" };
     }
 
-    // 1) 만약 밑(fixedBase)과 평행이동(fixedShiftX), 계수(fixedCoef)가 알려져 있고 상수항만 미지수인 경우 (예: y = 2^x + b):
-    //    st.fn(x) - coef * base^(x - shiftX) 가 정의역 전체에서 상수인지 직접 검증!
-    if (tpl.fixedBase !== null && tpl.fixedCoef !== null && tpl.fixedShiftX !== null) {
+    const expSlope = tpl.fixedExpSlope !== undefined && tpl.fixedExpSlope !== null ? tpl.fixedExpSlope : 1;
+
+    // 1) 만약 밑(fixedBase), 지수 계수(expSlope), 평행이동(fixedShiftX), 계수(fixedCoef)가 알려져 있고 상수항만 미지수인 경우 (예: y = 2^x + b, y = 2^{-x} + b):
+    //    st.fn(x) - coef * base^(expSlope * x - shiftX) 가 정의역 전체에서 상수인지 직접 검증!
+    if (tpl.fixedBase !== null && tpl.fixedCoef !== null && tpl.fixedShiftX !== null && expSlope !== null) {
       const diffs = [];
       for (let k = 0; k < 5; k++) {
         const x = dom[0] + ((dom[1] - dom[0]) * (k + 0.5)) / 5;
         const yPlot = fn(x);
-        const yExp = tpl.fixedCoef * safePow(tpl.fixedBase, x - tpl.fixedShiftX);
+        const yExp = tpl.fixedCoef * safePow(tpl.fixedBase, expSlope * x - tpl.fixedShiftX);
         if (!Number.isFinite(yPlot) || !Number.isFinite(yExp)) {
           return { compatible: false, reason: "지수함수 정의역 평가 중 비유한값 발생" };
         }
@@ -1195,13 +1213,13 @@ export function checkStructuralCompatibilityUnit2(tpl, stroke, mathStruct, node,
         }
         return {
           compatible: true,
-          details: `지수함수 구조 일치(base=${tpl.fixedBase}, 추정 상수항=${r2(meanDiff)}, 편차=${r2(maxDev)})`,
+          details: `지수함수 구조 일치(base=${tpl.fixedBase}, expSlope=${expSlope}, 추정 상수항=${r2(meanDiff)}, 편차=${r2(maxDev)})`,
         };
       }
       return { compatible: false, reason: `지수함수 밑(${tpl.fixedBase}) 증가율 불일치(편차=${r2(maxDev)})` };
     }
 
-    // 2) 일반 지수함수 증가율 검증: 등간격 4개 점에서 차분비 (y_{k+1}-y_k)/(y_k-y_{k-1}) = a^h > 0 일정 여부 확인
+    // 2) 일반 지수함수 증가율 검증: 등간격 4개 점에서 차분비 (y_{k+1}-y_k)/(y_k-y_{k-1}) = (a^expSlope)^h > 0 일정 여부 확인
     const h = (dom[1] - dom[0]) / 3;
     if (h <= 1e-6) return { compatible: false, reason: "정의역 폭 부족" };
     const ys = [0, 1, 2, 3].map((k) => fn(dom[0] + k * h));
@@ -1215,13 +1233,16 @@ export function checkStructuralCompatibilityUnit2(tpl, stroke, mathStruct, node,
     if (!(r1 > 0 && Math.abs(r1 - 1) > 1e-3 && Math.abs(r1 - r2Ratio) <= 1e-2)) {
       return { compatible: false, reason: "등비 차분 성질 불만족(지수함수가 아님)" };
     }
-    const impliedBase = Math.pow(r1, 1 / h);
-    if (tpl.fixedBase !== null && Math.abs(impliedBase - tpl.fixedBase) > 2e-2) {
-      return { compatible: false, reason: `지수 밑 불일치(요구 ${tpl.fixedBase}, 곡선 ${r2(impliedBase)})` };
+    const impliedEffectiveBase = Math.pow(r1, 1 / h);
+    if (tpl.fixedBase !== null && expSlope !== null) {
+      const expectedEffectiveBase = safePow(tpl.fixedBase, expSlope);
+      if (Math.abs(impliedEffectiveBase - expectedEffectiveBase) > 2e-2) {
+        return { compatible: false, reason: `지수 밑 불일치(요구 ${r2(expectedEffectiveBase)}, 곡선 ${r2(impliedEffectiveBase)})` };
+      }
     }
     return {
       compatible: true,
-      details: `지수함수 등비 차분 구조 일치(추정 밑 a=${r2(impliedBase)})`,
+      details: `지수함수 등비 차분 구조 일치(추정 유효 밑=${r2(impliedEffectiveBase)})`,
     };
   }
 
@@ -2089,6 +2110,119 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
   for (const s of scene.strokes) if (s.kind !== "axis") for (const p of s.pts) addC({ x0: p[0], y0: p[1], x1: p[0], y1: p[1] });
   for (const n of fixed) if (n.role !== "axisLabel" && n.role !== "origin") addC(n.bbox);
 
+  // [공동 최적화(Joint Optimization)]: 항상 동일한 원본 TikZ의 축 끝 좌표(xl0, xr0, yb0, yt0)를 기준으로
+  // 각 라벨 후보에 필요한 추가 축 연장량(marginalAxisExtPt)을 계산하고, 해당 축 연장 시 기존 노드와의 충돌 여부를 검증한다.
+  const hasAxes0 = Boolean(
+    F.enableJointAxisOpt !== false &&
+      scene?.axes?.x &&
+      scene?.axes?.y &&
+      scene?.units?.xU &&
+      scene?.units?.yU
+  );
+  const xl0 = hasAxes0 ? Math.min(scene.axes.x.from, scene.axes.x.to) * scene.units.xU : -Infinity;
+  const xr0 = hasAxes0 ? Math.max(scene.axes.x.from, scene.axes.x.to) * scene.units.xU : Infinity;
+  const yb0 = hasAxes0 ? Math.min(scene.axes.y.from, scene.axes.y.to) * scene.units.yU : -Infinity;
+  const yt0 = hasAxes0 ? Math.max(scene.axes.y.from, scene.axes.y.to) * scene.units.yU : Infinity;
+  const mRightJ = P.margins?.right ?? 16.0;
+  const mTopJ = P.margins?.top ?? 18.5;
+  const mNegTargetJ = P.negTargetMarginPt ?? 12.0;
+  const mNegNearNodeJ = P.negNearNodeMarginPt ?? 4.0;
+  const negNearTriggerJ = P.negNodeNearTriggerGapPt ?? 3.5;
+
+  const computeBaseAxisReqPt = () => {
+    let reqR = xr0;
+    let reqT = yt0;
+    let reqL = xl0;
+    let reqB = yb0;
+    if (!hasAxes0) return { reqL, reqR, reqB, reqT };
+    const ign = P.axisIgnoreEndWithin ?? 1.5;
+    for (const st of scene.strokes || []) {
+      if (!st || st.kind === "axis" || !Array.isArray(st.pts) || st.pts.length === 0) continue;
+      let sx0 = Infinity, sy0 = Infinity, sx1 = -Infinity, sy1 = -Infinity;
+      for (const p of st.pts) {
+        if (p[0] < sx0) sx0 = p[0];
+        if (p[0] > sx1) sx1 = p[0];
+        if (p[1] < sy0) sy0 = p[1];
+        if (p[1] > sy1) sy1 = p[1];
+      }
+      const p0 = st.pts[0], p1 = st.pts[st.pts.length - 1];
+      const touchesRight = Math.abs(p0[0] - xr0) <= ign || Math.abs(p1[0] - xr0) <= ign;
+      const touchesTop = Math.abs(p0[1] - yt0) <= ign || Math.abs(p1[1] - yt0) <= ign;
+      if (!touchesRight || sx1 > xr0 + ign) reqR = Math.max(reqR, sx1 + mRightJ);
+      if (!touchesTop || sy1 > yt0 + ign) reqT = Math.max(reqT, sy1 + mTopJ);
+      if (sx0 - xl0 < -0.5) reqL = Math.min(reqL, sx0 - mNegTargetJ);
+      if (sy0 - yb0 < -0.5) reqB = Math.min(reqB, sy0 - mNegTargetJ);
+    }
+    const applyBoxToAxisReq = (b) => {
+      reqR = Math.max(reqR, b.x1 + mRightJ);
+      reqT = Math.max(reqT, b.y1 + mTopJ);
+      const gapL = b.x0 - xl0;
+      const nearX = b.y0 <= 8.0 && b.y1 >= -8.0;
+      if (gapL < 0) reqL = Math.min(reqL, b.x0 - mNegTargetJ);
+      else if (nearX && gapL < negNearTriggerJ) reqL = Math.min(reqL, b.x0 - mNegNearNodeJ);
+      const gapB = b.y0 - yb0;
+      if (gapB < 0) reqB = Math.min(reqB, b.y0 - mNegTargetJ);
+      else if (gapB < negNearTriggerJ) reqB = Math.min(reqB, b.y0 - mNegNearNodeJ);
+    };
+    for (const fn of fixed) {
+      if (fn.role !== "axisLabel" && fn.role !== "origin") applyBoxToAxisReq(fn.bbox);
+    }
+    for (const pb of placedBoxes) applyBoxToAxisReq(pb);
+    return { reqL, reqR, reqB, reqT };
+  };
+
+  const evaluateJointAxisImpact = (bb, baseReq, candMeta = null) => {
+    if (!hasAxes0) {
+      return {
+        marginalExtPt: 0,
+        candL: xl0,
+        candR: xr0,
+        candB: yb0,
+        candT: yt0,
+        extDirections: [],
+      };
+    }
+    let candR = Math.max(baseReq.reqR, bb.x1 + mRightJ);
+    let candT = Math.max(baseReq.reqT, bb.y1 + mTopJ);
+    let candL = baseReq.reqL;
+    let candB = baseReq.reqB;
+
+    const gapL = bb.x0 - xl0;
+    const nearX = bb.y0 <= 8.0 && bb.y1 >= -8.0;
+    if (gapL < 0) {
+      candL = Math.min(candL, bb.x0 - mNegTargetJ);
+    } else if (nearX && gapL < negNearTriggerJ) {
+      candL = Math.min(candL, bb.x0 - mNegNearNodeJ);
+    }
+
+    const gapB = bb.y0 - yb0;
+    if (gapB < 0) candB = Math.min(candB, bb.y0 - mNegTargetJ);
+    else if (gapB < negNearTriggerJ) candB = Math.min(candB, bb.y0 - mNegNearNodeJ);
+
+    const extL = Math.max(0, baseReq.reqL - candL);
+    const extR = Math.max(0, candR - baseReq.reqR);
+    const extB = Math.max(0, baseReq.reqB - candB);
+    const extT = Math.max(0, candT - baseReq.reqT);
+    const extDirections = [];
+    if (extL > 0.5) extDirections.push(`-x(${r2(extL)}pt)`);
+    if (extR > 0.5) extDirections.push(`+x(${r2(extR)}pt)`);
+    if (extB > 0.5) extDirections.push(`-y(${r2(extB)}pt)`);
+    if (extT > 0.5) extDirections.push(`+y(${r2(extT)}pt)`);
+
+    return {
+      marginalExtPt: r2(extL + extR + extB + extT),
+      extL: r2(extL),
+      extR: r2(extR),
+      extB: r2(extB),
+      extT: r2(extT),
+      candL,
+      candR,
+      candB,
+      candT,
+      extDirections,
+    };
+  };
+
   for (const n of targets) {
     if (!n.usable) {
       plan.skipped.push({
@@ -2193,6 +2327,8 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       }
     }
 
+    const baseAxisReq = computeBaseAxisReqPt();
+    const keepAxisImpact = evaluateJointAxisImpact(n.bbox, baseAxisReq);
     const e0 = evalBox(n.bbox);
     let keepCheck = evaluateKeep(n.bbox, strokeKind, ends, preferredEnd, e0, P);
     if (
@@ -2211,7 +2347,12 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       if (crestKeep) keepCheck = crestKeep;
     }
 
-    if (keepCheck.keep && (a.confirmed || !P.allowUncertainMove)) {
+    // [공동 최적화 규칙]:
+    // 1) 미확정 라벨이거나, 원 위치가 이미 평가원 기준에 부합하면서 불필요한 과잉 축 연장(<= 8pt)도 유발하지 않으면 즉시 원 위치 유지!
+    const keepForcesExcessiveAxisExt =
+      hasAxes0 && a.confirmed && keepAxisImpact.marginalExtPt > (P.jointKeepMaxAxisExtPt ?? 8.0);
+
+    if (keepCheck.keep && (!a.confirmed && !P.allowUncertainMove)) {
       plan.placements.push({
         id: n.id,
         label: n.label,
@@ -2231,6 +2372,34 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
         from: n.bbox,
         eval: e0,
         keepCheck,
+        jointAxisImpact: keepAxisImpact,
+      });
+      placedBoxes.push(n.bbox);
+      addC(n.bbox);
+      continue;
+    }
+
+    if (keepCheck.keep && a.confirmed && !keepForcesExcessiveAxisExt) {
+      plan.placements.push({
+        id: n.id,
+        label: n.label,
+        action: "keep",
+        reason: `원 위치가 평가원 스타일에 부합(끝점/곡선 간격 ${keepCheck.endGapPt}pt, 방향 ${keepCheck.currentSide}, |α|=${Math.abs(keepCheck.alpha)}, 무충돌, 추가 축 연장 불필요)`,
+        stroke: s.index,
+        strokeKind,
+        how: a.how,
+        confirmedAssignment: !!a.confirmed,
+        uncertainAssignment: !!a.uncertain,
+        assignmentReason: a.reason || null,
+        end: keepCheck.currentEnd,
+        preferredEnd,
+        side: keepCheck.currentSide,
+        alpha: keepCheck.alpha,
+        bbox: n.bbox,
+        from: n.bbox,
+        eval: e0,
+        keepCheck,
+        jointAxisImpact: keepAxisImpact,
       });
       placedBoxes.push(n.bbox);
       addC(n.bbox);
@@ -2274,10 +2443,36 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
     }
 
     let best = null;
+    let bestNoAxisPen = null;
     const scored = [];
     const baseC = content || { ...n.bbox };
+    const wAxisExt = P.wAxisExt ?? 2.5;
     for (const c of cands) {
-      const ev = evalBox(c.bb);
+      const axisImpact = evaluateJointAxisImpact(c.bb, baseAxisReq, { action: "move", side: c.side, origBbox: n.bbox });
+      const ev0 = evalBox(c.bb);
+      let minOther = ev0.minOther;
+      if (hasAxes0) {
+        const extXStroke = {
+          pts: [
+            [axisImpact.candL, 0],
+            [axisImpact.candR, 0],
+          ],
+          halfWidth: scene.axes?.x?.stroke?.halfWidth || 0.5,
+        };
+        const extYStroke = {
+          pts: [
+            [0, axisImpact.candB],
+            [0, axisImpact.candT],
+          ],
+          halfWidth: scene.axes?.y?.stroke?.halfWidth || 0.5,
+        };
+        minOther = Math.min(
+          minOther,
+          clearanceToStroke(c.bb, extXStroke),
+          clearanceToStroke(c.bb, extYStroke)
+        );
+      }
+      const ev = { ...ev0, minOther };
       const hard = ev.minOther < P.cHard || ev.own < P.cOwn || ev.labelGap < P.mLabel;
       const grow =
         Math.max(baseC.x1, c.bb.x1) -
@@ -2287,7 +2482,7 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       const clearPen = Math.max(0, P.cPref - Math.min(ev.minOther, ev.labelGap)) / P.cPref;
       const ownPen = ev.own < (P.cOwnPref || 1.6) ? ((P.cOwnPref || 1.6) - ev.own) / (P.cOwnPref || 1.6) : 0;
       const gapPen = (c.gapOffset || 0) * 0.35;
-      const cost =
+      const baseCost =
         P.wClear * clearPen * clearPen +
         (P.wOwnPref || 3.5) * ownPen * ownPen +
         (c.sideMismatch ? P.wSide : 0) +
@@ -2295,8 +2490,59 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
         P.wAlpha * Math.abs(c.alpha) +
         P.wGrow * (grow / 100) +
         gapPen;
-      scored.push({ ...c, ev, hard, cost });
-      if (!hard && (!best || cost < best.cost)) best = { ...c, ev, cost };
+      const axisPen = hasAxes0 ? wAxisExt * (axisImpact.marginalExtPt / 100) : 0;
+      const cost = baseCost + axisPen;
+      scored.push({ ...c, ev, hard, baseCost, axisPen, cost, axisImpact });
+      if (!hard && (!best || cost < best.cost)) best = { ...c, ev, baseCost, axisPen, cost, axisImpact };
+      if (!hard && (!bestNoAxisPen || baseCost < bestNoAxisPen.baseCost)) {
+        bestNoAxisPen = { ...c, ev, baseCost, axisPen, cost, axisImpact };
+      }
+    }
+
+    // 만약 원 위치가 keepCheck.keep 을 통과했으나 과잉 축 연장(keepForcesExcessiveAxisExt) 때문에 후보를 탐색한 경우:
+    // 탐색된 최선 후보(best)가 접선 방향이 자연스럽고(!sideMismatch) 무충돌이며,
+    // 원 위치보다 필요 축 연장량을 의미 있게 줄여줄 때(최소 15pt 이상 절감)만 이동하고, 그렇지 않으면 원 위치를 유지(5순위: 개선이 뚜렷하지 않으면 원 위치 유지)!
+    if (keepCheck.keep && a.confirmed && keepForcesExcessiveAxisExt) {
+      const savedAxisPt = best ? r2(keepAxisImpact.marginalExtPt - best.axisImpact.marginalExtPt) : 0;
+      const naturalAlternative =
+        best &&
+        !best.sideMismatch &&
+        best.baseCost <= (P.jointMaxNaturalBaseCost ?? 10.5) &&
+        savedAxisPt >= (P.jointMinSavedAxisExtPt ?? 15.0);
+      if (!naturalAlternative) {
+        plan.placements.push({
+          id: n.id,
+          label: n.label,
+          action: "keep",
+          reason: `원 위치가 평가원 스타일에 부합하며 축 연장 절감 효과가 있는 더 나은 자연 후보가 없어 원 위치 유지(끝점/곡선 간격 ${keepCheck.endGapPt}pt, 방향 ${keepCheck.currentSide})`,
+          stroke: s.index,
+          strokeKind,
+          how: a.how,
+          confirmedAssignment: !!a.confirmed,
+          uncertainAssignment: !!a.uncertain,
+          assignmentReason: a.reason || null,
+          end: keepCheck.currentEnd,
+          preferredEnd,
+          side: keepCheck.currentSide,
+          alpha: keepCheck.alpha,
+          bbox: n.bbox,
+          from: n.bbox,
+          eval: e0,
+          keepCheck,
+          jointAxisImpact: keepAxisImpact,
+        });
+        placedBoxes.push(n.bbox);
+        addC(n.bbox);
+        continue;
+      }
+      keepCheck = {
+        ...keepCheck,
+        keep: false,
+        rejectReasons: [
+          ...keepCheck.rejectReasons,
+          `원 위치 유지 시 과도한 축 연장 필요(${keepAxisImpact.extDirections.join(", ")}) → 곡선 인접 자연 위치로 축 연장 ${savedAxisPt}pt 절감`,
+        ],
+      };
     }
 
     if (!best) {
@@ -2384,13 +2630,26 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       continue;
     }
 
+    const savedExtPt = r2(keepAxisImpact.marginalExtPt - (best.axisImpact?.marginalExtPt ?? 0));
+    const savedVsAltCandPt =
+      bestNoAxisPen && (bestNoAxisPen.side !== best.side || bestNoAxisPen.ei !== best.ei)
+        ? r2((bestNoAxisPen.axisImpact?.marginalExtPt ?? 0) - (best.axisImpact?.marginalExtPt ?? 0))
+        : 0;
+    const axisSaveNote =
+      hasAxes0 && savedExtPt >= 10.0
+        ? ` (필요 축 연장량 ${r2(keepAxisImpact.marginalExtPt)}pt → ${r2(best.axisImpact.marginalExtPt)}pt로 ${savedExtPt}pt 절감)`
+        : hasAxes0 && savedVsAltCandPt >= 10.0
+        ? ` (${bestNoAxisPen.side} 후보 대비 필요 축 연장량 ${r2(bestNoAxisPen.axisImpact.marginalExtPt)}pt → ${r2(best.axisImpact.marginalExtPt)}pt로 ${savedVsAltCandPt}pt 절감)`
+        : "";
+
     plan.placements.push({
       id: n.id,
       label: n.label,
       action: "move",
-      reason: keepCheck.rejectReasons.length
-        ? `원 위치 미유지(${keepCheck.rejectReasons.join(", ")}) → 끝${best.ei}/${best.side} 이동`
-        : `끝${best.ei}/${best.side} 이동`,
+      reason:
+        (keepCheck.rejectReasons.length
+          ? `원 위치 미유지(${keepCheck.rejectReasons.join(", ")}) → 끝${best.ei}/${best.side} 이동`
+          : `끝${best.ei}/${best.side} 이동`) + axisSaveNote,
       stroke: s.index,
       strokeKind,
       how: a.how,
@@ -2407,6 +2666,9 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       from: n.bbox,
       eval: best.ev,
       keepCheck,
+      jointAxisImpact: best.axisImpact || null,
+      keepAxisImpact,
+      savedAxisExtPt: savedExtPt,
       candidates: scored.length,
       feasible: scored.filter((q) => !q.hard).length,
     });
