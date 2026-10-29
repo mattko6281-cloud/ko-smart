@@ -578,6 +578,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
   const applyAxisRequested = Boolean(opts.applyAxis === true);
   const engineVersion = normalizeEngineVersion(opts.engineVersion);
   const isV022 = engineVersion === "v0.2.2-beta";
+  const applyDomainExtensionRequested = isV022 && Boolean(opts.applyDomainExtension === true);
   const unit3BServerStatus = isUnit3BServerEnabled({ env: opts.env });
   const enableUnit3BRequested = isV022 && Boolean(opts.enableUnit3B === true);
   const enableUnit3B = enableUnit3BRequested && unit3BServerStatus.enabled;
@@ -614,6 +615,18 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       message: applyAxisRequested
         ? "축 길이 조정 대기 중"
         : "축 길이 자동 조정 옵션 OFF (함수식 라벨만 정렬)",
+    },
+    applyDomainExtensionRequested,
+    domainExtensionOption: {
+      requested: applyDomainExtensionRequested,
+      applied: false,
+      status: applyDomainExtensionRequested ? "not-needed" : "disabled",
+      modeNote: "8단계 안전 필터 통과 시 최소 끝점 연장 전용 (축소 없음)",
+      editsCount: 0,
+      message: applyDomainExtensionRequested
+        ? "그래프 끝점 미세 연장 대기 중"
+        : "그래프 끝점 미세 연장 옵션 OFF (원본 정의역 유지)",
+      items: [],
     },
     collisionDiagnostics: null,
     inputHash,
@@ -770,6 +783,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     let activePlan;
     let axisPlan;
     let axisEditsToApply = [];
+    let domainPlan = { requested: false, applied: false, edits: [], decisions: [] };
+    let domainEditsToApply = [];
     let activeShift;
     let tickPlan = { edits: [], movedTicks: [], heldTicks: [], decisions: [] };
     let originPlan = { edits: [], movedOrigins: [], heldOrigins: [], decisions: [] };
@@ -782,11 +797,14 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         applyAxisRequested,
         { enableOriginPlacement: enableUnit3D },
         enableUnit3B,
-        enableUnit3D
+        enableUnit3D,
+        applyDomainExtensionRequested
       );
       activePlan = v022Plan.activePlan;
       axisPlan = v022Plan.axisPlan;
       axisEditsToApply = v022Plan.axisEditsToApply;
+      domainPlan = v022Plan.domainPlan || domainPlan;
+      domainEditsToApply = v022Plan.domainEditsToApply || [];
       activeShift = v022Plan.activeShift;
       tickPlan = v022Plan.tickPlan || tickPlan;
       originPlan = v022Plan.originPlan || originPlan;
@@ -832,6 +850,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     const tickEditsOnEffective = tickPlan.edits || [];
     const originEditsOnEffective = originPlan.edits || [];
     const editsToApply = [
+      ...domainEditsToApply,
       ...labelEditsOnEffective,
       ...tickEditsOnEffective,
       ...originEditsOnEffective,
@@ -841,6 +860,32 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     const xAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-x");
     const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
     const anyAxisChanged = axisEditsToApply.length > 0;
+    const anyDomainChanged = domainEditsToApply.length > 0;
+
+    const domainOptionInfo = {
+      requested: applyDomainExtensionRequested,
+      applied: false,
+      status: !applyDomainExtensionRequested
+        ? "disabled"
+        : anyDomainChanged
+        ? "pending-verification"
+        : "not-needed",
+      modeNote: "8단계 안전 필터 통과 시 최소 끝점 연장 전용 (축소 없음)",
+      editsCount: domainEditsToApply.length,
+      items: domainPlan.decisions || [],
+      message: !applyDomainExtensionRequested
+        ? "그래프 끝점 미세 연장 옵션 OFF (원본 정의역 유지)"
+        : anyDomainChanged
+        ? `그래프 끝점 미세 연장 후보 산출됨 (${(domainPlan.decisions || [])
+            .filter((d) => d.action === "extend")
+            .map(
+              (d) =>
+                `${d.label}: domain [${d.origDomain.join(", ")}] → [${d.newDomain.join(", ")}] (+${d.arcLengthPt}pt, 간격 ${d.origOwnGapPt}pt → ${d.newOwnGapPt}pt)`
+            )
+            .join(" · ")})`
+        : "모든 함수 그래프가 이미 적정 연결 간격이거나 8단계 안전 게이트에 의해 원본 정의역을 유지합니다.",
+    };
+    baseResponse.domainExtensionOption = domainOptionInfo;
 
     const axisOptionInfo = {
       requested: applyAxisRequested,
@@ -1197,6 +1242,17 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         .filter(Boolean)
         .join(", ")})`;
     }
+    if (anyDomainChanged) {
+      domainOptionInfo.applied = true;
+      domainOptionInfo.status = "applied";
+      domainOptionInfo.message = `그래프 끝점 미세 연장 및 2차 충돌 검증 통과 (${(domainPlan.decisions || [])
+        .filter((d) => d.action === "extend")
+        .map(
+          (d) =>
+            `${d.label}: domain [${d.origDomain.join(", ")}] → [${d.newDomain.join(", ")}] (+${d.arcLengthPt}pt, 간격 ${d.origOwnGapPt}pt → ${d.newOwnGapPt}pt)`
+        )
+        .join(" · ")})`;
+    }
 
     const finalFnAuditById = new Map(
       (finalDiag.finalAudit?.functionLabelAudits || []).map((fa) => [fa.id, fa])
@@ -1226,6 +1282,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
 
     const actionParts = [];
     if (fnMovedCount > 0) actionParts.push(`함수식 라벨 ${fnMovedCount}개 추천 위치`);
+    if (anyDomainChanged) actionParts.push(`그래프 끝점 미세 연장(${domainEditsToApply.length}개 곡선)`);
     if (tickMovedCount > 0) actionParts.push(`축 눈금 숫자 ${tickMovedCount}개 겹침 자동 조정(Unit 3-B)`);
     if (originMovedCount > 0) actionParts.push(`원점 O ${originMovedCount}개 4방향 자동 배치(Unit 3-D)`);
     if (anyAxisChanged) actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
@@ -1245,7 +1302,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         ? "verified-recommendation-with-unresolved-collisions"
         : "verified-recommendation",
       message: successMsg,
-      canApply: (movedCount > 0 || anyAxisChanged) && recommendedFullCode !== rawInput,
+      canApply: (movedCount > 0 || anyAxisChanged || anyDomainChanged) && recommendedFullCode !== rawInput,
       verified: true,
       recommendedCode: recommendedFullCode,
       movedCount,
@@ -1351,6 +1408,7 @@ export async function handleSmartLabelGet(deps) {
       availableEngines: isDeveloper ? SUPPORTED_ENGINE_VERSIONS : ["v0.2.2-beta"],
       defaultEnableUnit3B: unit3BFlag.enabled ? authCheck.defaultEnableUnit3B : false,
       defaultApplyAxis: false,
+      defaultApplyDomainExtension: false,
       unit3BServerEnabled: unit3BFlag.enabled,
       unit3BDisabledReason: unit3BFlag.enabled ? null : unit3BFlag.reason,
       unit3DServerEnabled: unit3DFlag.enabled,
@@ -1416,6 +1474,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
   const rawTikz = typeof requestBody.tikz === "string" ? requestBody.tikz : "";
   const clientInputHash = typeof requestBody.inputHash === "string" ? requestBody.inputHash : null;
   const applyAxis = Boolean(requestBody.applyAxis === true);
+  const applyDomainExtension = Boolean(requestBody.applyDomainExtension === true);
   // 파일럿 팀원(role === "pilot")은 요청 본문에 어떤 engineVersion 을 보내더라도 서버에서 v0.2.2-beta 로 강제 고정
   const engineVersion =
     authCheck.role === "pilot" ? "v0.2.2-beta" : normalizeEngineVersion(requestBody.engineVersion);
@@ -1458,6 +1517,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
       env: deps.env,
       verify: true,
       applyAxis,
+      applyDomainExtension,
       engineVersion,
       enableUnit3B,
     });

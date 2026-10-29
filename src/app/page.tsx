@@ -376,6 +376,7 @@ export default function Home() {
   const [unit3BDisabledReason, setUnit3BDisabledReason] = useState<string | null>(null);
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
   const [applyAxisBeta, setApplyAxisBeta] = useState(false);
+  const [applyDomainExtensionBeta, setApplyDomainExtensionBeta] = useState(false);
   const [enableUnit3BBeta, setEnableUnit3BBeta] = useState(false);
   const [engineVersionBeta, setEngineVersionBeta] = useState<SmartLabelEngineVersion>("v0.2.1");
   const [smartLabelProposal, setSmartLabelProposal] = useState<SmartLabelBetaResponse | null>(null);
@@ -429,6 +430,7 @@ export default function Home() {
         // 개발자는 기본 ON(단 서버 비활성 시 OFF), 파일럿 팀원은 초기 기본 OFF
         setEnableUnit3BBeta(u3bAllowed ? Boolean(data.defaultEnableUnit3B) : false);
         setApplyAxisBeta(false);
+        setApplyDomainExtensionBeta(false);
       })
       .catch(() => {
         if (!cancelled) {
@@ -493,7 +495,8 @@ export default function Home() {
   const handleRunSmartLabelBeta = async (
     overrideApplyAxis?: boolean,
     overrideEngineVersion?: SmartLabelEngineVersion,
-    overrideEnableUnit3B?: boolean
+    overrideEnableUnit3B?: boolean,
+    overrideApplyDomainExtension?: boolean
   ) => {
     if (!showSmartLabelBeta || isSmartLabelLoading) return;
     if (!rawInput.trim()) {
@@ -509,6 +512,11 @@ export default function Home() {
     const rawEnableUnit3B =
       typeof overrideEnableUnit3B === "boolean" ? overrideEnableUnit3B : enableUnit3BBeta;
     const useEnableUnit3B = unit3BServerEnabled && useEngineVersion === "v0.2.2-beta" ? rawEnableUnit3B : false;
+    const rawApplyDomainExt =
+      typeof overrideApplyDomainExtension === "boolean"
+        ? overrideApplyDomainExtension
+        : applyDomainExtensionBeta;
+    const useApplyDomainExtension = useEngineVersion === "v0.2.2-beta" ? rawApplyDomainExt : false;
     const snapshotCode = rawInput;
     setIsSmartLabelLoading(true);
     try {
@@ -518,6 +526,7 @@ export default function Home() {
         body: JSON.stringify({
           tikz: snapshotCode,
           applyAxis: useApplyAxis,
+          applyDomainExtension: useApplyDomainExtension,
           engineVersion: useEngineVersion,
           enableUnit3B: useEnableUnit3B,
         }),
@@ -3526,20 +3535,25 @@ const getProcessedInput = (code: string) => {
           unit3BServerEnabled={unit3BServerEnabled}
           unit3BDisabledReason={unit3BDisabledReason}
           applyAxisOption={applyAxisBeta}
+          applyDomainExtensionOption={applyDomainExtensionBeta}
           enableUnit3BOption={unit3BServerEnabled ? enableUnit3BBeta : false}
           engineVersion={smartLabelAccess.canSelectEngine ? engineVersionBeta : "v0.2.2-beta"}
           isRecomputing={isSmartLabelLoading}
           onToggleApplyAxisOption={(next) => {
             setApplyAxisBeta(next);
-            handleRunSmartLabelBeta(next, engineVersionBeta, enableUnit3BBeta);
+            handleRunSmartLabelBeta(next, engineVersionBeta, enableUnit3BBeta, applyDomainExtensionBeta);
+          }}
+          onToggleApplyDomainExtensionOption={(next) => {
+            setApplyDomainExtensionBeta(next);
+            handleRunSmartLabelBeta(applyAxisBeta, engineVersionBeta, enableUnit3BBeta, next);
           }}
           onToggleEnableUnit3BOption={(next) => {
             setEnableUnit3BBeta(next);
-            handleRunSmartLabelBeta(applyAxisBeta, engineVersionBeta, next);
+            handleRunSmartLabelBeta(applyAxisBeta, engineVersionBeta, next, applyDomainExtensionBeta);
           }}
           onChangeEngineVersion={(nextEngine) => {
             handleChangeEngineVersionBeta(nextEngine);
-            handleRunSmartLabelBeta(applyAxisBeta, nextEngine, enableUnit3BBeta);
+            handleRunSmartLabelBeta(applyAxisBeta, nextEngine, enableUnit3BBeta, applyDomainExtensionBeta);
           }}
         />
       )}

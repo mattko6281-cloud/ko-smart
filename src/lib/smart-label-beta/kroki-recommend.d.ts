@@ -77,6 +77,37 @@ export interface AxisOptionInfo {
   message: string;
 }
 
+export interface DomainExtensionDecisionItem {
+  nodeId: string;
+  label: string;
+  strokeIndex: number | null;
+  plotExpr: string | null;
+  action: "extend" | "hold";
+  triggerType: "gap-closure" | "congestion-escape" | null;
+  origDomain: [number, number] | null;
+  newDomain: [number, number] | null;
+  arcLengthPt: number;
+  domainRatioPct: number;
+  origOwnGapPt: number | null;
+  newOwnGapPt: number | null;
+  origMinOtherPt: number | null;
+  newMinOtherPt: number | null;
+  origShift: [number, number];
+  newShift: [number, number];
+  holdCode: string | null;
+  reason: string;
+}
+
+export interface DomainExtensionOptionInfo {
+  requested: boolean;
+  applied: boolean;
+  status: "disabled" | "not-needed" | "pending-verification" | "applied" | "blocked-unsafe";
+  modeNote: string;
+  editsCount: number;
+  message: string;
+  items: DomainExtensionDecisionItem[];
+}
+
 export interface CollisionAuditItem {
   key: string;
   category: string;
@@ -220,6 +251,8 @@ export interface SmartLabelBetaProposal {
   verified: boolean;
   applyAxisRequested: boolean;
   axisOption: AxisOptionInfo;
+  applyDomainExtensionRequested?: boolean;
+  domainExtensionOption?: DomainExtensionOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
   inputHash: string;
   originalCode: string;
@@ -265,6 +298,7 @@ export function recommendSmartLabelBeta(
     params?: any;
     verify?: boolean;
     applyAxis?: boolean;
+    applyDomainExtension?: boolean;
     engineVersion?: SmartLabelEngineVersion;
     enableUnit3B?: boolean;
     enableUnit3D?: boolean;

@@ -22,6 +22,8 @@ interface SmartLabelBetaModalProps {
   unit3BDisabledReason?: string | null;
   applyAxisOption?: boolean;
   onToggleApplyAxisOption?: (next: boolean) => void;
+  applyDomainExtensionOption?: boolean;
+  onToggleApplyDomainExtensionOption?: (next: boolean) => void;
   enableUnit3BOption?: boolean;
   onToggleEnableUnit3BOption?: (next: boolean) => void;
   engineVersion?: SmartLabelEngineVersion;
@@ -43,6 +45,8 @@ export function SmartLabelBetaModal({
   unit3BDisabledReason = null,
   applyAxisOption = false,
   onToggleApplyAxisOption,
+  applyDomainExtensionOption = false,
+  onToggleApplyDomainExtensionOption,
   enableUnit3BOption = true,
   onToggleEnableUnit3BOption,
   engineVersion = "v0.2.1",
@@ -230,6 +234,22 @@ export function SmartLabelBetaModal({
                 </span>
               </label>
             )}
+            {activeEngineVersion === "v0.2.2-beta" && onToggleApplyDomainExtensionOption && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 rounded-md border border-cyan-700/70 bg-cyan-950/60 px-2.5 py-1 text-[11px] font-medium text-cyan-200 hover:border-cyan-400"
+                title="체크 시 라벨과 그래프 끝점 간격이 멀거나 보조선 혼잡이 있을 때 8단계 안전 게이트를 통과한 단일 plot 곡선의 끝점을 최소 연장합니다 (기본 OFF)"
+                data-testid="modal-checkbox-apply-domain-extension"
+              >
+                <input
+                  type="checkbox"
+                  checked={applyDomainExtensionOption}
+                  disabled={isRecomputing}
+                  onChange={(e) => onToggleApplyDomainExtensionOption(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded accent-cyan-500"
+                />
+                <span>그래프 끝점 미세 연장</span>
+              </label>
+            )}
             {onToggleApplyAxisOption && (
               <label
                 className="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-indigo-400"
@@ -273,7 +293,8 @@ export function SmartLabelBetaModal({
                 {typeof proposal.originMovedCount === "number" && proposal.originMovedCount > 0
                   ? ` · 원점 O ${proposal.originMovedCount}개`
                   : ""}
-                ) · 원본 유지: {proposal.heldCount}개 · 축 조정:{" "}
+                ) · 원본 유지: {proposal.heldCount}개 · 끝점 연장:{" "}
+                {proposal.domainExtensionOption?.editsCount ?? 0}개 · 축 조정:{" "}
                 {proposal.axisOption?.editsCount ?? 0}개 · 2차 검증:{" "}
                 {proposal.verified ? "통과 (Verified)" : "미적용"}
               </span>
@@ -355,6 +376,95 @@ export function SmartLabelBetaModal({
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* 그래프 끝점(domain) 미세 연장 상태 카드 (v0.2.2-beta 전용) */}
+          {activeEngineVersion === "v0.2.2-beta" && proposal.domainExtensionOption && (
+            <div
+              className={`rounded-lg border p-3.5 text-xs ${
+                proposal.domainExtensionOption.status === "applied"
+                  ? "border-cyan-300 bg-cyan-50/60 text-cyan-950"
+                  : proposal.domainExtensionOption.status === "blocked-unsafe"
+                  ? "border-rose-300 bg-rose-50 text-rose-900"
+                  : "border-slate-200 bg-slate-50 text-slate-700"
+              }`}
+              data-testid="smart-label-domain-extension-card"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
+                <span>
+                  📈 그래프 끝점 미세 연장 옵션:{" "}
+                  {proposal.domainExtensionOption.requested ? "ON (활성화)" : "OFF (기본 원본 정의역 유지)"}
+                </span>
+                <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-semibold border border-slate-200 text-slate-600">
+                  {proposal.domainExtensionOption.modeNote}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed mb-1.5">
+                {proposal.domainExtensionOption.message}
+              </p>
+              {proposal.domainExtensionOption.requested &&
+                proposal.domainExtensionOption.items &&
+                proposal.domainExtensionOption.items.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {proposal.domainExtensionOption.items.map((item) => (
+                      <div
+                        key={`dom-ext-${item.nodeId}`}
+                        data-testid="smart-label-domain-extension-item"
+                        className={`rounded border px-2.5 py-1.5 text-[11px] ${
+                          item.action === "extend"
+                            ? "border-cyan-200 bg-white text-slate-800"
+                            : "border-slate-200 bg-white/70 text-slate-600"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <code className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-white">
+                              {item.label}
+                            </code>
+                            {item.action === "extend" && item.origDomain && item.newDomain ? (
+                              <>
+                                <span className="rounded bg-cyan-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  끝점 미세 연장 추천
+                                </span>
+                                <span className="font-mono text-slate-600">
+                                  domain=[{item.origDomain[0]}, {item.origDomain[1]}]
+                                </span>
+                                <span className="font-bold text-cyan-700">➔</span>
+                                <span className="font-mono font-semibold text-emerald-700">
+                                  domain=[{item.newDomain[0]}, {item.newDomain[1]}]
+                                </span>
+                                <span className="rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-900">
+                                  연장 길이: +{item.arcLengthPt}pt
+                                </span>
+                                <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900">
+                                  라벨-그래프 간격: {item.origOwnGapPt}pt ➔ {item.newOwnGapPt}pt
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="rounded bg-slate-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  정의역 원본 유지 (Hold)
+                                </span>
+                                {item.origDomain && (
+                                  <span className="font-mono text-slate-500">
+                                    domain=[{item.origDomain[0]}, {item.origDomain[1]}]
+                                  </span>
+                                )}
+                                {typeof item.origOwnGapPt === "number" && (
+                                  <span className="text-[10px] text-slate-500">
+                                    (현재 간격: {item.origOwnGapPt}pt)
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-slate-600 leading-relaxed">{item.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
             </div>
           )}
 

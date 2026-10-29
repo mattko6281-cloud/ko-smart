@@ -14,6 +14,11 @@
 import { buildScene } from "../../../../experiments/smart-label-prototype-v021/src/scene.mjs";
 import {
   PARAMS,
+  classifyStrokeKind,
+  clearanceToStroke,
+  bboxPtDist,
+  bboxFromShift,
+  setShifts,
   planAxes,
   axisEdits,
   shiftEdits,
@@ -471,7 +476,7 @@ export function buildV022LabelDecisions(scene, plan, shiftResult) {
 }
 
 /**
- * v0.2.2-beta 전용 라벨 배치 및(옵션 시) 축 연장 / Unit 3-B 눈금 겹침 보정 / Unit 3-D-Origin 원점 배치 계획 실행기
+ * v0.2.2-beta 전용 라벨 배치 및(옵션 시) 축 연장 / 그래프 끝점(domain) 미세 연장 / Unit 3-B 눈금 겹침 보정 / Unit 3-D-Origin 원점 배치 계획 실행기
  */
 export function runPlanningV022(
   scene,
@@ -479,30 +484,86 @@ export function runPlanningV022(
   applyAxisRequested = false,
   flags = DEFAULT_UNIT2_FLAGS,
   enableUnit3B = false,
-  enableUnit3D = true
+  enableUnit3D = true,
+  applyDomainExtension = false
 ) {
   const plan0 = planLabelsUnit2(scene, P, null, { ...flags, applyAxisRequested });
   let activePlan = plan0;
-  let axisPlan = planAxesV022(scene, activePlan, P);
+  let activeShift = shiftEdits(scene, activePlan, P);
+
+  // 그래프 끝점(domain) 미세 연장 및 라벨 위치 공동 최적화 (기본 OFF, 체크 시에만 실행)
+  const domainPlan = applyDomainExtension
+    ? planDomainMicroExtensionsV022(scene, activePlan, activeShift, P, {
+        applyDomainExtension: true,
+        flags,
+      })
+    : {
+        requested: false,
+        applied: false,
+        edits: [],
+        decisions: [],
+        updatedStrokesByIndex: new Map(),
+        updatedPlacementsById: new Map(),
+        updatedShiftReportById: new Map(),
+        updatedLabelEditsById: new Map(),
+      };
+
+  let sceneForPostPlan = scene;
+  if (domainPlan.applied) {
+    // 원본 scene 은 오염시키지 않고 파생 장면(sceneForPostPlan)과 activePlan/activeShift 만 갱신
+    sceneForPostPlan = {
+      ...scene,
+      strokes: (scene.strokes || []).map(
+        (s) => domainPlan.updatedStrokesByIndex.get(s.index) || s
+      ),
+    };
+    const updatedPlacements = (activePlan.placements || []).map(
+      (pl) => domainPlan.updatedPlacementsById.get(pl.id) || pl
+    );
+    const updatedSkipped = (activePlan.skipped || []).filter(
+      (sk) => !domainPlan.updatedPlacementsById.has(sk.id)
+    );
+    activePlan = {
+      ...activePlan,
+      placements: updatedPlacements,
+      skipped: updatedSkipped,
+    };
+
+    const editMap = new Map((activeShift.edits || []).map((e) => [e.id, e]));
+    for (const [id, newEdit] of domainPlan.updatedLabelEditsById.entries()) {
+      editMap.set(id, newEdit);
+    }
+    const reportMap = new Map((activeShift.report || []).map((r) => [r.id, r]));
+    for (const [id, newRep] of domainPlan.updatedShiftReportById.entries()) {
+      reportMap.set(id, newRep);
+    }
+    activeShift = {
+      ...activeShift,
+      edits: [...editMap.values()],
+      report: [...reportMap.values()],
+    };
+  }
+
+  const domainEditsToApply = domainPlan.edits || [];
+  let axisPlan = planAxesV022(sceneForPostPlan, activePlan, P);
   let axisEditsToApply = [];
 
   if (applyAxisRequested) {
     // [공동 최적화]: 이미 늘어난 축을 다시 줄이는 방식이 아니라,
     // 항상 동일한 원본 TikZ의 축 끝 좌표를 기준으로 각 라벨 후보의 필요 축 연장량과 연장 축 충돌 여부를
     // planLabelsUnit2 내부에서 공동 평가하여 최종 후보를 선택한 뒤, 그 결과에 대해서만 축 연장을 1회 적용한다.
-    axisEditsToApply = axisEdits(scene, axisPlan);
+    axisEditsToApply = axisEdits(sceneForPostPlan, axisPlan);
   }
 
-  const activeShift = shiftEdits(scene, activePlan, P);
   const { labelDecisions, decisionsByNodeId } = buildV022LabelDecisions(
-    scene,
+    sceneForPostPlan,
     activePlan,
     activeShift
   );
 
   // Unit 3-B (Step 1: 좌표축 눈금 숫자 겹침 자동 해결) 독립 단계 실행
   const tickPlan = enableUnit3B
-    ? planAxisTickOverlapsUnit3B(scene, activePlan, activeShift, axisEditsToApply)
+    ? planAxisTickOverlapsUnit3B(sceneForPostPlan, activePlan, activeShift, axisEditsToApply)
     : {
         edits: [],
         movedTicks: [],
@@ -516,9 +577,9 @@ export function runPlanningV022(
   }
 
   if (tickPlan.movedTicks && tickPlan.movedTicks.length > 0) {
-    axisPlan = planAxesV022(scene, activePlan, P, { tickMoves: tickPlan.movedTicks });
+    axisPlan = planAxesV022(sceneForPostPlan, activePlan, P, { tickMoves: tickPlan.movedTicks });
     if (applyAxisRequested) {
-      axisEditsToApply = axisEdits(scene, axisPlan);
+      axisEditsToApply = axisEdits(sceneForPostPlan, axisPlan);
     }
   }
 
@@ -530,7 +591,7 @@ export function runPlanningV022(
   // Unit 3-D-Origin (표준 원점 O 노드 4방향 자동 배치 규칙) 독립 단계 실행
   const originPlan = shouldRunUnit3D
     ? planOriginNodeUnit3D(
-        scene,
+        sceneForPostPlan,
         activePlan,
         activeShift,
         axisEditsToApply,
@@ -552,6 +613,7 @@ export function runPlanningV022(
   activePlan.decisionsByNodeId = decisionsByNodeId;
   activePlan.tickPlan = tickPlan;
   activePlan.originPlan = originPlan;
+  activePlan.domainPlan = domainPlan;
 
   // placements 배열에도 shift 와 selectedEngine 보강
   const shiftById = new Map((activeShift.report || []).map((r) => [r.id, r]));
@@ -574,6 +636,8 @@ export function runPlanningV022(
     activePlan,
     axisPlan,
     axisEditsToApply,
+    domainPlan,
+    domainEditsToApply,
     activeShift,
     tickPlan,
     originPlan,
@@ -777,20 +841,23 @@ export function compareCollisionDiagnosticsV022(
 /**
  * v0.2.2-beta 보존 검증기:
  *  - 기존 checkPreservation 의 모든 불변성(수식, domain, samples, 선분, 마커, 전역 폰트/선 두께, 범위 밖 텍스트)을 검증하며,
- *  - Unit 3-D-Origin 의 origin-anchor 편집(원점 O 옵션 내 4방향 앵커 토큰만 변경)을 추가로 허용·검증한다.
+ *  - Unit 3-D-Origin 의 origin-anchor 편집(원점 O 옵션 내 4방향 앵커 토큰만 변경)과
+ *    Unit 2-B 의 domain-micro-ext 편집(plot 의 domain=a:b 수치 구간만 안전 연장)을 추가로 허용·검증한다.
  */
 export function checkPreservationV022(orig, rec, edits = []) {
   const originEdits = (edits || []).filter((e) => e && e.kind === "origin-anchor");
-  if (originEdits.length === 0) {
+  const domainEdits = (edits || []).filter((e) => e && e.kind === "domain-micro-ext");
+  const specialEdits = [...originEdits, ...domainEdits];
+  if (specialEdits.length === 0) {
     return checkPreservation(orig, rec, edits);
   }
 
   const sortedAll = [...edits].sort((a, b) => a.start - b.start);
-  const originIssues = [];
+  const specialIssues = [];
 
   for (let i = 1; i < sortedAll.length; i++) {
     if (sortedAll[i].start < sortedAll[i - 1].end) {
-      originIssues.push("편집 범위 겹침 발생");
+      specialIssues.push("편집 범위 겹침 발생");
     }
   }
 
@@ -807,20 +874,41 @@ export function checkPreservationV022(orig, rec, edits = []) {
     const pBefore = parseStandardOriginOptionsUnit3D(beforeInner);
     const pAfter = parseStandardOriginOptionsUnit3D(afterInner);
     if (!pBefore.valid || !pAfter.valid || normOriginOpts(before) !== normOriginOpts(after)) {
-      originIssues.push(`원점 O 옵션이 4방향 앵커 외에도 변경됨: ${before} → ${after}`);
+      specialIssues.push(`원점 O 옵션이 4방향 앵커 외에도 변경됨: ${before} → ${after}`);
     }
   }
 
-  const sortedOrigin = [...originEdits].sort((a, b) => a.start - b.start);
-  const origWithOriginApplied = applyEdits(orig, sortedOrigin);
+  const domainTokenRe = /^domain\s*=\s*([-+]?(?:\d+\.?\d*|\.\d+))\s*:\s*([-+]?(?:\d+\.?\d*|\.\d+))$/;
+  for (const de of domainEdits) {
+    const before = orig.slice(de.start, de.end);
+    const after = String(de.replacement || "");
+    const mBefore = domainTokenRe.exec(before.trim());
+    const mAfter = domainTokenRe.exec(after.trim());
+    if (!mBefore || !mAfter) {
+      specialIssues.push(`plot domain 편집 형식이 유효하지 않음: ${before} → ${after}`);
+      continue;
+    }
+    const oldA = Number(mBefore[1]);
+    const oldB = Number(mBefore[2]);
+    const newA = Number(mAfter[1]);
+    const newB = Number(mAfter[2]);
+    if (!Number.isFinite(oldA) || !Number.isFinite(oldB) || !Number.isFinite(newA) || !Number.isFinite(newB) || newA >= newB) {
+      specialIssues.push(`plot domain 수치 범위가 유효하지 않음: ${before} → ${after}`);
+    } else if (newA > oldA + 1e-6 || newB < oldB - 1e-6) {
+      specialIssues.push(`plot domain 구간이 축소됨(연장 전용 위반): ${before} → ${after}`);
+    }
+  }
 
-  const nonOriginEditsMapped = (edits || [])
-    .filter((e) => e && e.kind !== "origin-anchor")
+  const sortedSpecial = [...specialEdits].sort((a, b) => a.start - b.start);
+  const origWithSpecialApplied = applyEdits(orig, sortedSpecial);
+
+  const nonSpecialEditsMapped = (edits || [])
+    .filter((e) => e && e.kind !== "origin-anchor" && e.kind !== "domain-micro-ext")
     .map((e) => {
       let delta = 0;
-      for (const oe of sortedOrigin) {
-        if (oe.end <= e.start) {
-          delta += oe.replacement.length - (oe.end - oe.start);
+      for (const se of sortedSpecial) {
+        if (se.end <= e.start) {
+          delta += se.replacement.length - (se.end - se.start);
         }
       }
       return {
@@ -830,8 +918,8 @@ export function checkPreservationV022(orig, rec, edits = []) {
       };
     });
 
-  const basePres = checkPreservation(origWithOriginApplied, rec, nonOriginEditsMapped);
-  const allIssues = [...originIssues, ...(basePres.issues || [])];
+  const basePres = checkPreservation(origWithSpecialApplied, rec, nonSpecialEditsMapped);
+  const allIssues = [...specialIssues, ...(basePres.issues || [])];
 
   return {
     ok: allIssues.length === 0,
@@ -840,7 +928,7 @@ export function checkPreservationV022(orig, rec, edits = []) {
     checks: {
       ...(basePres.checks || {}),
       allowedEditSyntaxOnly:
-        Boolean(basePres.checks?.allowedEditSyntaxOnly) && originIssues.length === 0,
+        Boolean(basePres.checks?.allowedEditSyntaxOnly) && specialIssues.length === 0,
     },
   };
 }
@@ -1076,4 +1164,1136 @@ export function verifyOutputVariantV022({
   out.deliveredBody = candidateBody;
   out.scene = sc;
   return out;
+}
+
+const r3 = (n) => (typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 1000) / 1000 : n);
+
+export const DEFAULT_DOMAIN_EXT_CONFIG_V022 = {
+  // 렌더링 pt 기준 연장량 탐색 격자 및 상한
+  arcStepGridPt: [8, 12, 16, 18.5, 19.7, 21, 24, 28, 30, 32, 36, 40, 44, 48, 52],
+  maxArcLengthPt: 55.0,          // 렌더링 곡선 길이 기준 최대 미세 연장 상한 (pt)
+  maxDomainRatio: 0.25,          // 기존 정의역 폭(b - a) 대비 최대 연장 비율 (25%)
+  domainRoundStep: 0.02,         // TikZ domain 수치 반올림 단위
+  // 8단계 안전 게이트 임계값
+  markerLockRadiusPt: 5.0,       // 끝점에 점/원/꼭짓점/투영 보조선이 있을 때 잠금 반경 (pt)
+  maxSlopePtPerPt: 8.5,          // 점근선/발산 구간 감지를 위한 렌더링 기울기(|dy_pt/dx_pt|) 상한
+  asymptoteClearanceMinPt: 3.0,  // 점선 점근선과의 최소 안전 간격 (pt)
+  otherStrokeMinClearPt: 2.5,    // 연장 구간이 다른 곡선/직선과 교차·접촉하지 않기 위한 최소 간격 (pt)
+  otherNodeMinClearPt: 4.0,      // 연장 구간이 다른 라벨/눈금/축라벨 bbox와 유지할 최소 간격 (pt)
+  clipMarginPt: 2.5,             // \clip 사각형 경계 안쪽 최소 여유 (pt)
+  // 필요성 판정(Gate 8) 및 평가원 스타일 목표 간격(4.5~7.5pt)
+  triggerMinOwnGapPt: 10.0,      // 기존 배치의 자기 곡선 간격(own)이 이 값 이상일 때만 연결감 개선 대상으로 검토
+  comfortableOwnGapMinPt: 4.5,   // 연장 후 평가원 스타일 적정 최소 라벨-곡선 간격 (pt)
+  comfortableOwnGapIdealPt: 5.6, // 연장 후 평가원 스타일 이상적 라벨-곡선 간격 (pt)
+  comfortableOwnGapMaxPt: 7.5,   // 연장 후 평가원 스타일 적정 최대 라벨-곡선 간격 (pt)
+  gapClosureMinRelX: 0.48,       // 위/아래 배치 라벨에서 곡선 끝점이 도달해야 할 최소 가로 중심 비율
+  gapClosureIdealRelX: 0.51,     // 위/아래 배치 라벨에서 이상적 가로 중심 비율 (라벨 중앙 부근)
+  gapClosureMaxRelX: 0.68,       // 과도한 우측 돌출 방지를 위한 가로 비율 상한
+  jointMinOtherClearPt: 6.0,     // 공동 배치된 라벨과 타 선분 간 최소 안전 간격 (pt)
+  congestionEscapeMinClearPt: 8.0, // 보조선 혼잡 탈출 시 확보해야 할 최소 타 선분 간격 (pt)
+  jointMinLabelGapPt: 5.0,       // 공동 배치된 라벨과 타 노드 간 최소 안전 간격 (pt)
+};
+
+/**
+ * TikZ 본문에서 \clip (x0, y0) rectangle (x1, y1) 영역들을 pt 좌표로 추출
+ */
+export function extractClipRectsPtV022(body, units) {
+  if (!body || !units || !units.xU || !units.yU) return [];
+  const masked = maskComments(body);
+  const NUM = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)`;
+  const re = new RegExp(
+    String.raw`\\clip\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*rectangle\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*;`,
+    "g"
+  );
+  const rects = [];
+  let m;
+  while ((m = re.exec(masked)) !== null) {
+    const x0 = Number(m[1]) * units.xU;
+    const y0 = Number(m[2]) * units.yU;
+    const x1 = Number(m[3]) * units.xU;
+    const y1 = Number(m[4]) * units.yU;
+    rects.push({
+      pos: m.index,
+      x0: Math.min(x0, x1),
+      y0: Math.min(y0, y1),
+      x1: Math.max(x0, x1),
+      y1: Math.max(y0, y1),
+    });
+  }
+  return rects;
+}
+
+/**
+ * 특정 문장(stmt.start)이 속한 \begin{scope} ... \end{scope} 내부의 \clip 사각형을 찾는다.
+ */
+export function findActiveClipForStmtV022(body, stmt, units) {
+  if (!body || !stmt || !units) return null;
+  const masked = maskComments(body);
+  const scopeRe = /\\begin\{scope\}[\s\S]*?\\end\{scope\}/g;
+  let m;
+  while ((m = scopeRe.exec(masked)) !== null) {
+    const s0 = m.index;
+    const s1 = s0 + m[0].length;
+    if (stmt.start >= s0 && stmt.end <= s1) {
+      const clips = extractClipRectsPtV022(m[0], units);
+      if (clips.length > 0) return clips[clips.length - 1];
+    }
+  }
+  return null;
+}
+
+/**
+ * plot 문장의 함수 fn(u)에 대해 구간 [uFrom, uTo]의 렌더링 pt 폴리라인 샘플과 호의 길이(arcLengthPt)를 계산
+ */
+export function samplePlotSegmentPtV022(fn, uFrom, uTo, units, nSamples = 32) {
+  const xU = units?.xU || 28.45274;
+  const yU = units?.yU || 28.45274;
+  const pts = [];
+  let arcLengthPt = 0;
+  let maxSlopePtPerPt = 0;
+  let prevSlopeSign = 0;
+  let slopeSignFlips = 0;
+  let nonFinite = false;
+
+  for (let i = 0; i <= nSamples; i++) {
+    const t = i / nSamples;
+    const u = uFrom + (uTo - uFrom) * t;
+    let yMath;
+    try {
+      yMath = fn(u);
+    } catch {
+      nonFinite = true;
+      break;
+    }
+    if (typeof yMath !== "number" || !Number.isFinite(yMath) || Math.abs(yMath) > 1e4) {
+      nonFinite = true;
+      break;
+    }
+    const p = [u * xU, yMath * yU];
+    if (pts.length > 0) {
+      const prev = pts[pts.length - 1];
+      const dx = p[0] - prev[0];
+      const dy = p[1] - prev[1];
+      const ds = Math.hypot(dx, dy);
+      arcLengthPt += ds;
+      const slope = Math.abs(dx) > 1e-6 ? Math.abs(dy / dx) : 1e6;
+      if (slope > maxSlopePtPerPt) maxSlopePtPerPt = slope;
+      if (Math.abs(dy) > 0.05) {
+        const sgn = dy > 0 ? 1 : -1;
+        if (prevSlopeSign !== 0 && sgn !== prevSlopeSign) slopeSignFlips++;
+        prevSlopeSign = sgn;
+      }
+    }
+    pts.push(p);
+  }
+
+  return {
+    ok: !nonFinite && pts.length >= 2,
+    pts,
+    endPt: pts.length > 0 ? pts[pts.length - 1] : null,
+    arcLengthPt: r2(arcLengthPt),
+    maxSlopePtPerPt: r2(maxSlopePtPerPt),
+    slopeSignFlips,
+  };
+}
+
+/**
+ * 렌더링 호 길이(targetArcPt)에 대응하는 새로운 정의역 끝점 uNew를 미분 호 길이 적분으로 계산
+ */
+export function solveDomainEndForArcLengthPtV022(
+  fn,
+  uStart,
+  directionSign,
+  targetArcPt,
+  units,
+  config = DEFAULT_DOMAIN_EXT_CONFIG_V022
+) {
+  const xU = units?.xU || 28.45274;
+  const yU = units?.yU || 28.45274;
+  const stepDu = 0.005 * (directionSign >= 0 ? 1 : -1);
+  let u = uStart;
+  let accumPt = 0;
+  let prevPt = [u * xU, fn(u) * yU];
+  if (!Number.isFinite(prevPt[1])) return null;
+
+  const maxSteps = 2000;
+  for (let step = 0; step < maxSteps; step++) {
+    const nextU = u + stepDu;
+    let nextY;
+    try {
+      nextY = fn(nextU);
+    } catch {
+      return null;
+    }
+    if (typeof nextY !== "number" || !Number.isFinite(nextY)) return null;
+    const nextPt = [nextU * xU, nextY * yU];
+    const ds = Math.hypot(nextPt[0] - prevPt[0], nextPt[1] - prevPt[1]);
+    if (ds > 50) return null;
+    accumPt += ds;
+    u = nextU;
+    prevPt = nextPt;
+    if (accumPt >= targetArcPt) break;
+  }
+
+  const roundStep = config.domainRoundStep || 0.02;
+  const uRounded = Math.round(u / roundStep) * roundStep;
+  return Number(uRounded.toFixed(2));
+}
+
+/**
+ * TikZ 코드에서 특정 plot 문장(stmt)의 domain=a:b 옵션만 정밀 치환하는 편집 객체 생성
+ */
+export function buildDomainEditV022(body, stmt, newDomain) {
+  const NUM = String.raw`[-+]?(?:\d+\.?\d*|\.\d+)`;
+  const stmtText = body.slice(stmt.start, stmt.end);
+  const dmRe = new RegExp(String.raw`(domain\s*=\s*)(${NUM})(\s*:\s*)(${NUM})`);
+  const m = dmRe.exec(stmtText);
+  if (!m) return null;
+  const matchStartInBody = stmt.start + m.index;
+  const matchEndInBody = matchStartInBody + m[0].length;
+  const fmt = (v) => (Number.isInteger(v) ? String(v) : String(Number(v.toFixed(2))));
+  const replacement = `${m[1]}${fmt(newDomain[0])}${m[3]}${fmt(newDomain[1])}`;
+  return {
+    kind: "domain-micro-ext",
+    start: matchStartInBody,
+    end: matchEndInBody,
+    oldText: m[0],
+    replacement,
+    oldDomain: [...stmt.domain],
+    newDomain: [Number(fmt(newDomain[0])), Number(fmt(newDomain[1]))],
+  };
+}
+
+/**
+ * 8단계 보수적 안전 필터 (Safety Gates 1~7; Gate 8은 필요성 및 개선 폭 판정)
+ */
+export function evaluateDomainExtensionSafetyGuardsV022({
+  scene,
+  node,
+  stroke,
+  assignment,
+  endIdx,
+  uNew,
+  config = DEFAULT_DOMAIN_EXT_CONFIG_V022,
+  ignoreNodeIds = new Set(),
+}) {
+  const C = { ...DEFAULT_DOMAIN_EXT_CONFIG_V022, ...(config || {}) };
+  const gates = [];
+
+  // Gate 1: 라벨-곡선 매칭 확정성 및 단일 plot 수식 존재 여부
+  const stmt = stroke?.stmt;
+  const hasPlotFn = Boolean(
+    stmt &&
+      stmt.type === "plot" &&
+      Array.isArray(stmt.domain) &&
+      stmt.domain.length === 2 &&
+      typeof stmt.fn === "function"
+  );
+  const matchConfirmed = Boolean(assignment && assignment.confirmed);
+  const gate1Pass = matchConfirmed && hasPlotFn;
+  gates.push({
+    gate: "Gate 1 (매칭 확정 및 유효 plot 함수식)",
+    code: "unconfirmed-match",
+    passed: gate1Pass,
+    detail: gate1Pass
+      ? `매칭 확정(${assignment.how}) 및 plot domain=[${stmt.domain[0]}, ${stmt.domain[1]}] 확인`
+      : "라벨-곡선 대응이 미확정이거나 단일 plot 수식이 아님",
+  });
+  if (!gate1Pass) {
+    return {
+      safe: false,
+      blockedCode: "unconfirmed-match",
+      blockedReason: gates[gates.length - 1].detail,
+      gates,
+    };
+  }
+
+  const [u0, u1] = stmt.domain;
+  const uOrigEnd = endIdx === 0 ? u0 : u1;
+  const dirSign = endIdx === 0 ? -1 : 1;
+  const deltaU = (uNew - uOrigEnd) * dirSign;
+  const domainSpan = Math.abs(u1 - u0);
+  const origEndPt = endIdx === 0 ? stroke.pts[0] : stroke.pts[stroke.pts.length - 1];
+
+  // Gate 2: 끝점이 점/원/폐구간 마커, 꼭짓점 라벨, 또는 축 투영 점선 보조선과 연결된 경우 차단
+  let endpointMarkerHit = null;
+  for (const nd of scene.nodes || []) {
+    if (nd.id === node.id) continue;
+    if (nd.role === "marker" || nd.role === "vertex") {
+      const pt =
+        nd.at ||
+        nd.anchor ||
+        (nd.bbox ? [(nd.bbox.x0 + nd.bbox.x1) / 2, (nd.bbox.y0 + nd.bbox.y1) / 2] : null);
+      if (pt && Math.hypot(pt[0] - origEndPt[0], pt[1] - origEndPt[1]) <= C.markerLockRadiusPt) {
+        endpointMarkerHit = `끝점(${r2(origEndPt[0])}, ${r2(origEndPt[1])})이 마커/꼭짓점 노드(${nd.label || nd.role})와 연결됨`;
+        break;
+      }
+    }
+  }
+  if (!endpointMarkerHit && scene.geom && Array.isArray(scene.geom.paths)) {
+    for (const p of scene.geom.paths) {
+      if (p.kind === "marker" || (p.kind === "filled" && p.bbox)) {
+        const b = p.bbox;
+        if (!b) continue;
+        const w = b.x1 - b.x0;
+        const h = b.y1 - b.y0;
+        if (w <= 12 && h <= 12) {
+          const cx = (b.x0 + b.x1) / 2;
+          const cy = (b.y0 + b.y1) / 2;
+          if (Math.hypot(cx - origEndPt[0], cy - origEndPt[1]) <= C.markerLockRadiusPt) {
+            endpointMarkerHit = `끝점이 점/원 마커 도형(반경 ${r2(Math.max(w, h) / 2)}pt)과 연결됨`;
+            break;
+          }
+        }
+      }
+    }
+  }
+  if (!endpointMarkerHit) {
+    for (const s of scene.strokes || []) {
+      if (s.index === stroke.index || s.kind === "axis") continue;
+      if (!s.pts || s.pts.length < 2) continue;
+      const sp0 = s.pts[0];
+      const sp1 = s.pts[s.pts.length - 1];
+      const d0 = Math.hypot(sp0[0] - origEndPt[0], sp0[1] - origEndPt[1]);
+      const d1 = Math.hypot(sp1[0] - origEndPt[0], sp1[1] - origEndPt[1]);
+      if (Math.min(d0, d1) <= C.markerLockRadiusPt) {
+        endpointMarkerHit = `끝점이 보조선/다른 선분(#${s.index})의 끝점과 직접 맞닿아 정의역 경계를 나타냄(거리 ${r2(Math.min(d0, d1))}pt)`;
+        break;
+      }
+    }
+  }
+  const gate2Pass = !endpointMarkerHit;
+  gates.push({
+    gate: "Gate 2 (정의역 끝점 마커·투영선 잠금 검사)",
+    code: "endpoint-marker-or-tick-locked",
+    passed: gate2Pass,
+    detail: gate2Pass ? "끝점에 연결된 마커·꼭짓점·투영 보조선 없음" : endpointMarkerHit,
+  });
+  if (!gate2Pass) {
+    return {
+      safe: false,
+      blockedCode: "endpoint-marker-or-tick-locked",
+      blockedReason: endpointMarkerHit,
+      gates,
+    };
+  }
+
+  // Gate 4: Piecewise 함수 또는 다중 주기 가지(periodicBranches) 여부 검사
+  let piecewiseHit = null;
+  if (Array.isArray(assignment.periodicBranches) && assignment.periodicBranches.length > 1) {
+    piecewiseHit = `다중 주기 가지(${assignment.periodicBranches.map((i) => `#${i}`).join(", ")})로 구성된 함수는 개별 가지 연장을 차단함 (Gate 4)`;
+  } else {
+    for (const s of scene.strokes || []) {
+      if (s.index === stroke.index || !s.stmt || s.stmt.type !== "plot" || !Array.isArray(s.stmt.domain)) continue;
+      const [ou0, ou1] = s.stmt.domain;
+      if (Math.abs(u1 - ou0) <= 0.05 || Math.abs(u0 - ou1) <= 0.05 || Math.abs(uOrigEnd - ou0) <= 0.05 || Math.abs(uOrigEnd - ou1) <= 0.05) {
+        piecewiseHit = `다른 plot 구간(#${s.index}: domain=[${ou0}, ${ou1}])과 정의역 경계(${uOrigEnd})를 공유하는 구간별(piecewise) 함수 (Gate 4)`;
+        break;
+      }
+    }
+  }
+  const gate4Pass = !piecewiseHit;
+  gates.push({
+    gate: "Gate 4 (구간별 함수 및 다중 plot 조각 보호)",
+    code: "piecewise-or-multi-branch",
+    passed: gate4Pass,
+    detail: gate4Pass ? "단일 연속 plot 곡선 확인" : piecewiseHit,
+  });
+  if (!gate4Pass) {
+    return {
+      safe: false,
+      blockedCode: "piecewise-or-multi-branch",
+      blockedReason: piecewiseHit,
+      gates,
+    };
+  }
+
+  // Gate 3: 불연속점, 점근선, 발산 기울기 및 단조성 반전(새 극점 생성) 위험 구간 검사
+  const extSeg = samplePlotSegmentPtV022(stmt.fn, uOrigEnd, uNew, scene.units, 36);
+  const lookaheadU = uNew + dirSign * Math.min(0.15, Math.max(0.05, deltaU * 0.35));
+  const lookaheadSeg = samplePlotSegmentPtV022(stmt.fn, uOrigEnd, lookaheadU, scene.units, 40);
+
+  let hazardReason = null;
+  if (!extSeg.ok || !lookaheadSeg.ok) {
+    hazardReason = "연장 구간 또는 인접 구간에서 함수값이 정의되지 않거나 발산함 (Gate 3)";
+  } else if (
+    extSeg.maxSlopePtPerPt > C.maxSlopePtPerPt ||
+    lookaheadSeg.maxSlopePtPerPt > C.maxSlopePtPerPt * 1.25
+  ) {
+    hazardReason = `연장 구간의 렌더링 기울기(${extSeg.maxSlopePtPerPt} pt/pt)가 급격히 발산하여 점근선/특이점 위험 구간으로 판정됨 (Gate 3)`;
+  } else if (extSeg.slopeSignFlips > 0) {
+    hazardReason = "연장 구간 내에서 기울기 부호가 반전되어 원본에 없던 새로운 극점(변곡/꺾임)이 생성됨 (Gate 3)";
+  } else {
+    for (const s of scene.strokes || []) {
+      if (s.index === stroke.index || s.kind === "axis") continue;
+      const sk = classifyStrokeKind(s);
+      if (sk === "verticalLine") {
+        const vx = s.pts[0][0];
+        const dStart = Math.abs(origEndPt[0] - vx);
+        const dEnd = Math.abs(extSeg.endPt[0] - vx);
+        if (dEnd < dStart && dEnd <= C.asymptoteClearanceMinPt && extSeg.maxSlopePtPerPt >= 3.5) {
+          hazardReason = `연장 끝점이 수직 보조선/점근선(#${s.index}, x=${r2(vx)}pt)에 ${r2(dEnd)}pt까지 접근함 (Gate 3)`;
+          break;
+        }
+      }
+    }
+  }
+  const gate3Pass = !hazardReason;
+  gates.push({
+    gate: "Gate 3 (불연속·점근선·발산 및 극점 생성 차단)",
+    code: "singularity-or-asymptote-hazard",
+    passed: gate3Pass,
+    detail: gate3Pass
+      ? `연속·단조 유지 (최대 기울기 ${extSeg.maxSlopePtPerPt} pt/pt, 부호 반전 0회)`
+      : hazardReason,
+  });
+  if (!gate3Pass) {
+    return {
+      safe: false,
+      blockedCode: "singularity-or-asymptote-hazard",
+      blockedReason: hazardReason,
+      gates,
+    };
+  }
+
+  // Gate 5: \clip 사각형 경계 이탈 검사
+  const activeClip = findActiveClipForStmtV022(scene.body, stmt, scene.units);
+  let clipViolation = null;
+  if (activeClip) {
+    for (const p of extSeg.pts) {
+      if (
+        p[0] < activeClip.x0 + C.clipMarginPt ||
+        p[0] > activeClip.x1 - C.clipMarginPt ||
+        p[1] < activeClip.y0 + C.clipMarginPt ||
+        p[1] > activeClip.y1 - C.clipMarginPt
+      ) {
+        clipViolation = `연장 구간 점(${r2(p[0])}, ${r2(p[1])})이 \\clip 경계([${r2(activeClip.x0)}, ${r2(activeClip.y0)}]..[${r2(activeClip.x1)}, ${r2(activeClip.y1)}]) 바깥 또는 경계에 도달함 (Gate 5)`;
+        break;
+      }
+    }
+  }
+  const gate5Pass = !clipViolation;
+  gates.push({
+    gate: "Gate 5 (\\clip 가시 영역 경계 보호)",
+    code: "outside-clip-or-axis-bound",
+    passed: gate5Pass,
+    detail: gate5Pass
+      ? activeClip
+        ? "\\clip 영역 내부 안전 여유 확인"
+        : "\\clip 미사용(전체 가시)"
+      : clipViolation,
+  });
+  if (!gate5Pass) {
+    return {
+      safe: false,
+      blockedCode: "outside-clip-or-axis-bound",
+      blockedReason: clipViolation,
+      gates,
+    };
+  }
+
+  // Gate 6: 연장된 곡선 구간(extSeg)이 다른 곡선/직선과 새로운 교점을 만들거나 다른 노드 bbox와 충돌하는지 검사
+  let collisionHit = null;
+  for (const s of scene.strokes || []) {
+    if (s.index === stroke.index || s.kind === "axis") continue;
+    if (!s.pts || s.pts.length < 2) continue;
+    const dist =
+      minDistPolylines([{ pts: extSeg.pts, closed: false }], [{ pts: s.pts, closed: false }]) -
+      ((stroke.halfWidth || 0.75) + (s.halfWidth || 0.5));
+    const tailPts = extSeg.pts.slice(Math.min(4, extSeg.pts.length - 2));
+    const tailDist =
+      minDistPolylines([{ pts: tailPts, closed: false }], [{ pts: s.pts, closed: false }]) -
+      ((stroke.halfWidth || 0.75) + (s.halfWidth || 0.5));
+    const startDist = minDistPolylines(
+      [{ pts: [origEndPt, origEndPt], closed: false }],
+      [{ pts: s.pts, closed: false }]
+    );
+    const movingAway = tailDist > startDist + 1.0;
+
+    if (tailDist < C.otherStrokeMinClearPt && !movingAway) {
+      collisionHit = `연장 구간이 다른 선/곡선(#${s.index})과 ${r2(tailDist)}pt로 근접하거나 새로운 교점을 형성함 (Gate 6)`;
+      break;
+    }
+    if (dist < 0.5 && !movingAway) {
+      collisionHit = `연장 구간이 다른 선/곡선(#${s.index})과 교차함(간격 ${r2(dist)}pt) (Gate 6)`;
+      break;
+    }
+  }
+  if (!collisionHit) {
+    const tailPts = extSeg.pts.slice(Math.min(4, extSeg.pts.length - 2));
+    for (const nd of scene.nodes || []) {
+      if (nd.id === node.id || ignoreNodeIds.has(nd.id) || !nd.bbox || nd.role === "marker") continue;
+      if (nd.role === "axisLabel" && nd.kind === "inline") continue;
+      const clAll =
+        minDistPolylines([rectPoly(nd.bbox)], [{ pts: extSeg.pts, closed: false }]) -
+        (stroke.halfWidth || 0.75);
+      const clTail =
+        minDistPolylines([rectPoly(nd.bbox)], [{ pts: tailPts, closed: false }]) -
+        (stroke.halfWidth || 0.75);
+      const clStart =
+        minDistPolylines([rectPoly(nd.bbox)], [{ pts: [origEndPt, origEndPt], closed: false }]) -
+        (stroke.halfWidth || 0.75);
+      const movingAwayNode = clTail > clStart + 1.0 && clAll >= clStart - 0.05;
+      if (clTail < C.otherNodeMinClearPt && !movingAwayNode) {
+        collisionHit = `연장 구간이 기존 노드(${nd.label}, role=${nd.role}) bbox와 ${r2(clTail)}pt로 침범/근접함 (Gate 6)`;
+        break;
+      }
+      if (clAll < 0.5 && !movingAwayNode) {
+        collisionHit = `연장 구간이 기존 노드(${nd.label}, role=${nd.role}) bbox와 ${r2(clAll)}pt로 침범함 (Gate 6)`;
+        break;
+      }
+    }
+  }
+  const gate6Pass = !collisionHit;
+  gates.push({
+    gate: "Gate 6 (신규 교점 및 타 노드 충돌 차단)",
+    code: "new-intersection-or-collision",
+    passed: gate6Pass,
+    detail: gate6Pass ? "타 곡선/보조선 신규 교점 0건 및 타 노드 충돌 0건" : collisionHit,
+  });
+  if (!gate6Pass) {
+    return {
+      safe: false,
+      blockedCode: "new-intersection-or-collision",
+      blockedReason: collisionHit,
+      gates,
+    };
+  }
+
+  // Gate 7: 렌더링 호 길이(maxArcLengthPt) 및 정의역 비율(maxDomainRatio) 상한 검사
+  const domainRatio = domainSpan > 1e-6 ? deltaU / domainSpan : 1;
+  let capViolation = null;
+  if (deltaU <= 0) {
+    capViolation = "연장량이 0 이하임(축소 금지) (Gate 7)";
+  } else if (extSeg.arcLengthPt > C.maxArcLengthPt + 0.5) {
+    capViolation = `연장 호 길이(${extSeg.arcLengthPt}pt)가 상한(${C.maxArcLengthPt}pt)을 초과함 (Gate 7)`;
+  } else if (domainRatio > C.maxDomainRatio + 0.01) {
+    capViolation = `정의역 연장 비율(${r2(domainRatio * 100)}%)이 상한(${r2(C.maxDomainRatio * 100)}%)을 초과함 (Gate 7)`;
+  }
+  const gate7Pass = !capViolation;
+  gates.push({
+    gate: "Gate 7 (스케일 기반 연장량 상한 검사)",
+    code: "max-extension-cap",
+    passed: gate7Pass,
+    detail: gate7Pass
+      ? `연장 호 길이 ${extSeg.arcLengthPt}pt (<= ${C.maxArcLengthPt}pt), 정의역 비율 ${r2(domainRatio * 100)}% (<= ${r2(C.maxDomainRatio * 100)}%)`
+      : capViolation,
+  });
+  if (!gate7Pass) {
+    return {
+      safe: false,
+      blockedCode: "max-extension-cap",
+      blockedReason: capViolation,
+      gates,
+    };
+  }
+
+  return {
+    safe: true,
+    blockedCode: null,
+    blockedReason: null,
+    extSeg,
+    deltaU: r3(deltaU),
+    domainRatio: r3(domainRatio),
+    gates,
+  };
+}
+
+/**
+ * 주어진 라벨 bbox(candBbox)가 장면 내 타 선분(otherStrokes) 및 타 노드(otherNodes)와 유지하는 최소 간격 계산
+ */
+function measureBoxClearances(candBbox, ownStrokeIndex, strokes, nodes, ownNodeId) {
+  let minOtherPt = Infinity;
+  for (const q of strokes || []) {
+    if (!q || q.index === ownStrokeIndex || !Array.isArray(q.pts) || q.pts.length < 2) continue;
+    const c = clearanceToStroke(candBbox, q);
+    if (c < minOtherPt) minOtherPt = c;
+  }
+  let labelGapPt = Infinity;
+  for (const ob of nodes || []) {
+    if (!ob || !ob.bbox || ob.id === ownNodeId || ob.role === "marker" || (ob.role === "axisLabel" && ob.kind === "inline")) continue;
+    const g = bboxGapRect(candBbox, ob.bbox);
+    if (g < labelGapPt) labelGapPt = g;
+  }
+  return {
+    minOtherPt: Number.isFinite(minOtherPt) ? r2(minOtherPt) : 999,
+    labelGapPt: Number.isFinite(labelGapPt) ? r2(labelGapPt) : 999,
+  };
+}
+
+/**
+ * v0.2.2-beta 그래프 끝점(domain) 미세 연장 및 라벨 위치 공동 최적화 플래너
+ * - applyDomainExtension === false(기본값)일 때는 아무 작업도 수행하지 않고 빈 결과를 반환한다.
+ * - applyDomainExtension === true일 때:
+ *    1) 모든 함수식 노드에 대해 8단계 안전 게이트와 Gate 8 필요성 조건을 평가한다.
+ *    2) 유형 I (Gap-Closure, 예: CASE-001):
+ *       라벨이 직선/곡선 끝점 위/아래에 배치되었으나 끝점과의 거리(own >= 10pt)가 먼 경우,
+ *       끝점이 라벨 가로 중앙 부근(relX ≈ 0.50)까지 오도록 최소 연장하고,
+ *       라벨 수직 위치를 적정 간격(4.5~7.5pt, 목표 5.5pt)으로 공동 조정한다.
+ *    3) 유형 II (Congestion-Escape, 예: CASE-002):
+ *       라벨 매칭은 확정되었으나 기존 끝점 부근 보조선(점선 등) 혼잡으로 no-safe-candidate 보류된 경우,
+ *       보조선과 충분한 여백(>= 8pt)을 확보하는 최소 라벨 이동과 적정 곡선 간격(4.5~7.5pt, 목표 5.8pt)을
+ *       만드는 최소 domain 연장을 공동 탐색한다.
+ */
+export function planDomainMicroExtensionsV022(
+  scene,
+  basePlan,
+  baseShift,
+  P = PARAMS,
+  opts = {}
+) {
+  const applyDomainExtension = Boolean(opts.applyDomainExtension === true);
+  const config = { ...DEFAULT_DOMAIN_EXT_CONFIG_V022, ...(opts.domainExtConfig || {}) };
+  const flags = opts.flags || DEFAULT_UNIT2_FLAGS;
+
+  const emptyResult = {
+    requested: applyDomainExtension,
+    applied: false,
+    edits: [],
+    decisions: [],
+    updatedStrokesByIndex: new Map(),
+    updatedPlacementsById: new Map(),
+    updatedShiftReportById: new Map(),
+    updatedLabelEditsById: new Map(),
+  };
+
+  if (!applyDomainExtension || !scene || !scene.ok) {
+    return emptyResult;
+  }
+
+  const fnNodes = (scene.nodes || []).filter((n) => n.role === "function" && n.bbox);
+  const assignedMap = assignStrokesUnit2(scene, fnNodes, flags);
+  const placementsById = new Map((basePlan?.placements || []).map((p) => [p.id, p]));
+  const skippedById = new Map((basePlan?.skipped || []).map((s) => [s.id, s]));
+  const shiftById = new Map((baseShift?.report || []).map((r) => [r.id, r]));
+
+  // 현재 다른 함수식 라벨들의 배치된 bbox를 반영한 노드 목록 구성
+  const currentNodesForClearance = (scene.nodes || []).map((nd) => {
+    const pl = placementsById.get(nd.id);
+    if (pl && pl.action === "move" && pl.bbox) {
+      return { ...nd, bbox: pl.bbox };
+    }
+    return nd;
+  });
+
+  const decisions = [];
+  const edits = [];
+  const updatedStrokesByIndex = new Map();
+  const updatedPlacementsById = new Map();
+  const updatedShiftReportById = new Map();
+  const updatedLabelEditsById = new Map();
+
+  for (const fnNode of fnNodes) {
+    const asg = assignedMap.get(fnNode.id) || null;
+    const stroke = asg?.stroke || null;
+    const plItem = placementsById.get(fnNode.id) || null;
+    const skItem = skippedById.get(fnNode.id) || null;
+    const shItem = shiftById.get(fnNode.id) || null;
+
+    const baseShiftPair = shItem
+      ? [...shItem.newShift]
+      : [fnNode.xshift || 0, fnNode.yshift || 0];
+    const baseBbox = plItem?.bbox || fnNode.bbox;
+    const origOwnGapPt = stroke ? r2(clearanceToStroke(baseBbox, stroke)) : null;
+    const origClear = stroke
+      ? measureBoxClearances(baseBbox, stroke.index, scene.strokes, currentNodesForClearance, fnNode.id)
+      : { minOtherPt: null, labelGapPt: null };
+
+    // Gate 1: 매칭 확정 및 단일 plot 곡선 확인
+    if (
+      !asg ||
+      !asg.confirmed ||
+      !stroke ||
+      !stroke.stmt ||
+      stroke.stmt.type !== "plot" ||
+      !Array.isArray(stroke.stmt.domain) ||
+      typeof stroke.stmt.fn !== "function"
+    ) {
+      decisions.push({
+        nodeId: fnNode.id,
+        label: fnNode.label,
+        strokeIndex: stroke?.index ?? null,
+        plotExpr: stroke?.stmt?.expr || null,
+        action: "hold",
+        triggerType: null,
+        origDomain: stroke?.stmt?.domain ? [...stroke.stmt.domain] : null,
+        newDomain: stroke?.stmt?.domain ? [...stroke.stmt.domain] : null,
+        arcLengthPt: 0,
+        domainRatioPct: 0,
+        origOwnGapPt,
+        newOwnGapPt: origOwnGapPt,
+        origMinOtherPt: origClear.minOtherPt,
+        newMinOtherPt: origClear.minOtherPt,
+        origShift: baseShiftPair,
+        newShift: baseShiftPair,
+        holdCode: "unconfirmed-or-non-plot",
+        reason: !asg?.confirmed
+          ? `라벨-곡선 매칭 미확정(${asg?.how || "unmatched"})으로 그래프 끝점 연장을 보류함 (Gate 1)`
+          : "대응 도형이 domain 기반 plot 곡선이 아니므로 끝점 연장 대상이 아님 (Gate 1)",
+      });
+      continue;
+    }
+
+    const dEnd0 = bboxPtDist(stroke.pts[0], baseBbox);
+    const dEnd1 = bboxPtDist(stroke.pts[stroke.pts.length - 1], baseBbox);
+    const endIdx = dEnd1 <= dEnd0 ? 1 : 0;
+    const dirSign = endIdx === 0 ? -1 : 1;
+    const uOrigEnd = stroke.stmt.domain[endIdx];
+    const domainSpan = Math.abs(stroke.stmt.domain[1] - stroke.stmt.domain[0]);
+
+    // 선행 안전 게이트 점검(Gate 2, Gate 3, Gate 4, Gate 5, Gate 6): 최소 시험 연장(12pt)으로 구조적 차단 사유 확인
+    const probeU = solveDomainEndForArcLengthPtV022(
+      stroke.stmt.fn,
+      uOrigEnd,
+      dirSign,
+      12,
+      scene.units,
+      config
+    );
+    if (probeU !== null) {
+      const probeGuard = evaluateDomainExtensionSafetyGuardsV022({
+        scene,
+        node: fnNode,
+        stroke,
+        assignment: asg,
+        endIdx,
+        uNew: probeU,
+        config,
+      });
+      if (
+        !probeGuard.safe &&
+        (probeGuard.blockedCode === "piecewise-or-multi-branch" ||
+          probeGuard.blockedCode === "endpoint-marker-or-tick-locked")
+      ) {
+        decisions.push({
+          nodeId: fnNode.id,
+          label: fnNode.label,
+          strokeIndex: stroke.index,
+          plotExpr: stroke.stmt.expr || null,
+          action: "hold",
+          triggerType: null,
+          origDomain: [...stroke.stmt.domain],
+          newDomain: [...stroke.stmt.domain],
+          arcLengthPt: 0,
+          domainRatioPct: 0,
+          origOwnGapPt,
+          newOwnGapPt: origOwnGapPt,
+          origMinOtherPt: origClear.minOtherPt,
+          newMinOtherPt: origClear.minOtherPt,
+          origShift: baseShiftPair,
+          newShift: baseShiftPair,
+          holdCode: probeGuard.blockedCode,
+          reason: probeGuard.blockedReason,
+        });
+        continue;
+      }
+    }
+
+    // Gate 8 (필요성 판정):
+    //  - 유형 I (Gap-Closure): 배치된 라벨과 자기 곡선 간격이 10pt 이상 벌어진 경우
+    //  - 유형 II (Congestion-Escape): 매칭은 확정되었으나 no-safe-candidate로 보류되어 own >= 10pt 인 경우
+    const needsCongestionEscape = Boolean(
+      skItem &&
+        skItem.category === "no-safe-candidate" &&
+        typeof origOwnGapPt === "number" &&
+        origOwnGapPt >= config.triggerMinOwnGapPt
+    );
+    const needsGapClosure = Boolean(
+      !needsCongestionEscape &&
+        typeof origOwnGapPt === "number" &&
+        origOwnGapPt >= config.triggerMinOwnGapPt
+    );
+
+    // 원본 라벨 자체가 멀리 떨어져 있었으나(rawOwnGap >= 10pt) Gate 5(\clip) 또는 Gate 6(교차) 때문에 연장 불가한 경우 진단 기록
+    const rawNodeOwnGapPt = r2(clearanceToStroke(fnNode.bbox, stroke));
+    if (!needsGapClosure && !needsCongestionEscape) {
+      let holdCode = "already-optimal-or-no-benefit";
+      let holdReason = `현재 라벨-곡선 간격(${origOwnGapPt}pt)이 이미 적정 범위(< ${config.triggerMinOwnGapPt}pt)이므로 불필요한 그래프 연장을 생략함 (Gate 8)`;
+      if (rawNodeOwnGapPt >= config.triggerMinOwnGapPt) {
+        const rawEndIdx = bboxPtDist(stroke.pts[stroke.pts.length - 1], fnNode.bbox) <= bboxPtDist(stroke.pts[0], fnNode.bbox) ? 1 : 0;
+        const rawProbeU = solveDomainEndForArcLengthPtV022(stroke.stmt.fn, stroke.stmt.domain[rawEndIdx], rawEndIdx === 0 ? -1 : 1, 12, scene.units, config);
+        const probeGuard = rawProbeU !== null ? evaluateDomainExtensionSafetyGuardsV022({
+          scene,
+          node: fnNode,
+          stroke,
+          assignment: asg,
+          endIdx: rawEndIdx,
+          uNew: rawProbeU,
+          config,
+        }) : { safe: true };
+        if (!probeGuard.safe) {
+          holdCode = probeGuard.blockedCode;
+          holdReason = probeGuard.blockedReason;
+        }
+      }
+      decisions.push({
+        nodeId: fnNode.id,
+        label: fnNode.label,
+        strokeIndex: stroke.index,
+        plotExpr: stroke.stmt.expr || null,
+        action: "hold",
+        triggerType: null,
+        origDomain: [...stroke.stmt.domain],
+        newDomain: [...stroke.stmt.domain],
+        arcLengthPt: 0,
+        domainRatioPct: 0,
+        origOwnGapPt,
+        newOwnGapPt: origOwnGapPt,
+        origMinOtherPt: origClear.minOtherPt,
+        newMinOtherPt: origClear.minOtherPt,
+        origShift: baseShiftPair,
+        newShift: baseShiftPair,
+        holdCode,
+        reason: holdReason,
+      });
+      continue;
+    }
+
+    const triggerType = needsCongestionEscape ? "congestion-escape" : "gap-closure";
+    let bestJointCandidate = null;
+    let firstGateBlock = null;
+
+    if (triggerType === "gap-closure") {
+      // ----------------------------------------------------------------------
+      // 유형 I (Gap-Closure):
+      //  라벨의 가로 위치(baseShiftPair[0])는 그대로 유지하면서,
+      //  1) 곡선 끝점이 라벨 가로 중앙 부근(relX ∈ [0.48, 0.68], 목표 0.51)에 도달하는 최소 domain 연장을 찾고,
+      //  2) 연장된 끝점과 라벨 사이의 수직 간격(yshift)을 적정 범위(4.5~7.5pt, 목표 5.5pt)로 공동 최적화한다.
+      // ----------------------------------------------------------------------
+      const seenU = new Set();
+      for (const arcPt of config.arcStepGridPt) {
+        const uCand = solveDomainEndForArcLengthPtV022(
+          stroke.stmt.fn,
+          uOrigEnd,
+          dirSign,
+          arcPt,
+          scene.units,
+          config
+        );
+        if (uCand === null || seenU.has(uCand)) continue;
+        seenU.add(uCand);
+
+        const safety = evaluateDomainExtensionSafetyGuardsV022({
+          scene,
+          node: fnNode,
+          stroke,
+          assignment: asg,
+          endIdx,
+          uNew: uCand,
+          config,
+        });
+        if (!safety.safe) {
+          if (!firstGateBlock) firstGateBlock = safety;
+          continue;
+        }
+
+        const newDomain =
+          endIdx === 0 ? [uCand, stroke.stmt.domain[1]] : [stroke.stmt.domain[0], uCand];
+        const domainEdit = buildDomainEditV022(scene.body, stroke.stmt, newDomain);
+        if (!domainEdit) continue;
+
+        const fullStrokePts =
+          endIdx === 1
+            ? [...stroke.pts, ...safety.extSeg.pts.slice(1)]
+            : [...safety.extSeg.pts.slice(0, -1).reverse(), ...stroke.pts];
+        const extStrokeObj = { ...stroke, pts: fullStrokePts };
+        const newEndPt = safety.extSeg.endPt;
+
+        const wBox = baseBbox.x1 - baseBbox.x0;
+        const relX =
+          wBox > 1e-6
+            ? dirSign >= 0
+              ? (newEndPt[0] - baseBbox.x0) / wBox
+              : (baseBbox.x1 - newEndPt[0]) / wBox
+            : 0.5;
+
+        if (relX < config.gapClosureMinRelX || relX > config.gapClosureMaxRelX) {
+          continue;
+        }
+
+        // 수직 미세 이동(dyStep ∈ [-2..+5]pt) 후보 탐색
+        for (const dyStep of [0, 1, 2, 3, 4, 5, -1, -2]) {
+          const candShift = [baseShiftPair[0], baseShiftPair[1] + dyStep];
+          const candBbox = bboxFromShift(fnNode, candShift);
+          const ownGapPt = r2(clearanceToStroke(candBbox, extStrokeObj));
+          const endGapPt = r2(bboxPtDist(newEndPt, candBbox));
+          const { minOtherPt, labelGapPt } = measureBoxClearances(
+            candBbox,
+            stroke.index,
+            scene.strokes,
+            currentNodesForClearance,
+            fnNode.id
+          );
+
+          if (
+            ownGapPt < config.comfortableOwnGapMinPt ||
+            ownGapPt > config.comfortableOwnGapMaxPt
+          ) {
+            continue;
+          }
+          if (minOtherPt < config.jointMinOtherClearPt || labelGapPt < config.jointMinLabelGapPt) {
+            continue;
+          }
+
+          const score =
+            Math.abs(relX - config.gapClosureIdealRelX) * 25.0 +
+            Math.abs(ownGapPt - 5.5) * 6.0 +
+            safety.extSeg.arcLengthPt * 0.15 +
+            Math.abs(dyStep) * 0.1;
+
+          if (!bestJointCandidate || score < bestJointCandidate.score) {
+            bestJointCandidate = {
+              score: r2(score),
+              uNew: uCand,
+              newDomain,
+              domainEdit,
+              extStrokeObj,
+              arcLengthPt: safety.extSeg.arcLengthPt,
+              domainRatioPct: r2(safety.domainRatio * 100),
+              candShift,
+              candBbox,
+              ownGapPt,
+              endGapPt,
+              minOtherPt,
+              labelGapPt,
+              relX: r2(relX),
+              gates: safety.gates,
+            };
+          }
+        }
+      }
+    } else {
+      // ----------------------------------------------------------------------
+      // 유형 II (Congestion-Escape):
+      //  기존 끝점 부근 보조선(점선 등) 혼잡으로 보류된 라벨에 대해:
+      //  1) 보조선 및 타 선분과의 간격(minOtherPt >= 8.0pt) 및 타 노드 간격(labelGapPt >= 5.5pt)을
+      //     확보하는 최소 라벨 이동(dx ∈ [0..8]pt, dy ∈ [-3..3]pt)을 찾고,
+      //  2) 정의역 끝점을 0.02 단위로 미세 연장하여 연장된 곡선과 라벨 간격(ownGapPt)이
+      //     평가원 적정 범위(4.5~7.5pt, 이상적 5.8pt)에 들어오는 최소 연장 후보를 공동 선택한다.
+      // ----------------------------------------------------------------------
+      const uStep = (config.domainRoundStep || 0.02) * dirSign;
+      const maxSteps = Math.min(40, Math.floor((domainSpan * config.maxDomainRatio) / Math.abs(uStep)));
+
+      const safeDomainSteps = [];
+      for (let k = 1; k <= maxSteps; k++) {
+        const uCand = Number((uOrigEnd + k * uStep).toFixed(2));
+        const safety = evaluateDomainExtensionSafetyGuardsV022({
+          scene,
+          node: fnNode,
+          stroke,
+          assignment: asg,
+          endIdx,
+          uNew: uCand,
+          config,
+        });
+        if (!safety.safe) {
+          if (!firstGateBlock) firstGateBlock = safety;
+          continue;
+        }
+        const newDomain =
+          endIdx === 0 ? [uCand, stroke.stmt.domain[1]] : [stroke.stmt.domain[0], uCand];
+        const domainEdit = buildDomainEditV022(scene.body, stroke.stmt, newDomain);
+        if (!domainEdit) continue;
+
+        const fullStrokePts =
+          endIdx === 1
+            ? [...stroke.pts, ...safety.extSeg.pts.slice(1)]
+            : [...safety.extSeg.pts.slice(0, -1).reverse(), ...stroke.pts];
+        safeDomainSteps.push({
+          uCand,
+          newDomain,
+          domainEdit,
+          extStrokeObj: { ...stroke, pts: fullStrokePts },
+          newEndPt: safety.extSeg.endPt,
+          arcLengthPt: safety.extSeg.arcLengthPt,
+          domainRatioPct: r2(safety.domainRatio * 100),
+          gates: safety.gates,
+        });
+      }
+
+      const dxCandidates = dirSign >= 0 ? [0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, -1, -2, -3, -4, -5, -6, -7, -8];
+      const dyCandidates = [0, -1, 1, -2, 2];
+
+      for (const dx of dxCandidates) {
+        for (const dy of dyCandidates) {
+          const candShift = [baseShiftPair[0] + dx, baseShiftPair[1] + dy];
+          const candBbox = bboxFromShift(fnNode, candShift);
+          const { minOtherPt, labelGapPt } = measureBoxClearances(
+            candBbox,
+            stroke.index,
+            scene.strokes,
+            currentNodesForClearance,
+            fnNode.id
+          );
+          if (
+            minOtherPt < config.congestionEscapeMinClearPt ||
+            labelGapPt < config.jointMinLabelGapPt
+          ) {
+            continue;
+          }
+
+          for (const dStep of safeDomainSteps) {
+            const ownGapPt = r2(clearanceToStroke(candBbox, dStep.extStrokeObj));
+            const endGapPt = r2(bboxPtDist(dStep.newEndPt, candBbox));
+            if (
+              ownGapPt < config.comfortableOwnGapMinPt ||
+              ownGapPt > config.comfortableOwnGapMaxPt ||
+              endGapPt > config.comfortableOwnGapMaxPt + 0.5
+            ) {
+              continue;
+            }
+
+            const moveMagnitude = Math.abs(dx) + Math.abs(dy) * 1.5;
+            const score =
+              moveMagnitude * 3.5 +
+              Math.abs(ownGapPt - 5.8) * 12.0 +
+              dStep.arcLengthPt * 0.15;
+
+            if (!bestJointCandidate || score < bestJointCandidate.score) {
+              bestJointCandidate = {
+                score: r2(score),
+                uNew: dStep.uCand,
+                newDomain: dStep.newDomain,
+                domainEdit: dStep.domainEdit,
+                extStrokeObj: dStep.extStrokeObj,
+                arcLengthPt: dStep.arcLengthPt,
+                domainRatioPct: dStep.domainRatioPct,
+                candShift,
+                candBbox,
+                ownGapPt,
+                endGapPt,
+                minOtherPt,
+                labelGapPt,
+                relX: null,
+                gates: dStep.gates,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    if (!bestJointCandidate) {
+      decisions.push({
+        nodeId: fnNode.id,
+        label: fnNode.label,
+        strokeIndex: stroke.index,
+        plotExpr: stroke.stmt.expr || null,
+        action: "hold",
+        triggerType,
+        origDomain: [...stroke.stmt.domain],
+        newDomain: [...stroke.stmt.domain],
+        arcLengthPt: 0,
+        domainRatioPct: 0,
+        origOwnGapPt,
+        newOwnGapPt: origOwnGapPt,
+        origMinOtherPt: origClear.minOtherPt,
+        newMinOtherPt: origClear.minOtherPt,
+        origShift: baseShiftPair,
+        newShift: baseShiftPair,
+        holdCode: firstGateBlock?.blockedCode || "no-safe-joint-candidate",
+        reason:
+          firstGateBlock?.blockedReason ||
+          "8단계 안전 게이트와 적정 간격(4.5~7.5pt)을 동시에 만족하는 미세 연장 후보가 없어 원본 정의역을 유지함",
+      });
+      continue;
+    }
+
+    // 채택된 그래프 끝점 연장 및 라벨 공동 배치 반영
+    edits.push(bestJointCandidate.domainEdit);
+    updatedStrokesByIndex.set(stroke.index, bestJointCandidate.extStrokeObj);
+
+    const sx = fnNode.scale ? fnNode.scale[0] : 1;
+    const sy = fnNode.scale ? fnNode.scale[1] : 1;
+    const oldX = fnNode.xshift || 0;
+    const oldY = fnNode.yshift || 0;
+    const newX = bestJointCandidate.candShift[0];
+    const newY = bestJointCandidate.candShift[1];
+    const actualDxPt = r2((newX - oldX) * sx);
+    const actualDyPt = r2((newY - oldY) * sy);
+    const movedDistPt = r2(Math.hypot(actualDxPt, actualDyPt));
+
+    const reasonText =
+      triggerType === "gap-closure"
+        ? `그래프 끝점 미세 연장(domain=${bestJointCandidate.domainEdit.oldDomain.join(":")} → ${bestJointCandidate.newDomain.join(":")}, +${bestJointCandidate.arcLengthPt}pt) 및 라벨 위치 공동 조정(shift=[${newX}, ${newY}]pt, 라벨-그래프 간격 ${origOwnGapPt}pt → ${bestJointCandidate.ownGapPt}pt)`
+        : `그래프 끝점 미세 연장(domain=${bestJointCandidate.domainEdit.oldDomain.join(":")} → ${bestJointCandidate.newDomain.join(":")}, +${bestJointCandidate.arcLengthPt}pt)으로 점선 혼잡 구간 탈출 및 라벨 공동 배치(shift=[${newX}, ${newY}]pt, 점선 간격 ${origClear.minOtherPt}pt → ${bestJointCandidate.minOtherPt}pt, 라벨-그래프 간격 ${origOwnGapPt}pt → ${bestJointCandidate.ownGapPt}pt)`;
+
+    if (newX !== oldX || newY !== oldY) {
+      const shText = setShifts(fnNode, newX, newY);
+      updatedLabelEditsById.set(fnNode.id, {
+        kind: "label-shift",
+        id: fnNode.id,
+        start: shText.start,
+        end: shText.end,
+        replacement: shText.replacement,
+      });
+      updatedShiftReportById.set(fnNode.id, {
+        id: fnNode.id,
+        label: fnNode.label,
+        how: asg.how,
+        strokeKind: asg.strokeKind || classifyStrokeKind(stroke),
+        selectedEngine: "v0.2.2-beta",
+        oldShift: [oldX, oldY],
+        newShift: [newX, newY],
+        scale: fnNode.scale,
+        neededMovePt: [actualDxPt, actualDyPt],
+      });
+    }
+
+    updatedPlacementsById.set(fnNode.id, {
+      ...(plItem || {}),
+      id: fnNode.id,
+      label: fnNode.label,
+      action: newX !== oldX || newY !== oldY ? "move" : "keep",
+      reason: reasonText,
+      stroke: stroke.index,
+      strokeKind: asg.strokeKind || classifyStrokeKind(stroke),
+      how: asg.how,
+      confirmedAssignment: true,
+      uncertainAssignment: false,
+      end: endIdx,
+      side: plItem?.side || (dirSign >= 0 ? "right" : "left"),
+      alpha: plItem?.alpha ?? 0,
+      bbox: bestJointCandidate.candBbox,
+      from: fnNode.bbox,
+      shift: [newX, newY],
+      eval: {
+        minOther: bestJointCandidate.minOtherPt,
+        own: bestJointCandidate.ownGapPt,
+        labelGap: bestJointCandidate.labelGapPt,
+      },
+    });
+
+    decisions.push({
+      nodeId: fnNode.id,
+      label: fnNode.label,
+      strokeIndex: stroke.index,
+      plotExpr: stroke.stmt.expr || null,
+      action: "extend",
+      triggerType,
+      origDomain: [...stroke.stmt.domain],
+      newDomain: [...bestJointCandidate.newDomain],
+      arcLengthPt: bestJointCandidate.arcLengthPt,
+      domainRatioPct: bestJointCandidate.domainRatioPct,
+      origOwnGapPt,
+      newOwnGapPt: bestJointCandidate.ownGapPt,
+      origMinOtherPt: origClear.minOtherPt,
+      newMinOtherPt: bestJointCandidate.minOtherPt,
+      origShift: baseShiftPair,
+      newShift: [newX, newY],
+      holdCode: null,
+      reason: reasonText,
+    });
+  }
+
+  return {
+    requested: true,
+    applied: edits.length > 0,
+    edits,
+    decisions,
+    updatedStrokesByIndex,
+    updatedPlacementsById,
+    updatedShiftReportById,
+    updatedLabelEditsById,
+  };
 }
