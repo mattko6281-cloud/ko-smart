@@ -95,13 +95,15 @@ export interface DomainExtensionDecisionItem {
   origShift: [number, number];
   newShift: [number, number];
   holdCode: string | null;
+  requiresAxisExtension?: boolean;
+  wouldExtendDomain?: [number, number] | null;
   reason: string;
 }
 
 export interface DomainExtensionOptionInfo {
   requested: boolean;
   applied: boolean;
-  status: "disabled" | "not-needed" | "pending-verification" | "applied" | "blocked-unsafe";
+  status: "disabled" | "not-needed" | "held-axis-off" | "pending-verification" | "applied" | "blocked-unsafe";
   modeNote: string;
   editsCount: number;
   message: string;

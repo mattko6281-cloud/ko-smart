@@ -861,6 +861,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
     const anyAxisChanged = axisEditsToApply.length > 0;
     const anyDomainChanged = domainEditsToApply.length > 0;
+    const hasAxisRequiredHold = (domainPlan.decisions || []).some(
+      (d) => d.action === "hold" && d.holdCode === "axis-extension-required"
+    );
 
     const domainOptionInfo = {
       requested: applyDomainExtensionRequested,
@@ -869,6 +872,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         ? "disabled"
         : anyDomainChanged
         ? "pending-verification"
+        : hasAxisRequiredHold
+        ? "held-axis-off"
         : "not-needed",
       modeNote: "8단계 안전 필터 통과 시 최소 끝점 연장 전용 (축소 없음)",
       editsCount: domainEditsToApply.length,
@@ -883,6 +888,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
                 `${d.label}: domain [${d.origDomain.join(", ")}] → [${d.newDomain.join(", ")}] (+${d.arcLengthPt}pt, 간격 ${d.origOwnGapPt}pt → ${d.newOwnGapPt}pt)`
             )
             .join(" · ")})`
+        : hasAxisRequiredHold
+        ? "원본 x축 범위와 축라벨 안전 여백을 보호하기 위해 그래프 끝점 연장을 보류했습니다. 축 길이 자동 조정을 함께 켜면 연장이 가능합니다."
         : "모든 함수 그래프가 이미 적정 연결 간격이거나 8단계 안전 게이트에 의해 원본 정의역을 유지합니다.",
     };
     baseResponse.domainExtensionOption = domainOptionInfo;

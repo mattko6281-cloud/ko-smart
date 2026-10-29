@@ -385,6 +385,8 @@ export function SmartLabelBetaModal({
               className={`rounded-lg border p-3.5 text-xs ${
                 proposal.domainExtensionOption.status === "applied"
                   ? "border-cyan-300 bg-cyan-50/60 text-cyan-950"
+                  : proposal.domainExtensionOption.status === "held-axis-off"
+                  ? "border-amber-300 bg-amber-50/60 text-amber-950"
                   : proposal.domainExtensionOption.status === "blocked-unsafe"
                   ? "border-rose-300 bg-rose-50 text-rose-900"
                   : "border-slate-200 bg-slate-50 text-slate-700"
@@ -414,6 +416,8 @@ export function SmartLabelBetaModal({
                         className={`rounded border px-2.5 py-1.5 text-[11px] ${
                           item.action === "extend"
                             ? "border-cyan-200 bg-white text-slate-800"
+                            : item.holdCode === "axis-extension-required"
+                            ? "border-amber-300 bg-white text-slate-800"
                             : "border-slate-200 bg-white/70 text-slate-600"
                         }`}
                       >
@@ -443,12 +447,26 @@ export function SmartLabelBetaModal({
                               </>
                             ) : (
                               <>
-                                <span className="rounded bg-slate-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-bold text-white ${
+                                    item.holdCode === "axis-extension-required"
+                                      ? "bg-amber-600"
+                                      : "bg-slate-500"
+                                  }`}
+                                >
                                   정의역 원본 유지 (Hold)
                                 </span>
                                 {item.origDomain && (
                                   <span className="font-mono text-slate-500">
                                     domain=[{item.origDomain[0]}, {item.origDomain[1]}]
+                                  </span>
+                                )}
+                                {item.holdCode === "axis-extension-required" && (
+                                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
+                                    축 자동 조정 ON 필요
+                                    {item.wouldExtendDomain
+                                      ? ` (축 ON 시 [${item.wouldExtendDomain[0]}, ${item.wouldExtendDomain[1]}] 연장 가능)`
+                                      : ""}
                                   </span>
                                 )}
                                 {typeof item.origOwnGapPt === "number" && (

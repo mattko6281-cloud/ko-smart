@@ -495,6 +495,7 @@ export function runPlanningV022(
   const domainPlan = applyDomainExtension
     ? planDomainMicroExtensionsV022(scene, activePlan, activeShift, P, {
         applyDomainExtension: true,
+        applyAxis: Boolean(applyAxisRequested),
         flags,
       })
     : {
@@ -1376,6 +1377,7 @@ export function evaluateDomainExtensionSafetyGuardsV022({
   uNew,
   config = DEFAULT_DOMAIN_EXT_CONFIG_V022,
   ignoreNodeIds = new Set(),
+  applyAxis = true,
 }) {
   const C = { ...DEFAULT_DOMAIN_EXT_CONFIG_V022, ...(config || {}) };
   const gates = [];
@@ -1556,9 +1558,10 @@ export function evaluateDomainExtensionSafetyGuardsV022({
     };
   }
 
-  // Gate 5: \clip 사각형 경계 이탈 검사
+  // Gate 5: \clip 사각형 경계 이탈 검사 및 (applyAxis === false 일 때) 원본 축 끝점 초과 돌출 검사
   const activeClip = findActiveClipForStmtV022(scene.body, stmt, scene.units);
   let clipViolation = null;
+  let axisBoundProtrusion = false;
   if (activeClip) {
     for (const p of extSeg.pts) {
       if (
@@ -1572,21 +1575,48 @@ export function evaluateDomainExtensionSafetyGuardsV022({
       }
     }
   }
+  // 축 자동 조정이 OFF(applyAxis === false)일 때:
+  // 원본부터 이미 축을 넘어간 그래프는 허용하되, 기존 끝점이 원본 축 내부(또는 끝점)에 있었는데
+  // 새로 추가된 연장이 원본 축 끝점을 넘어 돌출되는 경우 차단한다.
+  if (!clipViolation && !applyAxis && scene.axes?.x && scene.axes?.y && scene.units?.xU && scene.units?.yU) {
+    const { xU, yU } = scene.units;
+    const xr = Math.max(scene.axes.x.from, scene.axes.x.to) * xU;
+    const xl = Math.min(scene.axes.x.from, scene.axes.x.to) * xU;
+    const yt = Math.max(scene.axes.y.from, scene.axes.y.to) * yU;
+    const yb = Math.min(scene.axes.y.from, scene.axes.y.to) * yU;
+    const tol = 1.5;
+    const endPt = extSeg.endPt;
+    if (endPt) {
+      if (origEndPt[0] <= xr + tol && endPt[0] > xr + tol) {
+        axisBoundProtrusion = true;
+        clipViolation = `축 자동 조정 OFF 상태에서 연장 끝점(x=${r2(endPt[0] / xU)})이 원본 x축 끝(${r2(xr / xU)})을 넘어 돌출됨 (Gate 5)`;
+      } else if (origEndPt[0] >= xl - tol && endPt[0] < xl - tol) {
+        axisBoundProtrusion = true;
+        clipViolation = `축 자동 조정 OFF 상태에서 연장 끝점(x=${r2(endPt[0] / xU)})이 원본 x축 왼쪽 끝(${r2(xl / xU)})을 넘어 돌출됨 (Gate 5)`;
+      } else if (origEndPt[1] <= yt + tol && endPt[1] > yt + tol) {
+        axisBoundProtrusion = true;
+        clipViolation = `축 자동 조정 OFF 상태에서 연장 끝점(y=${r2(endPt[1] / yU)})이 원본 y축 끝(${r2(yt / yU)})을 넘어 돌출됨 (Gate 5)`;
+      } else if (origEndPt[1] >= yb - tol && endPt[1] < yb - tol) {
+        axisBoundProtrusion = true;
+        clipViolation = `축 자동 조정 OFF 상태에서 연장 끝점(y=${r2(endPt[1] / yU)})이 원본 y축 아래쪽 끝(${r2(yb / yU)})을 넘어 돌출됨 (Gate 5)`;
+      }
+    }
+  }
   const gate5Pass = !clipViolation;
   gates.push({
-    gate: "Gate 5 (\\clip 가시 영역 경계 보호)",
-    code: "outside-clip-or-axis-bound",
+    gate: "Gate 5 (\\clip 가시 영역 및 원본 축 경계 보호)",
+    code: axisBoundProtrusion ? "axis-extension-required" : "outside-clip-or-axis-bound",
     passed: gate5Pass,
     detail: gate5Pass
       ? activeClip
         ? "\\clip 영역 내부 안전 여유 확인"
-        : "\\clip 미사용(전체 가시)"
+        : "\\clip 미사용 및 축 경계 안전 확인"
       : clipViolation,
   });
   if (!gate5Pass) {
     return {
       safe: false,
-      blockedCode: "outside-clip-or-axis-bound",
+      blockedCode: axisBoundProtrusion ? "axis-extension-required" : "outside-clip-or-axis-bound",
       blockedReason: clipViolation,
       gates,
     };
@@ -1623,7 +1653,9 @@ export function evaluateDomainExtensionSafetyGuardsV022({
     const tailPts = extSeg.pts.slice(Math.min(4, extSeg.pts.length - 2));
     for (const nd of scene.nodes || []) {
       if (nd.id === node.id || ignoreNodeIds.has(nd.id) || !nd.bbox || nd.role === "marker") continue;
-      if (nd.role === "axisLabel" && nd.kind === "inline") continue;
+      // applyAxis === true 일 때만 축 연장으로 함께 이동할 인라인 축라벨을 예외 처리하고,
+      // applyAxis === false 일 때는 고정된 인라인 축라벨(x, y)의 실제 bbox를 그대로 검사한다.
+      if (applyAxis && nd.role === "axisLabel" && nd.kind === "inline") continue;
       const clAll =
         minDistPolylines([rectPoly(nd.bbox)], [{ pts: extSeg.pts, closed: false }]) -
         (stroke.halfWidth || 0.75);
@@ -1701,8 +1733,10 @@ export function evaluateDomainExtensionSafetyGuardsV022({
 
 /**
  * 주어진 라벨 bbox(candBbox)가 장면 내 타 선분(otherStrokes) 및 타 노드(otherNodes)와 유지하는 최소 간격 계산
+ * - applyAxis === false 일 때는 인라인 축라벨(x, y)이 이동하지 않으므로 실제 bbox를 그대로 포함하여 검사한다.
  */
-function measureBoxClearances(candBbox, ownStrokeIndex, strokes, nodes, ownNodeId) {
+function measureBoxClearances(candBbox, ownStrokeIndex, strokes, nodes, ownNodeId, opts = {}) {
+  const applyAxis = opts.applyAxis !== false;
   let minOtherPt = Infinity;
   for (const q of strokes || []) {
     if (!q || q.index === ownStrokeIndex || !Array.isArray(q.pts) || q.pts.length < 2) continue;
@@ -1711,7 +1745,15 @@ function measureBoxClearances(candBbox, ownStrokeIndex, strokes, nodes, ownNodeI
   }
   let labelGapPt = Infinity;
   for (const ob of nodes || []) {
-    if (!ob || !ob.bbox || ob.id === ownNodeId || ob.role === "marker" || (ob.role === "axisLabel" && ob.kind === "inline")) continue;
+    if (
+      !ob ||
+      !ob.bbox ||
+      ob.id === ownNodeId ||
+      ob.role === "marker" ||
+      (applyAxis && ob.role === "axisLabel" && ob.kind === "inline")
+    ) {
+      continue;
+    }
     const g = bboxGapRect(candBbox, ob.bbox);
     if (g < labelGapPt) labelGapPt = g;
   }
@@ -1743,6 +1785,7 @@ export function planDomainMicroExtensionsV022(
   opts = {}
 ) {
   const applyDomainExtension = Boolean(opts.applyDomainExtension === true);
+  const applyAxis = opts.applyAxis !== false;
   const config = { ...DEFAULT_DOMAIN_EXT_CONFIG_V022, ...(opts.domainExtConfig || {}) };
   const flags = opts.flags || DEFAULT_UNIT2_FLAGS;
 
@@ -1796,7 +1839,9 @@ export function planDomainMicroExtensionsV022(
     const baseBbox = plItem?.bbox || fnNode.bbox;
     const origOwnGapPt = stroke ? r2(clearanceToStroke(baseBbox, stroke)) : null;
     const origClear = stroke
-      ? measureBoxClearances(baseBbox, stroke.index, scene.strokes, currentNodesForClearance, fnNode.id)
+      ? measureBoxClearances(baseBbox, stroke.index, scene.strokes, currentNodesForClearance, fnNode.id, {
+          applyAxis,
+        })
       : { minOtherPt: null, labelGapPt: null };
 
     // Gate 1: 매칭 확정 및 단일 plot 곡선 확인
@@ -1859,6 +1904,7 @@ export function planDomainMicroExtensionsV022(
         endIdx,
         uNew: probeU,
         config,
+        applyAxis,
       });
       if (
         !probeGuard.safe &&
@@ -1920,6 +1966,7 @@ export function planDomainMicroExtensionsV022(
           endIdx: rawEndIdx,
           uNew: rawProbeU,
           config,
+          applyAxis,
         }) : { safe: true };
         if (!probeGuard.safe) {
           holdCode = probeGuard.blockedCode;
@@ -1950,230 +1997,261 @@ export function planDomainMicroExtensionsV022(
     }
 
     const triggerType = needsCongestionEscape ? "congestion-escape" : "gap-closure";
-    let bestJointCandidate = null;
-    let firstGateBlock = null;
 
-    if (triggerType === "gap-closure") {
-      // ----------------------------------------------------------------------
-      // 유형 I (Gap-Closure):
-      //  라벨의 가로 위치(baseShiftPair[0])는 그대로 유지하면서,
-      //  1) 곡선 끝점이 라벨 가로 중앙 부근(relX ∈ [0.48, 0.68], 목표 0.51)에 도달하는 최소 domain 연장을 찾고,
-      //  2) 연장된 끝점과 라벨 사이의 수직 간격(yshift)을 적정 범위(4.5~7.5pt, 목표 5.5pt)로 공동 최적화한다.
-      // ----------------------------------------------------------------------
-      const seenU = new Set();
-      for (const arcPt of config.arcStepGridPt) {
-        const uCand = solveDomainEndForArcLengthPtV022(
-          stroke.stmt.fn,
-          uOrigEnd,
-          dirSign,
-          arcPt,
-          scene.units,
-          config
-        );
-        if (uCand === null || seenU.has(uCand)) continue;
-        seenU.add(uCand);
+    const findBestJointCandidateForAxisMode = (axisModeFlag) => {
+      let bestCand = null;
+      let firstBlock = null;
 
-        const safety = evaluateDomainExtensionSafetyGuardsV022({
-          scene,
-          node: fnNode,
-          stroke,
-          assignment: asg,
-          endIdx,
-          uNew: uCand,
-          config,
-        });
-        if (!safety.safe) {
-          if (!firstGateBlock) firstGateBlock = safety;
-          continue;
-        }
-
-        const newDomain =
-          endIdx === 0 ? [uCand, stroke.stmt.domain[1]] : [stroke.stmt.domain[0], uCand];
-        const domainEdit = buildDomainEditV022(scene.body, stroke.stmt, newDomain);
-        if (!domainEdit) continue;
-
-        const fullStrokePts =
-          endIdx === 1
-            ? [...stroke.pts, ...safety.extSeg.pts.slice(1)]
-            : [...safety.extSeg.pts.slice(0, -1).reverse(), ...stroke.pts];
-        const extStrokeObj = { ...stroke, pts: fullStrokePts };
-        const newEndPt = safety.extSeg.endPt;
-
-        const wBox = baseBbox.x1 - baseBbox.x0;
-        const relX =
-          wBox > 1e-6
-            ? dirSign >= 0
-              ? (newEndPt[0] - baseBbox.x0) / wBox
-              : (baseBbox.x1 - newEndPt[0]) / wBox
-            : 0.5;
-
-        if (relX < config.gapClosureMinRelX || relX > config.gapClosureMaxRelX) {
-          continue;
-        }
-
-        // 수직 미세 이동(dyStep ∈ [-2..+5]pt) 후보 탐색
-        for (const dyStep of [0, 1, 2, 3, 4, 5, -1, -2]) {
-          const candShift = [baseShiftPair[0], baseShiftPair[1] + dyStep];
-          const candBbox = bboxFromShift(fnNode, candShift);
-          const ownGapPt = r2(clearanceToStroke(candBbox, extStrokeObj));
-          const endGapPt = r2(bboxPtDist(newEndPt, candBbox));
-          const { minOtherPt, labelGapPt } = measureBoxClearances(
-            candBbox,
-            stroke.index,
-            scene.strokes,
-            currentNodesForClearance,
-            fnNode.id
+      if (triggerType === "gap-closure") {
+        // ----------------------------------------------------------------------
+        // 유형 I (Gap-Closure):
+        //  라벨의 가로 위치(baseShiftPair[0])는 그대로 유지하면서,
+        //  1) 곡선 끝점이 라벨 가로 중앙 부근(relX ∈ [0.48, 0.68], 목표 0.51)에 도달하는 최소 domain 연장을 찾고,
+        //  2) 연장된 끝점과 라벨 사이의 수직 간격(yshift)을 적정 범위(4.5~7.5pt, 목표 5.5pt)로 공동 최적화한다.
+        // ----------------------------------------------------------------------
+        const seenU = new Set();
+        for (const arcPt of config.arcStepGridPt) {
+          const uCand = solveDomainEndForArcLengthPtV022(
+            stroke.stmt.fn,
+            uOrigEnd,
+            dirSign,
+            arcPt,
+            scene.units,
+            config
           );
+          if (uCand === null || seenU.has(uCand)) continue;
+          seenU.add(uCand);
 
-          if (
-            ownGapPt < config.comfortableOwnGapMinPt ||
-            ownGapPt > config.comfortableOwnGapMaxPt
-          ) {
+          const safety = evaluateDomainExtensionSafetyGuardsV022({
+            scene,
+            node: fnNode,
+            stroke,
+            assignment: asg,
+            endIdx,
+            uNew: uCand,
+            config,
+            applyAxis: axisModeFlag,
+          });
+          if (!safety.safe) {
+            if (!firstBlock) firstBlock = safety;
             continue;
           }
-          if (minOtherPt < config.jointMinOtherClearPt || labelGapPt < config.jointMinLabelGapPt) {
+
+          const newDomain =
+            endIdx === 0 ? [uCand, stroke.stmt.domain[1]] : [stroke.stmt.domain[0], uCand];
+          const domainEdit = buildDomainEditV022(scene.body, stroke.stmt, newDomain);
+          if (!domainEdit) continue;
+
+          const fullStrokePts =
+            endIdx === 1
+              ? [...stroke.pts, ...safety.extSeg.pts.slice(1)]
+              : [...safety.extSeg.pts.slice(0, -1).reverse(), ...stroke.pts];
+          const extStrokeObj = { ...stroke, pts: fullStrokePts };
+          const newEndPt = safety.extSeg.endPt;
+
+          const wBox = baseBbox.x1 - baseBbox.x0;
+          const relX =
+            wBox > 1e-6
+              ? dirSign >= 0
+                ? (newEndPt[0] - baseBbox.x0) / wBox
+                : (baseBbox.x1 - newEndPt[0]) / wBox
+              : 0.5;
+
+          if (relX < config.gapClosureMinRelX || relX > config.gapClosureMaxRelX) {
             continue;
           }
 
-          const score =
-            Math.abs(relX - config.gapClosureIdealRelX) * 25.0 +
-            Math.abs(ownGapPt - 5.5) * 6.0 +
-            safety.extSeg.arcLengthPt * 0.15 +
-            Math.abs(dyStep) * 0.1;
-
-          if (!bestJointCandidate || score < bestJointCandidate.score) {
-            bestJointCandidate = {
-              score: r2(score),
-              uNew: uCand,
-              newDomain,
-              domainEdit,
-              extStrokeObj,
-              arcLengthPt: safety.extSeg.arcLengthPt,
-              domainRatioPct: r2(safety.domainRatio * 100),
-              candShift,
+          // 수직 미세 이동(dyStep ∈ [-2..+5]pt) 후보 탐색
+          for (const dyStep of [0, 1, 2, 3, 4, 5, -1, -2]) {
+            const candShift = [baseShiftPair[0], baseShiftPair[1] + dyStep];
+            const candBbox = bboxFromShift(fnNode, candShift);
+            const ownGapPt = r2(clearanceToStroke(candBbox, extStrokeObj));
+            const endGapPt = r2(bboxPtDist(newEndPt, candBbox));
+            const { minOtherPt, labelGapPt } = measureBoxClearances(
               candBbox,
-              ownGapPt,
-              endGapPt,
-              minOtherPt,
-              labelGapPt,
-              relX: r2(relX),
-              gates: safety.gates,
-            };
-          }
-        }
-      }
-    } else {
-      // ----------------------------------------------------------------------
-      // 유형 II (Congestion-Escape):
-      //  기존 끝점 부근 보조선(점선 등) 혼잡으로 보류된 라벨에 대해:
-      //  1) 보조선 및 타 선분과의 간격(minOtherPt >= 8.0pt) 및 타 노드 간격(labelGapPt >= 5.5pt)을
-      //     확보하는 최소 라벨 이동(dx ∈ [0..8]pt, dy ∈ [-3..3]pt)을 찾고,
-      //  2) 정의역 끝점을 0.02 단위로 미세 연장하여 연장된 곡선과 라벨 간격(ownGapPt)이
-      //     평가원 적정 범위(4.5~7.5pt, 이상적 5.8pt)에 들어오는 최소 연장 후보를 공동 선택한다.
-      // ----------------------------------------------------------------------
-      const uStep = (config.domainRoundStep || 0.02) * dirSign;
-      const maxSteps = Math.min(40, Math.floor((domainSpan * config.maxDomainRatio) / Math.abs(uStep)));
+              stroke.index,
+              scene.strokes,
+              currentNodesForClearance,
+              fnNode.id,
+              { applyAxis: axisModeFlag }
+            );
 
-      const safeDomainSteps = [];
-      for (let k = 1; k <= maxSteps; k++) {
-        const uCand = Number((uOrigEnd + k * uStep).toFixed(2));
-        const safety = evaluateDomainExtensionSafetyGuardsV022({
-          scene,
-          node: fnNode,
-          stroke,
-          assignment: asg,
-          endIdx,
-          uNew: uCand,
-          config,
-        });
-        if (!safety.safe) {
-          if (!firstGateBlock) firstGateBlock = safety;
-          continue;
-        }
-        const newDomain =
-          endIdx === 0 ? [uCand, stroke.stmt.domain[1]] : [stroke.stmt.domain[0], uCand];
-        const domainEdit = buildDomainEditV022(scene.body, stroke.stmt, newDomain);
-        if (!domainEdit) continue;
-
-        const fullStrokePts =
-          endIdx === 1
-            ? [...stroke.pts, ...safety.extSeg.pts.slice(1)]
-            : [...safety.extSeg.pts.slice(0, -1).reverse(), ...stroke.pts];
-        safeDomainSteps.push({
-          uCand,
-          newDomain,
-          domainEdit,
-          extStrokeObj: { ...stroke, pts: fullStrokePts },
-          newEndPt: safety.extSeg.endPt,
-          arcLengthPt: safety.extSeg.arcLengthPt,
-          domainRatioPct: r2(safety.domainRatio * 100),
-          gates: safety.gates,
-        });
-      }
-
-      const dxCandidates = dirSign >= 0 ? [0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, -1, -2, -3, -4, -5, -6, -7, -8];
-      const dyCandidates = [0, -1, 1, -2, 2];
-
-      for (const dx of dxCandidates) {
-        for (const dy of dyCandidates) {
-          const candShift = [baseShiftPair[0] + dx, baseShiftPair[1] + dy];
-          const candBbox = bboxFromShift(fnNode, candShift);
-          const { minOtherPt, labelGapPt } = measureBoxClearances(
-            candBbox,
-            stroke.index,
-            scene.strokes,
-            currentNodesForClearance,
-            fnNode.id
-          );
-          if (
-            minOtherPt < config.congestionEscapeMinClearPt ||
-            labelGapPt < config.jointMinLabelGapPt
-          ) {
-            continue;
-          }
-
-          for (const dStep of safeDomainSteps) {
-            const ownGapPt = r2(clearanceToStroke(candBbox, dStep.extStrokeObj));
-            const endGapPt = r2(bboxPtDist(dStep.newEndPt, candBbox));
             if (
               ownGapPt < config.comfortableOwnGapMinPt ||
-              ownGapPt > config.comfortableOwnGapMaxPt ||
-              endGapPt > config.comfortableOwnGapMaxPt + 0.5
+              ownGapPt > config.comfortableOwnGapMaxPt
             ) {
               continue;
             }
+            if (minOtherPt < config.jointMinOtherClearPt || labelGapPt < config.jointMinLabelGapPt) {
+              continue;
+            }
 
-            const moveMagnitude = Math.abs(dx) + Math.abs(dy) * 1.5;
             const score =
-              moveMagnitude * 3.5 +
-              Math.abs(ownGapPt - 5.8) * 12.0 +
-              dStep.arcLengthPt * 0.15;
+              Math.abs(relX - config.gapClosureIdealRelX) * 25.0 +
+              Math.abs(ownGapPt - 5.5) * 6.0 +
+              safety.extSeg.arcLengthPt * 0.15 +
+              Math.abs(dyStep) * 0.1;
 
-            if (!bestJointCandidate || score < bestJointCandidate.score) {
-              bestJointCandidate = {
+            if (!bestCand || score < bestCand.score) {
+              bestCand = {
                 score: r2(score),
-                uNew: dStep.uCand,
-                newDomain: dStep.newDomain,
-                domainEdit: dStep.domainEdit,
-                extStrokeObj: dStep.extStrokeObj,
-                arcLengthPt: dStep.arcLengthPt,
-                domainRatioPct: dStep.domainRatioPct,
+                uNew: uCand,
+                newDomain,
+                domainEdit,
+                extStrokeObj,
+                arcLengthPt: safety.extSeg.arcLengthPt,
+                domainRatioPct: r2(safety.domainRatio * 100),
                 candShift,
                 candBbox,
                 ownGapPt,
                 endGapPt,
                 minOtherPt,
                 labelGapPt,
-                relX: null,
-                gates: dStep.gates,
+                relX: r2(relX),
+                gates: safety.gates,
               };
             }
           }
         }
+      } else {
+        // ----------------------------------------------------------------------
+        // 유형 II (Congestion-Escape):
+        //  기존 끝점 부근 보조선(점선 등) 혼잡으로 보류된 라벨에 대해:
+        //  1) 보조선 및 타 선분과의 간격(minOtherPt >= 8.0pt) 및 타 노드 간격(labelGapPt >= 5.5pt)을
+        //     확보하는 최소 라벨 이동(dx ∈ [0..8]pt, dy ∈ [-3..3]pt)을 찾고,
+        //  2) 정의역 끝점을 0.02 단위로 미세 연장하여 연장된 곡선과 라벨 간격(ownGapPt)이
+        //     평가원 적정 범위(4.5~7.5pt, 이상적 5.8pt)에 들어오는 최소 연장 후보를 공동 선택한다.
+        // ----------------------------------------------------------------------
+        const uStep = (config.domainRoundStep || 0.02) * dirSign;
+        const maxSteps = Math.min(40, Math.floor((domainSpan * config.maxDomainRatio) / Math.abs(uStep)));
+
+        const safeDomainSteps = [];
+        for (let k = 1; k <= maxSteps; k++) {
+          const uCand = Number((uOrigEnd + k * uStep).toFixed(2));
+          const safety = evaluateDomainExtensionSafetyGuardsV022({
+            scene,
+            node: fnNode,
+            stroke,
+            assignment: asg,
+            endIdx,
+            uNew: uCand,
+            config,
+            applyAxis: axisModeFlag,
+          });
+          if (!safety.safe) {
+            if (!firstBlock) firstBlock = safety;
+            continue;
+          }
+          const newDomain =
+            endIdx === 0 ? [uCand, stroke.stmt.domain[1]] : [stroke.stmt.domain[0], uCand];
+          const domainEdit = buildDomainEditV022(scene.body, stroke.stmt, newDomain);
+          if (!domainEdit) continue;
+
+          const fullStrokePts =
+            endIdx === 1
+              ? [...stroke.pts, ...safety.extSeg.pts.slice(1)]
+              : [...safety.extSeg.pts.slice(0, -1).reverse(), ...stroke.pts];
+          safeDomainSteps.push({
+            uCand,
+            newDomain,
+            domainEdit,
+            extStrokeObj: { ...stroke, pts: fullStrokePts },
+            newEndPt: safety.extSeg.endPt,
+            arcLengthPt: safety.extSeg.arcLengthPt,
+            domainRatioPct: r2(safety.domainRatio * 100),
+            gates: safety.gates,
+          });
+        }
+
+        const dxCandidates = dirSign >= 0 ? [0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, -1, -2, -3, -4, -5, -6, -7, -8];
+        const dyCandidates = [0, -1, 1, -2, 2];
+
+        for (const dx of dxCandidates) {
+          for (const dy of dyCandidates) {
+            const candShift = [baseShiftPair[0] + dx, baseShiftPair[1] + dy];
+            const candBbox = bboxFromShift(fnNode, candShift);
+            const { minOtherPt, labelGapPt } = measureBoxClearances(
+              candBbox,
+              stroke.index,
+              scene.strokes,
+              currentNodesForClearance,
+              fnNode.id,
+              { applyAxis: axisModeFlag }
+            );
+            if (
+              minOtherPt < config.congestionEscapeMinClearPt ||
+              labelGapPt < config.jointMinLabelGapPt
+            ) {
+              continue;
+            }
+
+            for (const dStep of safeDomainSteps) {
+              const ownGapPt = r2(clearanceToStroke(candBbox, dStep.extStrokeObj));
+              const endGapPt = r2(bboxPtDist(dStep.newEndPt, candBbox));
+              if (
+                ownGapPt < config.comfortableOwnGapMinPt ||
+                ownGapPt > config.comfortableOwnGapMaxPt ||
+                endGapPt > config.comfortableOwnGapMaxPt + 0.5
+              ) {
+                continue;
+              }
+
+              const moveMagnitude = Math.abs(dx) + Math.abs(dy) * 1.5;
+              const score =
+                moveMagnitude * 3.5 +
+                Math.abs(ownGapPt - 5.8) * 12.0 +
+                dStep.arcLengthPt * 0.15;
+
+              if (!bestCand || score < bestCand.score) {
+                bestCand = {
+                  score: r2(score),
+                  uNew: dStep.uCand,
+                  newDomain: dStep.newDomain,
+                  domainEdit: dStep.domainEdit,
+                  extStrokeObj: dStep.extStrokeObj,
+                  arcLengthPt: dStep.arcLengthPt,
+                  domainRatioPct: dStep.domainRatioPct,
+                  candShift,
+                  candBbox,
+                  ownGapPt,
+                  endGapPt,
+                  minOtherPt,
+                  labelGapPt,
+                  relX: null,
+                  gates: dStep.gates,
+                };
+              }
+            }
+          }
+        }
       }
-    }
+
+      return { bestCand, firstBlock };
+    };
+
+    const primarySearch = findBestJointCandidateForAxisMode(applyAxis);
+    const bestJointCandidate = primarySearch.bestCand;
+    const firstGateBlock = primarySearch.firstBlock;
 
     if (!bestJointCandidate) {
+      let holdCode = firstGateBlock?.blockedCode || "no-safe-joint-candidate";
+      let holdReason =
+        firstGateBlock?.blockedReason ||
+        "8단계 안전 게이트와 적정 간격(4.5~7.5pt)을 동시에 만족하는 미세 연장 후보가 없어 원본 정의역을 유지함";
+      let requiresAxisExtension = false;
+      let wouldExtendDomain = null;
+
+      if (!applyAxis) {
+        const axisOnSearch = findBestJointCandidateForAxisMode(true);
+        if (axisOnSearch.bestCand || firstGateBlock?.blockedCode === "axis-extension-required") {
+          holdCode = "axis-extension-required";
+          requiresAxisExtension = true;
+          wouldExtendDomain = axisOnSearch.bestCand ? [...axisOnSearch.bestCand.newDomain] : null;
+          holdReason =
+            "원본 x축 범위와 축라벨 안전 여백을 보호하기 위해 그래프 끝점 연장을 보류했습니다. 축 길이 자동 조정을 함께 켜면 연장이 가능합니다.";
+        }
+      }
+
       decisions.push({
         nodeId: fnNode.id,
         label: fnNode.label,
@@ -2191,10 +2269,10 @@ export function planDomainMicroExtensionsV022(
         newMinOtherPt: origClear.minOtherPt,
         origShift: baseShiftPair,
         newShift: baseShiftPair,
-        holdCode: firstGateBlock?.blockedCode || "no-safe-joint-candidate",
-        reason:
-          firstGateBlock?.blockedReason ||
-          "8단계 안전 게이트와 적정 간격(4.5~7.5pt)을 동시에 만족하는 미세 연장 후보가 없어 원본 정의역을 유지함",
+        holdCode,
+        requiresAxisExtension,
+        wouldExtendDomain,
+        reason: holdReason,
       });
       continue;
     }
