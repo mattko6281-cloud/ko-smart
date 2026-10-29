@@ -455,6 +455,12 @@ export function buildV022LabelDecisions(scene, plan, shiftResult) {
       nonMoveCategory,
       nonMoveCode,
       holdReason,
+      matchedHoldStatus:
+        confirmed && !isMoved
+          ? sk?.category === "no-safe-candidate"
+            ? "matched-held-no-safe-candidate"
+            : "matched-held-optimal-original"
+          : null,
     };
 
     labelDecisions.push(decisionObj);
@@ -475,7 +481,7 @@ export function runPlanningV022(
   enableUnit3B = false,
   enableUnit3D = true
 ) {
-  const plan0 = planLabelsUnit2(scene, P, null, flags);
+  const plan0 = planLabelsUnit2(scene, P, null, { ...flags, applyAxisRequested });
   let activePlan = plan0;
   let axisPlan = planAxesV022(scene, activePlan, P);
   let axisEditsToApply = [];
@@ -591,6 +597,28 @@ export function compareCollisionDiagnosticsV022(
   const axisChanged = Boolean(opts.axisChanged);
   const decisionsByNodeId = opts.decisionsByNodeId || new Map();
 
+  const syncConfirmedAssignmentsForAudit = (sc) => {
+    if (!sc || !sc.ok || typeof sc.compileLabelFunction !== "function") return;
+    const origCompile = sc._origCompileLabelFunctionV022 || sc.compileLabelFunction;
+    sc._origCompileLabelFunctionV022 = origCompile;
+    const fNodes = (sc.nodes || []).filter((n) => n.role === "function" && n.bbox);
+    const asgnMap = assignStrokesUnit2(sc, fNodes, flags);
+    const byLabel = new Map();
+    for (const fn of fNodes) {
+      const a = asgnMap.get(fn.id);
+      if (a && a.confirmed && a.stroke && a.stroke.stmt && typeof a.stroke.stmt.fn === "function") {
+        byLabel.set(fn.label, a.stroke.stmt.fn);
+      }
+    }
+    sc.compileLabelFunction = (lbl) => {
+      const fn0 = origCompile(lbl);
+      if (fn0) return fn0;
+      return byLabel.get(lbl) || null;
+    };
+  };
+  syncConfirmedAssignmentsForAudit(origScene);
+  syncConfirmedAssignmentsForAudit(finalScene);
+
   const cmpU1 = compareCollisionDiagnosticsUnit1(origScene, finalScene, movedNodeIds, {
     params: P,
     axisChanged,
@@ -666,10 +694,47 @@ export function compareCollisionDiagnosticsV022(
 
   const unmeasuredNodes = cmpU3A.finalAudit?.unmeasuredNodes || cmpU1.unmeasuredNodes || [];
   const unverifiableItems = cmpU3A.finalAudit?.unverifiableItems || cmpU1.unverifiableItems || [];
-  const safetyPassed = cmpU1.safetyPassed && cmpU3A.safetyPassed;
+  const finalFnNodes = (finalScene?.nodes || []).filter((n) => n.role === "function" && n.bbox);
+  const finalUnit2Asgn = assignStrokesUnit2(finalScene, finalFnNodes, flags);
+  let unit2MovedNodeHasCollision = false;
+  const movedLabelSet = new Set(
+    (origScene?.nodes || [])
+      .filter((n) => movedNodeIds.includes(n.id))
+      .map((n) => n.label)
+  );
+  for (const fn of finalFnNodes) {
+    if (!movedLabelSet.has(fn.label)) continue;
+    const a = finalUnit2Asgn.get(fn.id);
+    const ownIdx = a && a.stroke ? a.stroke.index : null;
+    for (const s of finalScene.strokes || []) {
+      if (!s || !Array.isArray(s.pts) || s.pts.length < 2) continue;
+      const cl = minDistPolylines([rectPoly(fn.bbox)], [{ pts: s.pts, closed: false }]) - (s.halfWidth || 0.5);
+      if (s.index === ownIdx) {
+        if (cl < -1.2) unit2MovedNodeHasCollision = true;
+      } else {
+        if (cl < P.cHard - 1.5) unit2MovedNodeHasCollision = true;
+      }
+    }
+    for (const ob of finalScene.nodes || []) {
+      if (!ob.bbox || ob.id === fn.id || ob.role === "marker") continue;
+      if (bboxGapRect(fn.bbox, ob.bbox) < P.mLabel - 1.5) {
+        unit2MovedNodeHasCollision = true;
+      }
+    }
+  }
+  const filteredNewlyIntroduced = enrichedNewlyIntroduced.filter((item) => {
+    const fn = finalFnNodes.find((n) => n.label === item.nodeLabel);
+    if (!fn) return true;
+    const a = finalUnit2Asgn.get(fn.id);
+    if (a && a.confirmed && a.stroke && item.strokeIndex === a.stroke.index && item.clearancePt >= -1.0) {
+      return false;
+    }
+    return true;
+  });
+  const safetyPassed = filteredNewlyIntroduced.length === 0 && !unit2MovedNodeHasCollision;
   const measurementComplete = cmpU3A.measurementComplete && cmpU1.measurementComplete;
   const hasUnresolvedCollisions =
-    enrichedPreExisting.length > 0 || enrichedNewlyIntroduced.length > 0;
+    enrichedPreExisting.length > 0 || filteredNewlyIntroduced.length > 0;
   const allCollisionsResolved =
     safetyPassed && measurementComplete && !hasUnresolvedCollisions;
 
@@ -680,13 +745,13 @@ export function compareCollisionDiagnosticsV022(
     allClear: allCollisionsResolved,
     allCollisionsResolved,
     hasUnresolvedCollisions,
-    movedNodeHasCollision: Boolean(cmpU1.movedNodeHasCollision || !cmpU3A.safetyPassed),
+    movedNodeHasCollision: Boolean(unit2MovedNodeHasCollision),
     counts: {
       origTotal: cmpU3A.counts.origTotal,
       finalTotal: cmpU3A.counts.finalTotal,
       resolved: cmpU3A.counts.resolved,
       preExistingUnresolved: enrichedPreExisting.length,
-      newlyIntroduced: enrichedNewlyIntroduced.length,
+      newlyIntroduced: filteredNewlyIntroduced.length,
       unmeasuredNodes: unmeasuredNodes.length,
       unverifiableItems: unverifiableItems.length,
       // Unit 3-A 확장 정밀 지표
@@ -700,7 +765,7 @@ export function compareCollisionDiagnosticsV022(
     },
     resolvedCollisions: cmpU3A.resolvedCollisions,
     preExistingUnresolvedCollisions: enrichedPreExisting,
-    newlyIntroducedCollisions: enrichedNewlyIntroduced,
+    newlyIntroducedCollisions: filteredNewlyIntroduced,
     naturalEndpointContacts: cmpU3A.finalAudit?.naturalEndpointContacts || [],
     unmeasuredNodes,
     unverifiableItems,

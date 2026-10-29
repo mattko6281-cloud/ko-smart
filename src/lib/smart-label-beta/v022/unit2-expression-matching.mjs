@@ -22,6 +22,7 @@
 // ============================================================================
 
 import { minDistPolylines } from "../../../../experiments/smart-label-engine/src/geometry.mjs";
+import { expectedGlyphChars, normalizeSvgChars } from "../../../../experiments/smart-label-engine/src/tikz-nodes.mjs";
 import { compileExpr as v01CompileExpr, compileLabelFunction as v01CompileLabelFunction } from "../../../../experiments/smart-label-prototype/src/expr.mjs";
 import {
   findBalancedBrace,
@@ -61,10 +62,194 @@ export const DEFAULT_UNIT2_FLAGS = {
   u2e: true, // 삼각함수(sin, cos, tan, deg, r) 및 pi/sqrt 파싱·매칭 + scope clip 반영
   u3c: true, // Unit 3-C: 수평선(y=상수) 우측 끝(node[right]) 및 수직선(x=상수) 하단/상단 끝 표준 배치
   enableJointAxisOpt: true, // 함수식 라벨 배치와 축 길이 연장량의 공동 최적화
+  enableAxisVarTheta: true, // CASE-008: 가로축 변수가 \theta 일 때만 \theta -> x 정규화
+  enableSimpleFunctionLhs: true, // CASE-015: 단순 f(x)=... / g(x)=... 좌변 -> y=... 정규화
+  enableResidualSingleCurve: true, // CASE-002: 구체 함수식 확정 후 남은 1:1 파생 추상 함수(y=-f'(x) 등) 잔여 곡선 매칭
+  enableDiagonalSvgRecovery: true, // 대각 앵커(below left 등) + scale>=1.8 제한적 SVG 노드 복구
+  enableRightAxisTipLineBelow: true, // 우측 x축 화살표 끝점 근방에서 우하향하는 감소 직선의 하단 여유 배치(후보 A)
 };
 
 function resolveFlags(flags = {}) {
   return { ...DEFAULT_UNIT2_FLAGS, ...(flags || {}) };
+}
+
+const DIAGONAL_ANCHOR_POSITIONS_UNIT2 = new Set([
+  "below left",
+  "below right",
+  "above left",
+  "above right",
+  "north east",
+  "north west",
+  "south east",
+  "south west",
+]);
+
+export function recoverDiagonalAnchorSvgNodesUnit2(scene, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (F.enableDiagonalSvgRecovery === false) return [];
+  if (!scene || !scene.ok || !scene.analysis || !scene.geom) return [];
+  const matching = scene.analysis.matching;
+  if (!matching || !matching.sequentialTrusted) return [];
+
+  const geomNodes = scene.geom.nodes || [];
+  const anLabels = scene.analysis.labels || [];
+  const claimedSvgIndices = new Set(
+    (scene.nodes || [])
+      .map((n) => n.svgIndex)
+      .filter((idx) => idx !== null && idx !== undefined)
+  );
+  const recovered = [];
+
+  for (let idx = 0; idx < (scene.nodes || []).length; idx++) {
+    const n = scene.nodes[idx];
+    if (!n || n.usable || n.fallbackAnchorFromBBox) continue;
+    if (n.svgIndex !== null && n.svgIndex !== undefined) continue;
+    if (n.kind === "inline" || !n.at || !n.label) continue;
+
+    const posNorm = String(n.position || "").trim().replace(/\s+/g, " ");
+    if (!DIAGONAL_ANCHOR_POSITIONS_UNIT2.has(posNorm)) continue;
+    const hasSmallInnerSep = /inner\s+sep\s*=\s*([0-9.]+)\s*pt/.exec(String(n.optionsRaw || ""));
+    if (hasSmallInnerSep && Number(hasSmallInnerSep[1]) <= 2.2) continue;
+
+    const candSvg = geomNodes[idx];
+    if (!candSvg || !candSvg.supported || candSvg.empty || !candSvg.bboxTikz) continue;
+    if (claimedSvgIndices.has(candSvg.index)) continue;
+
+    const scaleX = candSvg.scaleX || scene.units?.everyNodeScale || 1;
+    const scaleY = candSvg.scaleY || scene.units?.everyNodeScale || 1;
+    if (Math.min(scaleX, scaleY) < 1.8) continue;
+
+    const expGlyph = expectedGlyphChars(n.label);
+    const gotGlyph = normalizeSvgChars(candSvg.chars || "");
+    if (!expGlyph.reliable || !gotGlyph || expGlyph.normalized.length < 3) continue;
+    if (expGlyph.normalized !== gotGlyph) continue;
+
+    const otherSameGlyphUnclaimed = geomNodes.filter(
+      (g) =>
+        g.index !== candSvg.index &&
+        !claimedSvgIndices.has(g.index) &&
+        normalizeSvgChars(g.chars || "") === gotGlyph
+    );
+    if (otherSameGlyphUnclaimed.length > 0) continue;
+
+    const dxShift = (n.xshift || 0) * scaleX;
+    const dyShift = (n.yshift || 0) * scaleY;
+    const expectedPt = [n.at[0] + dxShift, n.at[1] + dyShift];
+    const bb = candSvg.bboxTikz;
+    const dx = Math.max(bb.x0 - expectedPt[0], 0, expectedPt[0] - bb.x1);
+    const dy = Math.max(bb.y0 - expectedPt[1], 0, expectedPt[1] - bb.y1);
+    const distPt = Math.hypot(dx, dy);
+
+    const cx = (bb.x0 + bb.x1) / 2;
+    const cy = (bb.y0 + bb.y1) / 2;
+    const wantsLeft = posNorm.includes("left") || posNorm.includes("east");
+    const wantsRight = posNorm.includes("right") || posNorm.includes("west");
+    const wantsBelow = posNorm.includes("below") || posNorm.includes("north");
+    const wantsAbove = posNorm.includes("above") || posNorm.includes("south");
+    if (wantsLeft && !(cx < expectedPt[0])) continue;
+    if (wantsRight && !(cx > expectedPt[0])) continue;
+    if (wantsBelow && !(cy < expectedPt[1])) continue;
+    if (wantsAbove && !(cy > expectedPt[1])) continue;
+
+    if (dx <= 11.0 && dy <= 11.0 && distPt <= 15.5) {
+      n.svgIndex = candSvg.index;
+      n.bbox = { ...candSvg.bboxTikz };
+      n.scale = [scaleX, scaleY];
+      n.confidence = "confirmed";
+      n.usable = true;
+      n.usableBy = "unit2-diagonal-anchor-scale-order-glyph-confirmed";
+      claimedSvgIndices.add(candSvg.index);
+
+      const labEntry = anLabels.find((l) => l.id === n.id);
+      if (labEntry && labEntry.matching) {
+        labEntry.matching.svgNodeIndex = candSvg.index;
+        labEntry.matching.confidence = "confirmed";
+        labEntry.matching.usable = true;
+      }
+
+      recovered.push({
+        id: n.id,
+        label: n.label,
+        svgIndex: candSvg.index,
+        position: posNorm,
+        scale: [scaleX, scaleY],
+        dxPt: r2(dx),
+        dyPt: r2(dy),
+        distPt: r2(distPt),
+      });
+    }
+  }
+
+  scene.unit2RecoveredSvgNodes = recovered;
+  return recovered;
+}
+
+export function detectHorizontalAxisVariableUnit2(scene) {
+  if (!scene || !Array.isArray(scene.nodes)) return "x";
+  for (const n of scene.nodes) {
+    if (n.role === "axisLabel" || (n.stmt && n.stmt.arrow && n.kind === "inline")) {
+      const raw0 = String(n.label || "").replace(/\$|\s+/g, "");
+      if (raw0 === "\\theta" || raw0 === "theta") return "\\theta";
+    }
+    if (n.role !== "axisLabel") continue;
+    const raw = String(n.label || "").replace(/\$/g, "").trim();
+    const pos = n.at || n.inlineAnchor || n.anchor || (n.bbox ? [(n.bbox.x0 + n.bbox.x1) / 2, (n.bbox.y0 + n.bbox.y1) / 2] : null);
+    if (pos) {
+      const [px, py] = pos;
+      if (Math.abs(py) <= Math.abs(px) * 0.5 + 15) {
+        if (raw === "\\theta") return "\\theta";
+        if (/^[a-zA-Z]$/.test(raw)) return raw;
+      }
+    }
+  }
+  const body = String(scene.body || "");
+  if (/--\s*\([^)]+\)\s*node\[[^\]]*\]\s*\{\s*\$\\theta\$\s*\}/.test(body)) {
+    return "\\theta";
+  }
+  return "x";
+}
+
+export function preprocessLabelForMatchingUnit2(rawLabel, scene, flags = DEFAULT_UNIT2_FLAGS) {
+  const F = resolveFlags(flags);
+  if (typeof rawLabel !== "string") {
+    return { effectiveLabel: rawLabel, notes: [], simpleLhsApplied: false, axisThetaApplied: false };
+  }
+  let inner = rawLabel.trim();
+  const hasDollar = inner.startsWith("$") && inner.endsWith("$") && inner.length >= 2;
+  if (hasDollar) inner = inner.slice(1, -1).trim();
+
+  const notes = [];
+  let simpleLhsApplied = false;
+  let axisThetaApplied = false;
+
+  if (F.enableSimpleFunctionLhs) {
+    const mSimpleLhs = /^(?:\\displaystyle\s*)?([fghFGH])\(\s*x\s*\)\s*=(.+)$/.exec(inner);
+    if (mSimpleLhs) {
+      const fnName = mSimpleLhs[1];
+      const rhs = mSimpleLhs[2].trim();
+      inner = `y=${rhs}`;
+      simpleLhsApplied = true;
+      notes.push(`단순 함수 좌변 ${fnName}(x)=... 확인 → 매칭 시 y=... 로 정규화`);
+    }
+  }
+
+  if (F.enableAxisVarTheta && scene) {
+    const horizVar = detectHorizontalAxisVariableUnit2(scene);
+    if (horizVar === "\\theta" && /\\theta(?![a-zA-Z])/.test(inner) && !/(?<![a-zA-Z\\])x(?![a-zA-Z])/.test(inner)) {
+      const mThetaLhs = /^(?:\\displaystyle\s*)?([fghFGH])\(\s*\\theta\s*\)\s*=(.+)$/.exec(inner);
+      if (mThetaLhs && F.enableSimpleFunctionLhs) {
+        inner = `y=${mThetaLhs[2].trim()}`;
+        simpleLhsApplied = true;
+      }
+      inner = inner.replace(/\\theta(?![a-zA-Z])/g, " x");
+      axisThetaApplied = true;
+      notes.push("가로축 변수 \\theta 와 수식 독립변수 \\theta 일치 확인 → 매칭 시 x 로 정규화");
+    }
+  }
+
+  const effectiveLabel = hasDollar ? `$${inner}$` : inner;
+  return { effectiveLabel, notes, simpleLhsApplied, axisThetaApplied };
+
 }
 
 // ============================================================================
@@ -1469,6 +1654,61 @@ export function runStructuralMatchingUnit2(scene, unclaimedNodes, claimedStrokeI
     }
   }
 
+  // [구체 함수식 확정 후 1:1 잔여 파생 추상 함수 곡선 소거] (예: CASE-002 의 y=-f'(x)):
+  // Sub-Unit 2a 의 abstract-single-curve(y=f(x))와 중복되지 않도록,
+  // 오직 파생 추상 함수(abstract-derived-hold: y=-f'(x), y=f'(x), y=-f(x))가 유일한 미배정 추상 라벨이고,
+  // 구체 함수식 매칭 이후 남은 미배정 함수 라벨이 정확히 1개이며 남은 비상수 실선 plot 곡선도 정확히 1개일 때만 확정한다.
+  if (F.enableResidualSingleCurve !== false && abstractLabelNodes.length === 1) {
+    const onlyAbs = abstractLabelNodes[0];
+    const remainingNodes = unclaimedNodes.filter((n) => !results.has(n.id));
+    if (
+      onlyAbs.tpl &&
+      onlyAbs.tpl.template === "abstract-derived-hold" &&
+      remainingNodes.length === 1 &&
+      remainingNodes[0].id === onlyAbs.node.id
+    ) {
+      const remainingPlotCands = plotCandidates.filter((c) => {
+        if (claimedStrokeIndices.has(c.stroke.index)) return false;
+        if (!c.stroke.stmt || c.stroke.stmt.type !== "plot") return false;
+        if (c.stroke.kind === "dashed" || /\bdashed\b/.test(String(c.stroke.stmt.optsRaw || ""))) return false;
+        if (c.mathStruct && c.mathStruct.degree === 0) return false;
+        return true;
+      });
+      if (remainingPlotCands.length === 1) {
+        const match = remainingPlotCands[0];
+        const n = onlyAbs.node;
+        const anchor = n.at || n.inlineAnchor || n.anchor || (n.bbox ? [(n.bbox.x0 + n.bbox.x1) / 2, (n.bbox.y0 + n.bbox.y1) / 2] : null);
+        const distPt = anchor
+          ? r2(minDistPolylines([{ pts: [anchor, anchor], closed: false }], [{ pts: match.stroke.pts, closed: false }]))
+          : null;
+        claimedStrokeIndices.add(match.stroke.index);
+        results.set(n.id, {
+          how: "residual-single-curve",
+          stroke: match.stroke,
+          strokeKind: match.strokeKind,
+          confirmed: true,
+          uncertain: false,
+          nonMoveCategory: null,
+          nonMoveCode: null,
+          template: onlyAbs.tpl.template,
+          templateDesc: onlyAbs.tpl.desc,
+          mathStructure: match.mathStruct,
+          distancePt: distPt,
+          plotExpr: match.stroke.stmt?.expr || "",
+          reason: `구체 함수식 확정 후 남은 유일한 미배정 함수 라벨(${n.trimmed || n.label})과 유일한 미배정 함수 곡선(#${match.stroke.index}: ${match.stroke.stmt?.expr || "plot"}${distPt !== null ? `, 거리 ${distPt}pt` : ""})이 1:1 대응되어 확정됨`,
+        });
+      }
+    }
+  }
+
+  if (false) {
+    if (false) {
+      results.set("__noop__", {
+        reason: `${""}`,
+      });
+    }
+  }
+
   return results;
 }
 
@@ -1693,7 +1933,11 @@ export function enhanceSceneWithUnit2(scene, flags = DEFAULT_UNIT2_FLAGS) {
   }
 
   scene.compileExpr = (expr) => compileExprUnit2(expr, F);
-  scene.compileLabelFunction = (lab) => compileNumericLabelFunctionUnit2(lab, F);
+  scene.compileLabelFunction = (lab) =>
+    compileNumericLabelFunctionUnit2(preprocessLabelForMatchingUnit2(lab, scene, F).effectiveLabel, F);
+  if (F.enableDiagonalSvgRecovery !== false) {
+    recoverDiagonalAnchorSvgNodesUnit2(scene, F);
+  }
   return scene;
 }
 
@@ -1712,8 +1956,18 @@ export function assignStrokesUnit2(scene, targets, flags = DEFAULT_UNIT2_FLAGS) 
   const strokes = Array.isArray(scene && scene.strokes) ? scene.strokes : [];
   const strokeOfPath = (p) => (p && p.index !== undefined ? strokes.find((s) => s && s.index === p.index) || null : null);
 
+  const prepMap = new Map();
+  const rawTargets = targets;
+  targets = rawTargets.map((n) => {
+    const prep = preprocessLabelForMatchingUnit2(n.label, scene, F);
+    prepMap.set(n.id, prep);
+    return { ...n, label: prep.effectiveLabel, _origLabel: n.label };
+  });
+
   // ① 인라인 소속 경로 확인
-  for (const n of targets) {
+  var applyAxisRequested = F.applyAxisRequested !== false;
+  for (let tIdx = 0; tIdx < targets.length; tIdx++) {
+    const n = targets[tIdx];
     if (n.kind === "inline" && n.stmt && n.stmt.path) {
       const st = strokeOfPath(n.stmt.path);
       if (st) {
@@ -1745,7 +1999,9 @@ export function assignStrokesUnit2(scene, targets, flags = DEFAULT_UNIT2_FLAGS) 
   }
 
   // ② 수식과 곡선의 수치적 대응 확인 (expr-match / numeric-equivalent-match)
-  for (const n of targets) {
+  var applyAxisRequested = F.applyAxisRequested !== false;
+  for (let tIdx = 0; tIdx < targets.length; tIdx++) {
+    const n = targets[tIdx];
     if (res.has(n.id)) continue;
     const numAn = analyzeNumericLabelExpressionUnit2(n.label, F);
     numAnalyses.set(n.id, numAn);
@@ -2035,6 +2291,20 @@ export function assignStrokesUnit2(scene, targets, flags = DEFAULT_UNIT2_FLAGS) 
       });
     }
   }
+  for (const [id, info] of res.entries()) {
+    const prep = prepMap.get(id);
+    if (info && prep && prep.notes && prep.notes.length > 0) {
+      info.preprocessNotes = prep.notes;
+      info.reason = `[${prep.notes.join("; ")}] ${info.reason || ""}`;
+    }
+  }
+  if (false) {
+    if (false) {
+      res.set("__noop__", {
+        reason: "",
+      });
+    }
+  }
   return res;
 }
 
@@ -2060,7 +2330,7 @@ function checkTrigCrestKeep(node, stroke, eval0, P = PARAMS) {
   // 라벨이 곡선의 가로 범위 내부에 있고, 라벨 하단(b.y0)이 곡선 최댓값(sBbox.y1) 부근(0pt ~ 10pt)에 위치하며
   // 자기 곡선과의 실제 거리가 너무 멀지 않은(own <= 12pt) 경우에만 극댓값 상단 배치로 인정
   const withinXSpan = cx >= sBbox.x0 && cx <= sBbox.x1;
-  const nearCrestY = b.y0 >= sBbox.y1 - 1.5 && b.y0 <= sBbox.y1 + 10.0;
+  const nearCrestY = b.y0 >= sBbox.y1 - 1.5 && b.y0 <= sBbox.y1 + 11.5;
   const closeToCurve = eval0.own >= 0 && eval0.own <= 12.0;
 
   if (withinXSpan && nearCrestY && closeToCurve) {
@@ -2223,7 +2493,9 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
     };
   };
 
-  for (const n of targets) {
+  var applyAxisRequested = F.applyAxisRequested !== false;
+  for (let tIdx = 0; tIdx < targets.length; tIdx++) {
+    const n = targets[tIdx];
     if (!n.usable) {
       plan.skipped.push({
         id: n.id,
@@ -2252,12 +2524,24 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
     const strokeKind = a.strokeKind || classifyStrokeKind(s);
     const w = n.bbox.x1 - n.bbox.x0, h = n.bbox.y1 - n.bbox.y0;
     const others = strokesEff.filter((q) => q.index !== s.index);
-    const obsBoxes = [...fixed.map((q) => q.bbox), ...placedBoxes];
+    const futureAxisParallelBoxes = [];
+    for (let remIdx = tIdx + 1; remIdx < targets.length; remIdx++) {
+      const rem = targets[remIdx];
+      if (!rem || !rem.bbox) continue;
+      const remAsgn = assigned.get(rem.id);
+      if (remAsgn && remAsgn.stroke) {
+        const remKind = remAsgn.strokeKind || classifyStrokeKind(remAsgn.stroke);
+        if (remKind === "verticalLine" || remKind === "horizontalLine") {
+          futureAxisParallelBoxes.push(rem.bbox);
+        }
+      }
+    }
+    const obsBoxes = [...fixed.map((q) => q.bbox), ...placedBoxes, ...futureAxisParallelBoxes];
     const ends = [endInfo(s, 0), endInfo(s, 1)];
     const anchor0 = n.at || n.inlineAnchor || n.anchor || [(n.bbox.x0 + n.bbox.x1) / 2, (n.bbox.y0 + n.bbox.y1) / 2];
     const preferredEnd = selectPreferredEnd(strokeKind, ends, anchor0);
 
-    const evalBox = (bb) => {
+    const evalBox = (bb, axisImpactForCand = null) => {
       let minOther = Infinity;
       for (const q of others) {
         const c = clearanceToStroke(bb, q);
@@ -2265,14 +2549,84 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       }
       const own = clearanceToStroke(bb, s);
       let labelGap = Infinity;
-      for (const ob of obsBoxes) labelGap = Math.min(labelGap, bboxGapRect(bb, ob));
+      for (const fn of fixed) {
+        let ob = fn.bbox;
+        if (
+          applyAxisRequested &&
+          hasAxes0 &&
+          axisImpactForCand &&
+          fn.role === "axisLabel" &&
+          fn.kind === "inline"
+        ) {
+          const cx = (ob.x0 + ob.x1) / 2;
+          const cy = (ob.y0 + ob.y1) / 2;
+          let obExt = ob;
+          if (Math.abs(ob.x0 - xr0) < 35 && Math.abs(cy) < 25) {
+            const dx = Math.max(0, axisImpactForCand.candR - xr0);
+            obExt = { x0: ob.x0 + dx, x1: ob.x1 + dx, y0: ob.y0, y1: ob.y1 };
+          } else if (Math.abs(ob.y0 - yt0) < 35 && Math.abs(cx) < 25) {
+            const dy = Math.max(0, axisImpactForCand.candT - yt0);
+            obExt = { x0: ob.x0, x1: ob.x1, y0: ob.y0 + dy, y1: ob.y1 + dy };
+          }
+          if (strokeKind === "generalLine" && F.enableRightAxisTipLineBelow !== false) {
+            ob = obExt;
+          } else {
+            labelGap = Math.min(labelGap, bboxGapRect(bb, obExt));
+          }
+        }
+        labelGap = Math.min(labelGap, bboxGapRect(bb, ob));
+      }
+      for (const pb of placedBoxes) labelGap = Math.min(labelGap, bboxGapRect(bb, pb));
+      for (const fb of futureAxisParallelBoxes) labelGap = Math.min(labelGap, bboxGapRect(bb, fb));
       return { minOther, own, labelGap };
     };
 
     // [Unit 3-C] 축 평행 직선 방정식 라벨(수평선 y=상수, 수직선 x=상수) 전용 교재 조판 규칙 적용
     if (F.u3c && a.confirmed) {
-      const numAn3C = analyzeNumericLabelExpressionUnit2(n.label, F);
-      const structTpl3C = parseLabelStructureTemplateUnit2(n.label, F);
+      const prep3C = preprocessLabelForMatchingUnit2(n.label, scene, F);
+      const numAn3C = analyzeNumericLabelExpressionUnit2(prep3C.effectiveLabel, F);
+      const baseReq3C = computeBaseAxisReqPt();
+      const evalBox3C = (bb) => {
+        if (F.applyAxisRequested === false || !hasAxes0) return evalBox(bb);
+        const axImpact = evaluateJointAxisImpact(bb, baseReq3C);
+        if (axImpact.marginalExtPt <= 0.1) return evalBox(bb);
+        const dR = Math.max(0, axImpact.candR - xr0);
+        const dT = Math.max(0, axImpact.candT - yt0);
+        let minOther = Infinity;
+        for (const q of others) {
+          if (q.kind === "axis" && F.enableAxisVarTheta !== false) {
+            const isHorizAxis = Math.abs(q.pts[0][1] - q.pts[q.pts.length - 1][1]) < 1e-6;
+            const extAxisStroke = {
+              pts: isHorizAxis
+                ? [[axImpact.candL, q.pts[0][1]], [axImpact.candR, q.pts[0][1]]]
+                : [[q.pts[0][0], axImpact.candB], [q.pts[0][0], axImpact.candT]],
+              halfWidth: q.halfWidth || 0.5,
+            };
+            const c = clearanceToStroke(bb, extAxisStroke);
+            if (c < minOther) minOther = c;
+            continue;
+          }
+          const c = clearanceToStroke(bb, q);
+          if (c < minOther) minOther = c;
+        }
+        const own = clearanceToStroke(bb, s);
+        let labelGap = Infinity;
+        for (const fn of fixed) {
+          let ob = fn.bbox;
+          if (fn.role === "axisLabel") {
+            const rawLbl = String(fn.label || "").replace(/\$/g, "").trim();
+            if ((rawLbl === "x" || rawLbl === "\\theta" || rawLbl === "t") && dR > 0.5) {
+              ob = { x0: ob.x0 + dR, y0: ob.y0, x1: ob.x1 + dR, y1: ob.y1 };
+            } else if (rawLbl === "y" && dT > 0.5) {
+              ob = { x0: ob.x0, y0: ob.y0 + dT, x1: ob.x1, y1: ob.y1 + dT };
+            }
+          }
+          labelGap = Math.min(labelGap, bboxGapRect(bb, ob));
+        }
+        for (const pb of placedBoxes) labelGap = Math.min(labelGap, bboxGapRect(bb, pb));
+        return { minOther, own, labelGap };
+      };
+      const structTpl3C = parseLabelStructureTemplateUnit2(prep3C.effectiveLabel, F);
       const axisParallelInfo = classifyAxisParallelLineLabelUnit3C(n, scene, a, numAn3C, structTpl3C);
       if (axisParallelInfo) {
         const axisParallelDecision =
@@ -2281,7 +2635,7 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
                 node: n,
                 stroke: s,
                 assignment: a,
-                evalBox,
+                evalBox: evalBox3C,
                 scene,
                 P,
               })
@@ -2289,7 +2643,7 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
                 node: n,
                 stroke: s,
                 assignment: a,
-                evalBox,
+                evalBox: evalBox3C,
                 scene,
                 P,
               });
@@ -2412,7 +2766,18 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
       const { point: E, t } = ends[ei];
       const prefAbove = t[1] >= 0;
       for (const side of ["above", "below"]) {
-        for (const gOff of gapOffsets) {
+        const isRightXAxisTipDecreasing =
+          F.enableRightAxisTipLineBelow !== false &&
+          strokeKind === "generalLine" &&
+          hasAxes0 &&
+          Math.abs(E[1]) <= 12.0 &&
+          E[0] >= xr0 - 30.0 &&
+          t[1] < -0.15;
+        const effGapOffsets =
+          isRightXAxisTipDecreasing && side === "below"
+            ? [...gapOffsets, 8, 12.5, 17, 22]
+            : gapOffsets;
+        for (const gOff of effGapOffsets) {
           for (let al = -1; al <= 1.0001; al += P.alphaStep) {
             const cx = E[0] + al * (w / 2);
             const gap = (side === "above" ? P.gapAbove : P.gapBelow) + gOff;
@@ -2422,7 +2787,7 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
                 : { x0: cx - w / 2, x1: cx + w / 2, y1: E[1] - gap, y0: E[1] - gap - h };
             const sh = computeShiftForMove(n, rawBb, P);
             const bb = sh.actualBbox;
-            cands.push({ bb, ei, side, alpha: al, gapOffset: gOff, sideMismatch: (side === "above") !== prefAbove, shift: sh.newShift });
+            cands.push({ bb, ei, side, alpha: al, gapOffset: gOff, sideMismatch: (side === "above") !== prefAbove, shift: sh.newShift, isRightXAxisTipDecreasing });
           }
         }
       }
@@ -2436,7 +2801,14 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
                 : { x1: E[0] - P.gapSide, x0: E[0] - P.gapSide - w, y0: cy - h / 2, y1: cy + h / 2 };
             const sh = computeShiftForMove(n, rawBb, P);
             const bb = sh.actualBbox;
-            cands.push({ bb, ei, side, alpha: be, gapOffset: 0, sideMismatch: (side === "right") !== (t[0] >= 0), shift: sh.newShift });
+            const isRightXAxisTipDecreasing =
+              F.enableRightAxisTipLineBelow !== false &&
+              strokeKind === "generalLine" &&
+              hasAxes0 &&
+              Math.abs(E[1]) <= 12.0 &&
+              E[0] >= xr0 - 30.0 &&
+              t[1] < -0.15;
+            cands.push({ bb, ei, side, alpha: be, gapOffset: 0, sideMismatch: (side === "right") !== (t[0] >= 0), shift: sh.newShift, isRightXAxisTipDecreasing });
           }
         }
       }
@@ -2449,7 +2821,7 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
     const wAxisExt = P.wAxisExt ?? 2.5;
     for (const c of cands) {
       const axisImpact = evaluateJointAxisImpact(c.bb, baseAxisReq, { action: "move", side: c.side, origBbox: n.bbox });
-      const ev0 = evalBox(c.bb);
+      const ev0 = evalBox(c.bb, axisImpact);
       let minOther = ev0.minOther;
       if (hasAxes0) {
         const extXStroke = {
@@ -2481,7 +2853,14 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
         (Math.max(baseC.y1, c.bb.y1) - Math.min(baseC.y0, c.bb.y0) - (baseC.y1 - baseC.y0));
       const clearPen = Math.max(0, P.cPref - Math.min(ev.minOther, ev.labelGap)) / P.cPref;
       const ownPen = ev.own < (P.cOwnPref || 1.6) ? ((P.cOwnPref || 1.6) - ev.own) / (P.cOwnPref || 1.6) : 0;
-      const gapPen = (c.gapOffset || 0) * 0.35;
+      const sameBandWithXAxisLabel =
+        c.isRightXAxisTipDecreasing &&
+        (c.side === "right" || c.bb.y1 > -9.5);
+      const sameBandAxisLabelPen = sameBandWithXAxisLabel ? 12.0 : 0;
+      const gapPen =
+        (c.isRightXAxisTipDecreasing && c.side === "below"
+          ? (c.gapOffset || 0) * 0.08
+          : (c.gapOffset || 0) * 0.35) + sameBandAxisLabelPen;
       const baseCost =
         P.wClear * clearPen * clearPen +
         (P.wOwnPref || 3.5) * ownPen * ownPen +
