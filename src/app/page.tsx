@@ -35,6 +35,7 @@ import {
   type SmartLabelBackupSnapshot,
 } from "@/lib/smart-label-beta/client-workflow";
 import type {
+  MultiAbstractActionMode,
   SmartLabelAccessRole,
   SmartLabelBetaResponse,
   SmartLabelEngineVersion,
@@ -377,6 +378,7 @@ export default function Home() {
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
   const [applyAxisBeta, setApplyAxisBeta] = useState(false);
   const [applyDomainExtensionBeta, setApplyDomainExtensionBeta] = useState(false);
+  const [multiAbstractActionBeta, setMultiAbstractActionBeta] = useState<MultiAbstractActionMode>("hold");
   const [enableUnit3BBeta, setEnableUnit3BBeta] = useState(false);
   const [engineVersionBeta, setEngineVersionBeta] = useState<SmartLabelEngineVersion>("v0.2.1");
   const [smartLabelProposal, setSmartLabelProposal] = useState<SmartLabelBetaResponse | null>(null);
@@ -541,6 +543,7 @@ export default function Home() {
         toast.error(data.message || data.error || "스마트 라벨 베타 요청이 거부되었습니다.");
         return;
       }
+      setMultiAbstractActionBeta("hold");
       setSmartLabelProposal(data as SmartLabelBetaResponse);
     } catch {
       toast.error("스마트 라벨 서버 통신 중 오류가 발생했습니다. 기존 코드는 안전하게 유지됩니다.");
@@ -550,7 +553,9 @@ export default function Home() {
   };
 
   const handleApproveSmartLabel = () => {
-    const result = applyApprovedProposal(smartLabelProposal, rawInput);
+    const result = applyApprovedProposal(smartLabelProposal, rawInput, {
+      multiAbstractAction: multiAbstractActionBeta,
+    });
     if (!result.applied || !result.backup) {
       toast.error(result.error || "추천 결과를 적용할 수 없습니다.");
       return;
@@ -563,6 +568,7 @@ export default function Home() {
     }
     handleRawInputChange(result.newRawInput);
     setSmartLabelProposal(null);
+    setMultiAbstractActionBeta("hold");
     toast.success("✅ 스마트 라벨 추천 위치가 적용되었습니다. (조이스틱으로 미세 조정 가능)");
   };
 
@@ -3526,7 +3532,10 @@ const getProcessedInput = (code: string) => {
           proposal={smartLabelProposal}
           currentRawInput={rawInput}
           onApproveApply={handleApproveSmartLabel}
-          onClose={() => setSmartLabelProposal(null)}
+          onClose={() => {
+            setSmartLabelProposal(null);
+            setMultiAbstractActionBeta("hold");
+          }}
           restoreConfirmOpen={isRestoreConfirmOpen}
           onConfirmRestoreOverwrite={() => handleRestoreSmartLabel(true)}
           onCancelRestoreConfirm={() => setIsRestoreConfirmOpen(false)}
@@ -3536,6 +3545,8 @@ const getProcessedInput = (code: string) => {
           unit3BDisabledReason={unit3BDisabledReason}
           applyAxisOption={applyAxisBeta}
           applyDomainExtensionOption={applyDomainExtensionBeta}
+          multiAbstractAction={multiAbstractActionBeta}
+          onChangeMultiAbstractAction={setMultiAbstractActionBeta}
           enableUnit3BOption={unit3BServerEnabled ? enableUnit3BBeta : false}
           engineVersion={smartLabelAccess.canSelectEngine ? engineVersionBeta : "v0.2.2-beta"}
           isRecomputing={isSmartLabelLoading}

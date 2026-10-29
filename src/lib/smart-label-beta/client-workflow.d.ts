@@ -8,6 +8,7 @@ export interface SmartLabelBackupSnapshot {
   originalCode: string;
   appliedRecommendedCode: string;
   inputHash: string | null;
+  multiAbstractAction?: "hold" | "recommend" | "swap" | null;
   appliedAt: number;
 }
 
@@ -36,9 +37,15 @@ export function resolveSmartLabelClientAccess(
 
 export function shouldShowSmartLabelBetaUI(params: SmartLabelClientAccessParams): boolean;
 
+export function resolveActiveProposalForMultiAbstractChoice(
+  proposal: any,
+  selectedAction?: "hold" | "recommend" | "swap"
+): any;
+
 export function evaluateProposalApplicability(
   proposal: any,
-  currentRawInput: string
+  currentRawInput: string,
+  opts?: { multiAbstractAction?: "hold" | "recommend" | "swap" }
 ): {
   allowed: boolean;
   reasonCode: string;
@@ -47,7 +54,8 @@ export function evaluateProposalApplicability(
 
 export function applyApprovedProposal(
   proposal: any,
-  currentRawInput: string
+  currentRawInput: string,
+  opts?: { multiAbstractAction?: "hold" | "recommend" | "swap" }
 ): {
   applied: boolean;
   reasonCode: string;

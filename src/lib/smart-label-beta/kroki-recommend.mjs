@@ -54,6 +54,17 @@ export function normalizeEngineVersion(engineVersion) {
   return engineVersion === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1";
 }
 
+/**
+ * 다중 추상 함수 대응 선택 모드(multiAbstractAction)를 안전하게 정규화한다.
+ * 미지정 또는 알 수 없는 값이면 기본값 "hold"(원본 유지)를 반환한다.
+ * @param {any} action
+ * @returns {"hold" | "recommend" | "swap"}
+ */
+export function normalizeMultiAbstractAction(action) {
+  if (action === "recommend" || action === "swap") return action;
+  return "hold";
+}
+
 // 위험 TeX 매크로 차단 정규식 (주석 제거 후 검사)
 const DANGEROUS_TEX_MACRO_RE =
   /\\(?:input|include|write18|immediate|openin|openout|read|newread|newwrite|catcode|csname|endcsname|makeatletter|loop|repeat|pdfoutput|everyeof|everypar)\b/;
@@ -579,6 +590,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
   const engineVersion = normalizeEngineVersion(opts.engineVersion);
   const isV022 = engineVersion === "v0.2.2-beta";
   const applyDomainExtensionRequested = isV022 && Boolean(opts.applyDomainExtension === true);
+  const multiAbstractActionRequested = isV022
+    ? normalizeMultiAbstractAction(opts.multiAbstractAction)
+    : "hold";
   const unit3BServerStatus = isUnit3BServerEnabled({ env: opts.env });
   const enableUnit3BRequested = isV022 && Boolean(opts.enableUnit3B === true);
   const enableUnit3B = enableUnit3BRequested && unit3BServerStatus.enabled;
@@ -627,6 +641,28 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         ? "그래프 끝점 미세 연장 대기 중"
         : "그래프 끝점 미세 연장 옵션 OFF (원본 정의역 유지)",
       items: [],
+    },
+    multiAbstractActionRequested,
+    multiAbstractOption: {
+      detected: false,
+      supportedPair: false,
+      classificationType: null,
+      classificationCode: null,
+      mathematicallyProven: false,
+      requiresUserApproval: false,
+      requestedAction: multiAbstractActionRequested,
+      selectedAction: "hold",
+      defaultAction: "hold",
+      canRecommend: false,
+      canSwap: false,
+      rawDistMarginPt: null,
+      moderateMarginCaution: false,
+      scaleNormalizedThresholds: null,
+      signals: [],
+      holdReason: null,
+      summaryReason: "다중 추상 함수(유형 2/3) 대상이 아닙니다.",
+      correspondenceRows: [],
+      variants: null,
     },
     collisionDiagnostics: null,
     inputHash,
@@ -779,158 +815,6 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       };
     }
 
-    // 6) 선택된 엔진(v0.2.1 또는 v0.2.2-beta)에 따른 함수식 라벨 후보 평가 및 선택
-    let activePlan;
-    let axisPlan;
-    let axisEditsToApply = [];
-    let domainPlan = { requested: false, applied: false, edits: [], decisions: [] };
-    let domainEditsToApply = [];
-    let activeShift;
-    let tickPlan = { edits: [], movedTicks: [], heldTicks: [], decisions: [] };
-    let originPlan = { edits: [], movedOrigins: [], heldOrigins: [], decisions: [] };
-    let decisionsByNodeId = new Map();
-
-    if (isV022) {
-      const v022Plan = runPlanningV022(
-        scene,
-        P,
-        applyAxisRequested,
-        { enableOriginPlacement: enableUnit3D },
-        enableUnit3B,
-        enableUnit3D,
-        applyDomainExtensionRequested
-      );
-      activePlan = v022Plan.activePlan;
-      axisPlan = v022Plan.axisPlan;
-      axisEditsToApply = v022Plan.axisEditsToApply;
-      domainPlan = v022Plan.domainPlan || domainPlan;
-      domainEditsToApply = v022Plan.domainEditsToApply || [];
-      activeShift = v022Plan.activeShift;
-      tickPlan = v022Plan.tickPlan || tickPlan;
-      originPlan = v022Plan.originPlan || originPlan;
-      decisionsByNodeId = v022Plan.decisionsByNodeId;
-      // decisionsByNodeId 를 반영하여 원본 진단 사유(Unit 1 4대 미이동 사유 + Unit 3-A + Unit 3-B + Unit 3-D) 갱신
-      origDiag = compareCollisionDiagnosticsV022(scene, scene, [], {
-        axisChanged: false,
-        params: P,
-        decisionsByNodeId,
-      });
-      baseResponse.collisionDiagnostics = origDiag;
-    } else {
-      const plan0 = planLabelsMultiEngine(scene, P, null, "auto", MP);
-      activePlan = plan0;
-      axisPlan = planAxes(scene, plan0, P);
-
-      if (applyAxisRequested) {
-        let iters = 1;
-        const sig = (p) =>
-          JSON.stringify((p.placements || []).map((q) => [q.id, q.action, q.selectedEngine, q.shift]));
-        while (iters < 3 && axisPlan.x && axisPlan.y) {
-          const { xU, yU } = scene.units;
-          const override = {
-            left: Math.min(...axisPlan.x.new) * xU,
-            right: Math.max(...axisPlan.x.new) * xU,
-            bottom: Math.min(...axisPlan.y.new) * yU,
-            top: Math.max(...axisPlan.y.new) * yU,
-          };
-          const next = planLabelsMultiEngine(scene, P, override, "auto", MP);
-          iters++;
-          const same = sig(next) === sig(activePlan);
-          activePlan = next;
-          axisPlan = planAxes(scene, activePlan, P);
-          if (same) break;
-        }
-        axisEditsToApply = axisEdits(scene, axisPlan);
-      }
-
-      activeShift = shiftEdits(scene, activePlan, P);
-    }
-
-    const labelEditsOnEffective = activeShift.edits;
-    const tickEditsOnEffective = tickPlan.edits || [];
-    const originEditsOnEffective = originPlan.edits || [];
-    const editsToApply = [
-      ...domainEditsToApply,
-      ...labelEditsOnEffective,
-      ...tickEditsOnEffective,
-      ...originEditsOnEffective,
-      ...axisEditsToApply,
-    ];
-
-    const xAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-x");
-    const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
-    const anyAxisChanged = axisEditsToApply.length > 0;
-    const anyDomainChanged = domainEditsToApply.length > 0;
-    const hasAxisRequiredHold = (domainPlan.decisions || []).some(
-      (d) => d.action === "hold" && d.holdCode === "axis-extension-required"
-    );
-
-    const domainOptionInfo = {
-      requested: applyDomainExtensionRequested,
-      applied: false,
-      status: !applyDomainExtensionRequested
-        ? "disabled"
-        : anyDomainChanged
-        ? "pending-verification"
-        : hasAxisRequiredHold
-        ? "held-axis-off"
-        : "not-needed",
-      modeNote: "8단계 안전 필터 통과 시 최소 끝점 연장 전용 (축소 없음)",
-      editsCount: domainEditsToApply.length,
-      items: domainPlan.decisions || [],
-      message: !applyDomainExtensionRequested
-        ? "그래프 끝점 미세 연장 옵션 OFF (원본 정의역 유지)"
-        : anyDomainChanged
-        ? `그래프 끝점 미세 연장 후보 산출됨 (${(domainPlan.decisions || [])
-            .filter((d) => d.action === "extend")
-            .map(
-              (d) =>
-                `${d.label}: domain [${d.origDomain.join(", ")}] → [${d.newDomain.join(", ")}] (+${d.arcLengthPt}pt, 간격 ${d.origOwnGapPt}pt → ${d.newOwnGapPt}pt)`
-            )
-            .join(" · ")})`
-        : hasAxisRequiredHold
-        ? "원본 x축 범위와 축라벨 안전 여백을 보호하기 위해 그래프 끝점 연장을 보류했습니다. 축 길이 자동 조정을 함께 켜면 연장이 가능합니다."
-        : "모든 함수 그래프가 이미 적정 연결 간격이거나 8단계 안전 게이트에 의해 원본 정의역을 유지합니다.",
-    };
-    baseResponse.domainExtensionOption = domainOptionInfo;
-
-    const axisOptionInfo = {
-      requested: applyAxisRequested,
-      applied: false,
-      status: !applyAxisRequested
-        ? "disabled"
-        : anyAxisChanged
-        ? "pending-verification"
-        : "not-needed",
-      modeNote: "길이 연장 전용 (축 축소 없음)",
-      x: axisPlan.x
-        ? {
-            old: axisPlan.x.old,
-            new: applyAxisRequested ? axisPlan.x.new : axisPlan.x.old,
-            changed: applyAxisRequested && xAxisChanged,
-          }
-        : null,
-      y: axisPlan.y
-        ? {
-            old: axisPlan.y.old,
-            new: applyAxisRequested ? axisPlan.y.new : axisPlan.y.old,
-            changed: applyAxisRequested && yAxisChanged,
-          }
-        : null,
-      editsCount: axisEditsToApply.length,
-      message: !applyAxisRequested
-        ? "축 길이 자동 조정 옵션 OFF (함수식 라벨만 정렬)"
-        : anyAxisChanged
-        ? `축 길이 연장 후보 산출됨 (${[
-            xAxisChanged ? `x축 [${axisPlan.x.old.join(", ")}] → [${axisPlan.x.new.join(", ")}]` : null,
-            yAxisChanged ? `y축 [${axisPlan.y.old.join(", ")}] → [${axisPlan.y.new.join(", ")}]` : null,
-          ]
-            .filter(Boolean)
-            .join(", ")})`
-        : "현재 x축·y축 길이가 이미 충분하여 축 길이 조정이 불필요합니다 (길이 연장 전용, 축소 없음).",
-    };
-    baseResponse.axisOption = axisOptionInfo;
-
     if (circleAdjusted) {
       const rawNodes = extractTikzNodes(rawBody).nodes;
       const effNodes = extractTikzNodes(effectiveBody).nodes;
@@ -945,416 +829,830 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       }
     }
 
-    const candEffectiveBody = applyEdits(effectiveBody, editsToApply);
-
-    const origFnAuditById = new Map(
-      (origDiag.origAudit?.functionLabelAudits || []).map((fa) => [fa.id, fa])
-    );
-
-    const buildEnrichedDecisions = (rawDecisions, finalFnAuditById) =>
-      (rawDecisions || []).map((d) => {
-        const origFa = origFnAuditById.get(d.id);
-        const finalFa = finalFnAuditById ? finalFnAuditById.get(d.id) : origFa;
-        const hasPreExistingCollision = Boolean(origFa?.hasCollision);
-        const hasRemainingCollision = Boolean(finalFa?.hasCollision);
-        const collisionDescriptions = (finalFa?.collisions || origFa?.collisions || []).map(
-          (c) => c.description
-        );
-        const autoMod = !!d.autoModified;
-        let holdReason = d.holdReason || null;
-        let selectionReason = d.selectionReason || "";
-        if (!autoMod && hasRemainingCollision) {
-          const warnSuffix =
-            d.nonMoveCode === "uncertain-match" || d.nonMoveCode === "parse-failure" || d.nonMoveCode === "fallback-anchor-unusable"
-              ? ` [⚠️ 미해결 기존 충돌: ${collisionDescriptions.join("; ")} — ${d.nonMoveCategory || "매칭/좌표 불확실"}로 인해 자동 이동을 보류하므로 수동/조이스틱 조정 권장]`
-              : ` [⚠️ 미해결 기존 충돌: ${collisionDescriptions.join("; ")} — 안전한 자동 이동 후보가 없어 원본을 유지하므로 수동/조이스틱 조정 권장]`;
-          if (holdReason && !holdReason.includes("미해결 기존 충돌")) {
-            holdReason += warnSuffix;
-          }
-          if (selectionReason && !selectionReason.includes("미해결 기존 충돌")) {
-            selectionReason += warnSuffix;
-          }
-        }
-        return {
-          id: d.id,
-          label: d.label,
-          autoModified: autoMod,
-          selectedEngine: d.selectedEngine || "original",
-          agreedEngines: d.agreedEngines || [],
-          how: d.assignmentMethod || d.assignment?.how || d.how || null,
-          confirmedAssignment: Boolean(d.assignmentConfirmed ?? d.assignment?.confirmed ?? d.confirmed),
-          shift: d.selectedPosition?.shift || d.chosenShift || [0, 0],
-          movedPt: d.movement?.movedDistancePt ?? d.movedPt ?? 0,
-          nonMoveCategory: d.nonMoveCategory || null,
-          nonMoveCode: d.nonMoveCode || null,
-          holdReason,
-          selectionReason,
-          hasPreExistingCollision,
-          hasRemainingCollision,
-          collisionDescriptions,
-        };
-      });
-
-    // 이동할 라벨 및 축 편집이 전혀 없는 경우 (모두 기존 위치 유지 또는 보류)
-    if (editsToApply.length === 0 || candEffectiveBody === effectiveBody) {
-      const decisions0 = buildEnrichedDecisions(activePlan.labelDecisions, origFnAuditById);
-      const preservation0 = checkPreservation(effectiveBody, effectiveBody, []);
-      const unresolvedCnt = origDiag.counts.preExistingUnresolved;
-      const unmeasuredCnt = origDiag.counts.unmeasuredNodes;
-
-      let unchangedMsg =
-        "모든 함수식 라벨이 이미 적절한 위치에 있거나 안전한 이동 조건에 해당하지 않아 원본 위치를 유지합니다.";
-      let unchangedReasonCode = "all-labels-kept";
-
-      if (unresolvedCnt > 0) {
-        unchangedReasonCode = "all-labels-kept-with-unresolved-collisions";
-        const hasUncertainHold = decisions0.some(
-          (d) =>
-            !d.autoModified &&
-            d.hasRemainingCollision &&
-            (d.nonMoveCode === "uncertain-match" ||
-              d.nonMoveCode === "parse-failure" ||
-              d.nonMoveCode === "fallback-anchor-unusable")
-        );
-        unchangedMsg =
-          isV022 && hasUncertainHold
-            ? `수식 매칭 또는 기호 좌표가 불확실한 항목을 안전 보류하여 원본 코드를 유지합니다. ⚠️ 원본부터 존재하던 미해결 충돌 ${unresolvedCnt}건이 남아 있습니다 (조이스틱/수동 조정 권장).`
-            : `안전하게 자동 이동할 수 있는 후보가 없어 원본 코드를 유지합니다. ⚠️ 원본부터 존재하던 미해결 충돌 ${unresolvedCnt}건이 남아 있습니다 (조이스틱/수동 조정 권장).`;
-      } else if (unmeasuredCnt > 0) {
-        unchangedMsg += ` (참고: SVG 측정 미확인 노드 ${unmeasuredCnt}건 존재)`;
-      }
-
-      return {
-        ...baseResponse,
-        ok: true,
-        status: "unchanged",
-        reasonCode: unchangedReasonCode,
-        message: unchangedMsg,
-        canApply: false,
-        verified: true,
-        movedCount: 0,
-        fnMovedCount: 0,
-        tickMovedCount: 0,
-        tickHeldCount: (tickPlan.heldTicks || []).length,
-        originMovedCount: 0,
-        originHeldCount: (originPlan.heldOrigins || []).length,
-        heldCount: decisions0.length,
-        labelDecisions: decisions0,
-        tickDecisions: tickPlan.decisions || [],
-        originDecisions: originPlan.decisions || [],
-        placements: activePlan.placements || [],
-        shiftReport: activeShift.report || [],
-        preservation: preservation0,
-        collisionDiagnostics: origDiag,
+    // 6~9) 주어진 multiAbstractAction ("hold" | "recommend" | "swap")에 대해
+    //      플래닝 → 1차 보존 검사 → 2차 Kroki 렌더링 및 충돌 검증 → 결과 객체 생성을 수행하는 내부 헬퍼
+    const evaluateActionVariant = async (actionMode = "hold") => {
+      const unit2FlagsForAction = {
+        enableOriginPlacement: enableUnit3D,
+        multiAbstractAction: actionMode,
       };
-    }
 
-    // 7) 1차 보존 검사 (수식, domain, samples, 선분, 점 마커, 전역 폰트·선 두께 불변 확인)
-    const prePreservation = isV022
-      ? checkPreservationV022(effectiveBody, candEffectiveBody, editsToApply)
-      : checkPreservation(effectiveBody, candEffectiveBody, editsToApply);
-    if (!prePreservation.ok) {
-      if (anyAxisChanged) {
-        axisOptionInfo.status = "blocked-unsafe";
-        axisOptionInfo.applied = false;
-        axisOptionInfo.message = `축 길이 조정 보존 검증 실패로 차단됨: ${prePreservation.issues.join("; ")}`;
-      }
-      return {
-        ...baseResponse,
-        ok: false,
-        status: "reverted",
-        reasonCode: "preservation-check-failed",
-        message: `원본 보존 검증에 실패하여 추천을 적용하지 않고 원본을 유지합니다: ${prePreservation.issues.join("; ")}`,
-        canApply: false,
-        verified: false,
-        preservation: prePreservation,
-        errors: prePreservation.issues,
-      };
-    }
+      let activePlan;
+      let axisPlan;
+      let axisEditsToApply = [];
+      let domainPlan = { requested: false, applied: false, edits: [], decisions: [] };
+      let domainEditsToApply = [];
+      let activeShift;
+      let tickPlan = { edits: [], movedTicks: [], heldTicks: [], decisions: [] };
+      let originPlan = { edits: [], movedOrigins: [], heldOrigins: [], decisions: [] };
+      let decisionsByNodeId = new Map();
+      let variantOrigDiag = origDiag;
+      let multiAbstractAnalysis = null;
 
-    // 8) 필수 2차 Kroki 실제 렌더링 및 충돌/안전성 검증 (verify=true)
-    const render2 = await renderTikzViaKroki(candEffectiveBody, opts);
-    if (!render2.ok || !render2.svg) {
-      if (anyAxisChanged) {
-        axisOptionInfo.status = "blocked-unsafe";
-        axisOptionInfo.applied = false;
-        axisOptionInfo.message = `축 길이 조정 후 2차 Kroki 렌더링 실패로 차단됨`;
-      }
-      return {
-        ...baseResponse,
-        ok: false,
-        status: "reverted",
-        reasonCode: render2.isTimeout ? "verify-kroki-timeout" : "verify-kroki-failed",
-        message: `2차 검증 렌더링에 실패하여 추천을 차단하고 원본을 유지합니다 (${render2.error || "렌더 실패"}).`,
-        canApply: false,
-        verified: false,
-        errors: [render2.error || "2차 검증 렌더링 실패"],
-      };
-    }
-
-    const staged2 = stageSvgForV021(tempWorkRoot, candEffectiveBody, render2.svg);
-    if (!staged2.exists) {
-      return {
-        ...baseResponse,
-        ok: false,
-        status: "reverted",
-        reasonCode: "verify-staging-failed",
-        message: "2차 검증 SVG 스테이징에 실패하여 원본을 유지합니다.",
-        canApply: false,
-        verified: false,
-      };
-    }
-
-    const origFNodes = scene.nodes.filter((n) => n.role === "function" && n.bbox);
-    const movedFnNodeIds = (activePlan.placements || [])
-      .filter((p) => p.action === "move")
-      .map((p) => p.id);
-    const movedTickNodeIds = (tickPlan.movedTicks || []).map((t) => t.id);
-    const movedOriginNodeIds = (originPlan.movedOrigins || []).map((o) => o.id);
-    const movedNodeIds = [...movedFnNodeIds, ...movedTickNodeIds, ...movedOriginNodeIds];
-    const movedFNodeIndices = movedFnNodeIds
-      .map((id) => origFNodes.findIndex((q) => q.id === id))
-      .filter((idx) => idx >= 0);
-
-    const vVariant = isV022
-      ? verifyOutputVariantV022({
-          variant: anyAxisChanged ? "recommendedBody" : "labelOnlyBody",
-          origBody: effectiveBody,
-          origScene: scene,
-          candidateBody: candEffectiveBody,
-          edits: editsToApply,
-          movedFNodeIndices,
-          movedOriginNodeIds,
-          workRoot: tempWorkRoot,
+      if (isV022) {
+        const v022Plan = runPlanningV022(
+          scene,
           P,
-        })
-      : verifyOutputVariant({
-          variant: anyAxisChanged ? "recommendedBody" : "labelOnlyBody",
-          origBody: effectiveBody,
-          origScene: scene,
-          candidateBody: candEffectiveBody,
-          edits: editsToApply,
-          movedFNodeIndices,
-          workRoot: tempWorkRoot,
-          P,
-          runRender: true,
-        });
-
-    // 2차 렌더링된 장면(vVariant.scene)에 대해 x, y, O 및 모든 일반 노드·함수식 라벨의 정밀 전후 충돌 비교 수행
-    const finalScene = vVariant.scene || scene;
-    const finalDiag = isV022
-      ? compareCollisionDiagnosticsV022(scene, finalScene, movedNodeIds, {
-          axisChanged: anyAxisChanged,
+          applyAxisRequested,
+          unit2FlagsForAction,
+          enableUnit3B,
+          enableUnit3D,
+          applyDomainExtensionRequested
+        );
+        activePlan = v022Plan.activePlan;
+        axisPlan = v022Plan.axisPlan;
+        axisEditsToApply = v022Plan.axisEditsToApply;
+        domainPlan = v022Plan.domainPlan || domainPlan;
+        domainEditsToApply = v022Plan.domainEditsToApply || [];
+        activeShift = v022Plan.activeShift;
+        tickPlan = v022Plan.tickPlan || tickPlan;
+        originPlan = v022Plan.originPlan || originPlan;
+        decisionsByNodeId = v022Plan.decisionsByNodeId;
+        multiAbstractAnalysis =
+          v022Plan.multiAbstractAnalysis || scene.multiAbstractAnalysis || null;
+        variantOrigDiag = compareCollisionDiagnosticsV022(scene, scene, [], {
+          axisChanged: false,
           params: P,
           decisionsByNodeId,
-        })
-      : compareCollisionDiagnostics(scene, finalScene, movedNodeIds, {
-          axisChanged: anyAxisChanged,
-          params: P,
+          unit2Flags: unit2FlagsForAction,
+        });
+      } else {
+        const plan0 = planLabelsMultiEngine(scene, P, null, "auto", MP);
+        activePlan = plan0;
+        axisPlan = planAxes(scene, plan0, P);
+
+        if (applyAxisRequested) {
+          let iters = 1;
+          const sig = (p) =>
+            JSON.stringify((p.placements || []).map((q) => [q.id, q.action, q.selectedEngine, q.shift]));
+          while (iters < 3 && axisPlan.x && axisPlan.y) {
+            const { xU, yU } = scene.units;
+            const override = {
+              left: Math.min(...axisPlan.x.new) * xU,
+              right: Math.max(...axisPlan.x.new) * xU,
+              bottom: Math.min(...axisPlan.y.new) * yU,
+              top: Math.max(...axisPlan.y.new) * yU,
+            };
+            const next = planLabelsMultiEngine(scene, P, override, "auto", MP);
+            iters++;
+            const same = sig(next) === sig(activePlan);
+            activePlan = next;
+            axisPlan = planAxes(scene, activePlan, P);
+            if (same) break;
+          }
+          axisEditsToApply = axisEdits(scene, axisPlan);
+        }
+
+        activeShift = shiftEdits(scene, activePlan, P);
+      }
+
+      const labelEditsOnEffective = activeShift.edits;
+      const tickEditsOnEffective = tickPlan.edits || [];
+      const originEditsOnEffective = originPlan.edits || [];
+      const editsToApply = [
+        ...domainEditsToApply,
+        ...labelEditsOnEffective,
+        ...tickEditsOnEffective,
+        ...originEditsOnEffective,
+        ...axisEditsToApply,
+      ];
+
+      const xAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-x");
+      const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
+      const anyAxisChanged = axisEditsToApply.length > 0;
+      const anyDomainChanged = domainEditsToApply.length > 0;
+      const hasAxisRequiredHold = (domainPlan.decisions || []).some(
+        (d) => d.action === "hold" && d.holdCode === "axis-extension-required"
+      );
+
+      const domainOptionInfo = {
+        requested: applyDomainExtensionRequested,
+        applied: false,
+        status: !applyDomainExtensionRequested
+          ? "disabled"
+          : anyDomainChanged
+          ? "pending-verification"
+          : hasAxisRequiredHold
+          ? "held-axis-off"
+          : "not-needed",
+        modeNote: "8단계 안전 필터 통과 시 최소 끝점 연장 전용 (축소 없음)",
+        editsCount: domainEditsToApply.length,
+        items: domainPlan.decisions || [],
+        message: !applyDomainExtensionRequested
+          ? "그래프 끝점 미세 연장 옵션 OFF (원본 정의역 유지)"
+          : anyDomainChanged
+          ? `그래프 끝점 미세 연장 후보 산출됨 (${(domainPlan.decisions || [])
+              .filter((d) => d.action === "extend")
+              .map(
+                (d) =>
+                  `${d.label}: domain [${d.origDomain.join(", ")}] → [${d.newDomain.join(", ")}] (+${d.arcLengthPt}pt, 간격 ${d.origOwnGapPt}pt → ${d.newOwnGapPt}pt)`
+              )
+              .join(" · ")})`
+          : hasAxisRequiredHold
+          ? "원본 x축 범위와 축라벨 안전 여백을 보호하기 위해 그래프 끝점 연장을 보류했습니다. 축 길이 자동 조정을 함께 켜면 연장이 가능합니다."
+          : "모든 함수 그래프가 이미 적정 연결 간격이거나 8단계 안전 게이트에 의해 원본 정의역을 유지합니다.",
+      };
+
+      const axisOptionInfo = {
+        requested: applyAxisRequested,
+        applied: false,
+        status: !applyAxisRequested
+          ? "disabled"
+          : anyAxisChanged
+          ? "pending-verification"
+          : "not-needed",
+        modeNote: "길이 연장 전용 (축 축소 없음)",
+        x: axisPlan.x
+          ? {
+              old: axisPlan.x.old,
+              new: applyAxisRequested ? axisPlan.x.new : axisPlan.x.old,
+              changed: applyAxisRequested && xAxisChanged,
+            }
+          : null,
+        y: axisPlan.y
+          ? {
+              old: axisPlan.y.old,
+              new: applyAxisRequested ? axisPlan.y.new : axisPlan.y.old,
+              changed: applyAxisRequested && yAxisChanged,
+            }
+          : null,
+        editsCount: axisEditsToApply.length,
+        message: !applyAxisRequested
+          ? "축 길이 자동 조정 옵션 OFF (함수식 라벨만 정렬)"
+          : anyAxisChanged
+          ? `축 길이 연장 후보 산출됨 (${[
+              xAxisChanged ? `x축 [${axisPlan.x.old.join(", ")}] → [${axisPlan.x.new.join(", ")}]` : null,
+              yAxisChanged ? `y축 [${axisPlan.y.old.join(", ")}] → [${axisPlan.y.new.join(", ")}]` : null,
+            ]
+              .filter(Boolean)
+              .join(", ")})`
+          : "현재 x축·y축 길이가 이미 충분하여 축 길이 조정이 불필요합니다 (길이 연장 전용, 축소 없음).",
+      };
+
+      const variantBase = {
+        ...baseResponse,
+        axisOption: axisOptionInfo,
+        domainExtensionOption: domainOptionInfo,
+        collisionDiagnostics: variantOrigDiag,
+      };
+
+      const candEffectiveBody = applyEdits(effectiveBody, editsToApply);
+
+      const origFnAuditById = new Map(
+        (variantOrigDiag.origAudit?.functionLabelAudits || []).map((fa) => [fa.id, fa])
+      );
+
+      const buildEnrichedDecisions = (rawDecisions, finalFnAuditById) =>
+        (rawDecisions || []).map((d) => {
+          const origFa = origFnAuditById.get(d.id);
+          const finalFa = finalFnAuditById ? finalFnAuditById.get(d.id) : origFa;
+          const hasPreExistingCollision = Boolean(origFa?.hasCollision);
+          const hasRemainingCollision = Boolean(finalFa?.hasCollision);
+          const collisionDescriptions = (finalFa?.collisions || origFa?.collisions || []).map(
+            (c) => c.description
+          );
+          const autoMod = !!d.autoModified;
+          let holdReason = d.holdReason || null;
+          let selectionReason = d.selectionReason || "";
+          if (!autoMod && hasRemainingCollision) {
+            const warnSuffix =
+              d.nonMoveCode === "uncertain-match" ||
+              d.nonMoveCode === "multi-abstract-user-confirm-required" ||
+              d.nonMoveCode === "multi-abstract-hold-only" ||
+              d.nonMoveCode === "parse-failure" ||
+              d.nonMoveCode === "fallback-anchor-unusable"
+                ? ` [⚠️ 미해결 기존 충돌: ${collisionDescriptions.join("; ")} — ${d.nonMoveCategory || "매칭/좌표 불확실"}로 인해 자동 이동을 보류하므로 수동/조이스틱 조정 권장]`
+                : ` [⚠️ 미해결 기존 충돌: ${collisionDescriptions.join("; ")} — 안전한 자동 이동 후보가 없어 원본을 유지하므로 수동/조이스틱 조정 권장]`;
+            if (holdReason && !holdReason.includes("미해결 기존 충돌")) {
+              holdReason += warnSuffix;
+            }
+            if (selectionReason && !selectionReason.includes("미해결 기존 충돌")) {
+              selectionReason += warnSuffix;
+            }
+          }
+          return {
+            id: d.id,
+            label: d.label,
+            autoModified: autoMod,
+            selectedEngine: d.selectedEngine || "original",
+            agreedEngines: d.agreedEngines || [],
+            how: d.assignmentMethod || d.assignment?.how || d.how || null,
+            confirmedAssignment: Boolean(d.assignmentConfirmed ?? d.assignment?.confirmed ?? d.confirmed),
+            matchedStroke: d.matchedStroke ?? null,
+            strokeKind: d.strokeKind || null,
+            plotExpr: d.plotExpr || null,
+            curveShape: d.curveShape || null,
+            isMultiAbstractPair: Boolean(d.isMultiAbstractPair),
+            multiAbstractAction: d.multiAbstractAction || null,
+            step2ClassificationType: d.step2ClassificationType || null,
+            step2ClassificationCode: d.step2ClassificationCode || null,
+            step2MathematicallyProven: Boolean(d.step2MathematicallyProven),
+            step2RequiresUserApproval: Boolean(d.step2RequiresUserApproval),
+            step2Signals: d.step2Signals || [],
+            step2RawDistMarginPt: d.step2RawDistMarginPt ?? null,
+            step2RecommendedStroke: d.step2RecommendedStroke ?? null,
+            step2SwappedStroke: d.step2SwappedStroke ?? null,
+            shift: d.selectedPosition?.shift || d.chosenShift || [0, 0],
+            movedPt: d.movement?.movedDistancePt ?? d.movedPt ?? 0,
+            nonMoveCategory: d.nonMoveCategory || null,
+            nonMoveCode: d.nonMoveCode || null,
+            holdReason,
+            selectionReason,
+            hasPreExistingCollision,
+            hasRemainingCollision,
+            collisionDescriptions,
+          };
         });
 
-    const newCollisionIssues = finalDiag.newlyIntroducedCollisions.map(
-      (c) => c.reason || c.description
-    );
-    const allSafetyIssues = [
-      ...(vVariant.issues || []),
-      ...newCollisionIssues.filter((msg) => !(vVariant.issues || []).includes(msg)),
-    ];
+      // 이동할 라벨 및 축 편집이 전혀 없는 경우 (모두 기존 위치 유지 또는 보류)
+      if (editsToApply.length === 0 || candEffectiveBody === effectiveBody) {
+        const decisions0 = buildEnrichedDecisions(activePlan.labelDecisions, origFnAuditById);
+        const preservation0 = checkPreservation(effectiveBody, effectiveBody, []);
+        const unresolvedCnt = variantOrigDiag.counts.preExistingUnresolved;
+        const unmeasuredCnt = variantOrigDiag.counts.unmeasuredNodes;
 
-    if (
-      !vVariant.valid ||
-      vVariant.revertedToOriginal ||
-      !vVariant.compiled ||
-      !vVariant.svgMeasured ||
-      !vVariant.collisionCheck?.ok ||
-      !finalDiag.safetyPassed
-    ) {
-      if (anyAxisChanged) {
-        axisOptionInfo.status = "blocked-unsafe";
-        axisOptionInfo.applied = false;
-        axisOptionInfo.message = `축 길이 조정 후 안전성/충돌 검증 실패로 축 변경 및 추천 적용 차단: ${allSafetyIssues.join("; ")}`;
+        let unchangedMsg =
+          "모든 함수식 라벨이 이미 적절한 위치에 있거나 안전한 이동 조건에 해당하지 않아 원본 위치를 유지합니다.";
+        let unchangedReasonCode = "all-labels-kept";
+
+        if (multiAbstractAnalysis?.classificationCode === "type2-user-confirm-required" && actionMode === "hold") {
+          unchangedReasonCode = "multi-abstract-hold-default";
+          unchangedMsg =
+            "다중 추상 함수식(유형 2: 사용자 확인 필요)이 감지되어 기본 상태에서는 원본 위치(Hold)를 안전하게 유지합니다. 모달에서 ① 추천 매칭(Recommend) 또는 ② 대응 관계 교환(Swap)을 선택해 미리보기를 비교한 뒤 승인할 수 있습니다.";
+          if (unresolvedCnt > 0) {
+            unchangedMsg += ` (⚠️ 원본 도형 미해결 충돌 ${unresolvedCnt}건 존재)`;
+          }
+        } else if (multiAbstractAnalysis?.classificationCode === "type3-hold-only") {
+          unchangedReasonCode = "multi-abstract-hold-forced";
+          unchangedMsg = `다중 추상 함수식 안전 보류(유형 3: Hold 강제 — ${multiAbstractAnalysis.holdReason || "근거 부족/충돌 위험"})에 따라 원본 위치를 유지합니다.`;
+          if (unresolvedCnt > 0) {
+            unchangedMsg += ` (⚠️ 원본 도형 미해결 충돌 ${unresolvedCnt}건 존재)`;
+          }
+        } else if (unresolvedCnt > 0) {
+          unchangedReasonCode = "all-labels-kept-with-unresolved-collisions";
+          const hasUncertainHold = decisions0.some(
+            (d) =>
+              !d.autoModified &&
+              d.hasRemainingCollision &&
+              (d.nonMoveCode === "uncertain-match" ||
+                d.nonMoveCode === "multi-abstract-user-confirm-required" ||
+                d.nonMoveCode === "multi-abstract-hold-only" ||
+                d.nonMoveCode === "parse-failure" ||
+                d.nonMoveCode === "fallback-anchor-unusable")
+          );
+          unchangedMsg =
+            isV022 && hasUncertainHold
+              ? `수식 매칭 또는 기호 좌표가 불확실한 항목을 안전 보류하여 원본 코드를 유지합니다. ⚠️ 원본부터 존재하던 미해결 충돌 ${unresolvedCnt}건이 남아 있습니다 (조이스틱/수동 조정 권장).`
+              : `안전하게 자동 이동할 수 있는 후보가 없어 원본 코드를 유지합니다. ⚠️ 원본부터 존재하던 미해결 충돌 ${unresolvedCnt}건이 남아 있습니다 (조이스틱/수동 조정 권장).`;
+        } else if (unmeasuredCnt > 0) {
+          unchangedMsg += ` (참고: SVG 측정 미확인 노드 ${unmeasuredCnt}건 존재)`;
+        }
+
+        return {
+          actionMode,
+          multiAbstractAnalysis,
+          response: {
+            ...variantBase,
+            ok: true,
+            status: "unchanged",
+            reasonCode: unchangedReasonCode,
+            message: unchangedMsg,
+            canApply: false,
+            verified: true,
+            movedCount: 0,
+            fnMovedCount: 0,
+            tickMovedCount: 0,
+            tickHeldCount: (tickPlan.heldTicks || []).length,
+            originMovedCount: 0,
+            originHeldCount: (originPlan.heldOrigins || []).length,
+            heldCount: decisions0.length,
+            labelDecisions: decisions0,
+            tickDecisions: tickPlan.decisions || [],
+            originDecisions: originPlan.decisions || [],
+            placements: activePlan.placements || [],
+            shiftReport: activeShift.report || [],
+            preservation: preservation0,
+            collisionDiagnostics: variantOrigDiag,
+          },
+        };
       }
-      const revReason = `2차 안전성 검증 실패로 원본 유지: ${allSafetyIssues.join("; ")}`;
-      const baseDecisions = buildEnrichedDecisions(activePlan.labelDecisions, origFnAuditById);
-      const revertedDecisions = baseDecisions.map((d) =>
-        d.autoModified
-          ? {
-              ...d,
-              autoModified: false,
-              nonMoveCategory: "안전성 검증 실패",
-              nonMoveCode: "safety-verification-failed",
-              holdReason: revReason,
-              selectionReason: `[안전성 검증 실패] ${revReason}`,
-            }
-          : d
+
+      // 7) 1차 보존 검사 (수식, domain, samples, 선분, 점 마커, 전역 폰트·선 두께 불변 확인)
+      const prePreservation = isV022
+        ? checkPreservationV022(effectiveBody, candEffectiveBody, editsToApply)
+        : checkPreservation(effectiveBody, candEffectiveBody, editsToApply);
+      if (!prePreservation.ok) {
+        if (anyAxisChanged) {
+          axisOptionInfo.status = "blocked-unsafe";
+          axisOptionInfo.applied = false;
+          axisOptionInfo.message = `축 길이 조정 보존 검증 실패로 차단됨: ${prePreservation.issues.join("; ")}`;
+        }
+        return {
+          actionMode,
+          multiAbstractAnalysis,
+          response: {
+            ...variantBase,
+            ok: false,
+            status: "reverted",
+            reasonCode: "preservation-check-failed",
+            message: `원본 보존 검증에 실패하여 추천을 적용하지 않고 원본을 유지합니다: ${prePreservation.issues.join("; ")}`,
+            canApply: false,
+            verified: false,
+            preservation: prePreservation,
+            errors: prePreservation.issues,
+          },
+        };
+      }
+
+      // 8) 필수 2차 Kroki 실제 렌더링 및 충돌/안전성 검증 (verify=true)
+      const render2 = await renderTikzViaKroki(candEffectiveBody, opts);
+      if (!render2.ok || !render2.svg) {
+        if (anyAxisChanged) {
+          axisOptionInfo.status = "blocked-unsafe";
+          axisOptionInfo.applied = false;
+          axisOptionInfo.message = `축 길이 조정 후 2차 Kroki 렌더링 실패로 차단됨`;
+        }
+        return {
+          actionMode,
+          multiAbstractAnalysis,
+          response: {
+            ...variantBase,
+            ok: false,
+            status: "reverted",
+            reasonCode: render2.isTimeout ? "verify-kroki-timeout" : "verify-kroki-failed",
+            message: `2차 검증 렌더링에 실패하여 추천을 차단하고 원본을 유지합니다 (${render2.error || "렌더 실패"}).`,
+            canApply: false,
+            verified: false,
+            errors: [render2.error || "2차 검증 렌더링 실패"],
+          },
+        };
+      }
+
+      const staged2 = stageSvgForV021(tempWorkRoot, candEffectiveBody, render2.svg);
+      if (!staged2.exists) {
+        return {
+          actionMode,
+          multiAbstractAnalysis,
+          response: {
+            ...variantBase,
+            ok: false,
+            status: "reverted",
+            reasonCode: "verify-staging-failed",
+            message: "2차 검증 SVG 스테이징에 실패하여 원본을 유지합니다.",
+            canApply: false,
+            verified: false,
+          },
+        };
+      }
+
+      const origFNodes = scene.nodes.filter((n) => n.role === "function" && n.bbox);
+      const movedFnNodeIds = (activePlan.placements || [])
+        .filter((p) => p.action === "move")
+        .map((p) => p.id);
+      const movedTickNodeIds = (tickPlan.movedTicks || []).map((t) => t.id);
+      const movedOriginNodeIds = (originPlan.movedOrigins || []).map((o) => o.id);
+      const movedNodeIds = [...movedFnNodeIds, ...movedTickNodeIds, ...movedOriginNodeIds];
+      const movedFNodeIndices = movedFnNodeIds
+        .map((id) => origFNodes.findIndex((q) => q.id === id))
+        .filter((idx) => idx >= 0);
+
+      const vVariant = isV022
+        ? verifyOutputVariantV022({
+            variant: anyAxisChanged ? "recommendedBody" : "labelOnlyBody",
+            origBody: effectiveBody,
+            origScene: scene,
+            candidateBody: candEffectiveBody,
+            edits: editsToApply,
+            movedFNodeIndices,
+            movedOriginNodeIds,
+            workRoot: tempWorkRoot,
+            P,
+            flags: unit2FlagsForAction,
+          })
+        : verifyOutputVariant({
+            variant: anyAxisChanged ? "recommendedBody" : "labelOnlyBody",
+            origBody: effectiveBody,
+            origScene: scene,
+            candidateBody: candEffectiveBody,
+            edits: editsToApply,
+            movedFNodeIndices,
+            workRoot: tempWorkRoot,
+            P,
+            runRender: true,
+          });
+
+      const finalScene = vVariant.scene || scene;
+      const finalDiag = isV022
+        ? compareCollisionDiagnosticsV022(scene, finalScene, movedNodeIds, {
+            axisChanged: anyAxisChanged,
+            params: P,
+            decisionsByNodeId,
+            unit2Flags: unit2FlagsForAction,
+          })
+        : compareCollisionDiagnostics(scene, finalScene, movedNodeIds, {
+            axisChanged: anyAxisChanged,
+            params: P,
+          });
+
+      const newCollisionIssues = finalDiag.newlyIntroducedCollisions.map(
+        (c) => c.reason || c.description
       );
+      const allSafetyIssues = [
+        ...(vVariant.issues || []),
+        ...newCollisionIssues.filter((msg) => !(vVariant.issues || []).includes(msg)),
+      ];
+
+      if (
+        !vVariant.valid ||
+        vVariant.revertedToOriginal ||
+        !vVariant.compiled ||
+        !vVariant.svgMeasured ||
+        !vVariant.collisionCheck?.ok ||
+        !finalDiag.safetyPassed
+      ) {
+        if (anyAxisChanged) {
+          axisOptionInfo.status = "blocked-unsafe";
+          axisOptionInfo.applied = false;
+          axisOptionInfo.message = `축 길이 조정 후 안전성/충돌 검증 실패로 축 변경 및 추천 적용 차단: ${allSafetyIssues.join("; ")}`;
+        }
+        const revReason = `2차 안전성 검증 실패로 원본 유지: ${allSafetyIssues.join("; ")}`;
+        const baseDecisions = buildEnrichedDecisions(activePlan.labelDecisions, origFnAuditById);
+        const revertedDecisions = baseDecisions.map((d) =>
+          d.autoModified
+            ? {
+                ...d,
+                autoModified: false,
+                nonMoveCategory: "안전성 검증 실패",
+                nonMoveCode: "safety-verification-failed",
+                holdReason: revReason,
+                selectionReason: `[안전성 검증 실패] ${revReason}`,
+              }
+            : d
+        );
+        return {
+          actionMode,
+          multiAbstractAnalysis,
+          response: {
+            ...variantBase,
+            ok: true,
+            status: "reverted",
+            reasonCode: "safety-verification-failed",
+            message: revReason,
+            canApply: false,
+            verified: false,
+            movedCount: 0,
+            heldCount: revertedDecisions.length,
+            labelDecisions: revertedDecisions,
+            placements: activePlan.placements || [],
+            shiftReport: activeShift.report || [],
+            preservation: vVariant.preservation,
+            collisionDiagnostics: finalDiag,
+            verification: {
+              compiled: vVariant.compiled,
+              svgMeasured: vVariant.svgMeasured,
+              collisionOk: false,
+              issues: allSafetyIssues,
+            },
+          },
+        };
+      }
+
+      // 9) rawBody 에도 동일하게 안전 편집 적용 및 보존 재검증
+      let finalBody = candEffectiveBody;
+      if (circleAdjusted) {
+        const headerDelta = effectiveBody.indexOf("]") - rawBody.indexOf("]");
+        const rawEdits = editsToApply.map((e) => ({
+          ...e,
+          start: e.start - headerDelta,
+          end: e.end - headerDelta,
+        }));
+        finalBody = applyEdits(rawBody, rawEdits);
+        const rawPreservation = isV022
+          ? checkPreservationV022(rawBody, finalBody, rawEdits)
+          : checkPreservation(rawBody, finalBody, rawEdits);
+        if (!rawPreservation.ok) {
+          return {
+            actionMode,
+            multiAbstractAnalysis,
+            response: {
+              ...variantBase,
+              ok: false,
+              status: "reverted",
+              reasonCode: "raw-preservation-failed",
+              message: "원본 TikZ 블록 보존 검증에 실패하여 원본을 유지합니다.",
+              canApply: false,
+              verified: false,
+              errors: rawPreservation.issues,
+            },
+          };
+        }
+      }
+
+      if (anyAxisChanged) {
+        axisOptionInfo.applied = true;
+        axisOptionInfo.status = "applied";
+        axisOptionInfo.message = `x축·y축 길이 자동 연장 및 2차 충돌 검증 통과 (${[
+          xAxisChanged ? `x축 [${axisPlan.x.old.join(", ")}] → [${axisPlan.x.new.join(", ")}]` : null,
+          yAxisChanged ? `y축 [${axisPlan.y.old.join(", ")}] → [${axisPlan.y.new.join(", ")}]` : null,
+        ]
+          .filter(Boolean)
+          .join(", ")})`;
+      }
+      if (anyDomainChanged) {
+        domainOptionInfo.applied = true;
+        domainOptionInfo.status = "applied";
+        domainOptionInfo.message = `그래프 끝점 미세 연장 및 2차 충돌 검증 통과 (${(domainPlan.decisions || [])
+          .filter((d) => d.action === "extend")
+          .map(
+            (d) =>
+              `${d.label}: domain [${d.origDomain.join(", ")}] → [${d.newDomain.join(", ")}] (+${d.arcLengthPt}pt, 간격 ${d.origOwnGapPt}pt → ${d.newOwnGapPt}pt)`
+          )
+          .join(" · ")})`;
+      }
+
+      const finalFnAuditById = new Map(
+        (finalDiag.finalAudit?.functionLabelAudits || []).map((fa) => [fa.id, fa])
+      );
+      const getFinalAuditForDecision = (d) => {
+        if (finalFnAuditById.has(d.id)) return finalFnAuditById.get(d.id);
+        const byLabel = (finalDiag.finalAudit?.functionLabelAudits || []).find(
+          (fa) => fa.label === d.label
+        );
+        return byLabel || origFnAuditById.get(d.id);
+      };
+      const finalAuditLookupMap = new Map(
+        (activePlan.labelDecisions || []).map((d) => [d.id, getFinalAuditForDecision(d)])
+      );
+      const decisions = buildEnrichedDecisions(activePlan.labelDecisions, finalAuditLookupMap);
+
+      const recommendedFullCode = prefix + finalBody + suffix;
+      const recSvgDataUri = "data:image/svg+xml;base64," + Buffer.from(render2.svg, "utf8").toString("base64");
+      const fnMovedCount = decisions.filter((d) => d.autoModified).length;
+      const tickMovedCount = (tickPlan.movedTicks || []).length;
+      const tickHeldCount = (tickPlan.heldTicks || []).length;
+      const originMovedCount = (originPlan.movedOrigins || []).length;
+      const originHeldCount = (originPlan.heldOrigins || []).length;
+      const movedCount = fnMovedCount + tickMovedCount + originMovedCount;
+      const heldCount = decisions.length - fnMovedCount;
+
+      const actionParts = [];
+      if (fnMovedCount > 0) {
+        if (multiAbstractAnalysis?.classificationCode === "type2-user-confirm-required" && actionMode === "recommend") {
+          actionParts.push(`다중 추상 함수 추천 매칭(Recommend) 라벨 ${fnMovedCount}개 위치`);
+        } else if (multiAbstractAnalysis?.classificationCode === "type2-user-confirm-required" && actionMode === "swap") {
+          actionParts.push(`다중 추상 함수 대응 교환(Swap) 라벨 ${fnMovedCount}개 위치`);
+        } else {
+          actionParts.push(`함수식 라벨 ${fnMovedCount}개 추천 위치`);
+        }
+      }
+      if (anyDomainChanged) actionParts.push(`그래프 끝점 미세 연장(${domainEditsToApply.length}개 곡선)`);
+      if (tickMovedCount > 0) actionParts.push(`축 눈금 숫자 ${tickMovedCount}개 겹침 자동 조정(Unit 3-B)`);
+      if (originMovedCount > 0) actionParts.push(`원점 O ${originMovedCount}개 4방향 자동 배치(Unit 3-D)`);
+      if (anyAxisChanged) actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
+      let successMsg = `${actionParts.join(" 및 ")}이(가) 2차 렌더링 및 안전성 검증을 통과했습니다.`;
+
+      if (finalDiag.hasUnresolvedCollisions) {
+        successMsg += ` (⚠️ 주의: 이동하지 않은 라벨/일반 노드에 원본부터 존재하던 미해결 충돌 ${finalDiag.counts.preExistingUnresolved}건이 남아 있어 추가 수동 확인이 필요합니다.)`;
+      } else if (!finalDiag.measurementComplete) {
+        successMsg += ` (참고: SVG 측정 미확인 노드 ${finalDiag.counts.unmeasuredNodes}건 존재)`;
+      }
+
       return {
-        ...baseResponse,
-        ok: true,
-        status: "reverted",
-        reasonCode: "safety-verification-failed",
-        message: revReason,
-        canApply: false,
-        verified: false,
-        movedCount: 0,
-        heldCount: revertedDecisions.length,
-        labelDecisions: revertedDecisions,
-        placements: activePlan.placements || [],
-        shiftReport: activeShift.report || [],
-        preservation: vVariant.preservation,
-        collisionDiagnostics: finalDiag,
-        verification: {
-          compiled: vVariant.compiled,
-          svgMeasured: vVariant.svgMeasured,
-          collisionOk: false,
-          issues: allSafetyIssues,
+        actionMode,
+        multiAbstractAnalysis,
+        response: {
+          ...variantBase,
+          ok: true,
+          status: "recommended",
+          reasonCode: finalDiag.hasUnresolvedCollisions
+            ? "verified-recommendation-with-unresolved-collisions"
+            : "verified-recommendation",
+          message: successMsg,
+          canApply: (movedCount > 0 || anyAxisChanged || anyDomainChanged) && recommendedFullCode !== rawInput,
+          verified: true,
+          recommendedCode: recommendedFullCode,
+          movedCount,
+          fnMovedCount,
+          tickMovedCount,
+          tickHeldCount,
+          originMovedCount,
+          originHeldCount,
+          heldCount,
+          labelDecisions: decisions,
+          tickDecisions: tickPlan.decisions || [],
+          originDecisions: originPlan.decisions || [],
+          placements: (activePlan.placements || []).map((p) => ({
+            id: p.id,
+            label: p.label,
+            action: p.action,
+            stroke: p.stroke ?? null,
+            strokeKind: p.strokeKind || null,
+            axisParallelKind: p.axisParallelKind || null,
+            side: p.side || null,
+            end: p.end ?? null,
+            alpha: p.alpha ?? null,
+            selectedEngine: p.selectedEngine || (isV022 ? "v0.2.2-beta" : "v0.2.1"),
+            agreedEngines: p.agreedEngines || [],
+            how: p.how,
+            confirmedAssignment: !!p.confirmedAssignment,
+            shift: p.shift,
+            reason: p.reason,
+            holdReason: p.holdReason || null,
+            nonMoveCategory: p.nonMoveCategory || null,
+          })),
+          shiftReport: activeShift.report || [],
+          preservation: vVariant.preservation,
+          collisionDiagnostics: finalDiag,
+          verification: {
+            compiled: vVariant.compiled,
+            svgMeasured: vVariant.svgMeasured,
+            collisionOk: vVariant.collisionCheck ? vVariant.collisionCheck.ok : false,
+            issues: vVariant.issues || [],
+            labelDetails: vVariant.collisionCheck?.labelDetails || [],
+          },
+          preview: {
+            originalSvgDataUri: origSvgDataUri,
+            recommendedSvgDataUri: recSvgDataUri,
+          },
         },
+      };
+    };
+
+    // v0.2.1 엔진이거나 v0.2.2-beta 기본("hold") 평가 실행
+    const holdEval = await evaluateActionVariant("hold");
+    const maAnalysis = isV022 ? holdEval.multiAbstractAnalysis : null;
+
+    if (!isV022 || !maAnalysis) {
+      return holdEval.response;
+    }
+
+    const summarizeVariantPayload = (resp, actionMode) => ({
+      actionMode,
+      ok: resp.ok,
+      status: resp.status,
+      reasonCode: resp.reasonCode,
+      message: resp.message,
+      canApply: resp.canApply,
+      verified: resp.verified,
+      recommendedCode: resp.recommendedCode,
+      movedCount: resp.movedCount,
+      fnMovedCount: resp.fnMovedCount,
+      tickMovedCount: resp.tickMovedCount,
+      tickHeldCount: resp.tickHeldCount,
+      originMovedCount: resp.originMovedCount,
+      originHeldCount: resp.originHeldCount,
+      heldCount: resp.heldCount,
+      labelDecisions: resp.labelDecisions,
+      tickDecisions: resp.tickDecisions,
+      originDecisions: resp.originDecisions,
+      placements: resp.placements,
+      shiftReport: resp.shiftReport,
+      axisOption: resp.axisOption,
+      domainExtensionOption: resp.domainExtensionOption,
+      collisionDiagnostics: resp.collisionDiagnostics,
+      verification: resp.verification,
+      preview: resp.preview,
+    });
+
+    if (maAnalysis.classificationCode === "type2-user-confirm-required" && maAnalysis.supportedPair) {
+      const recEval = await evaluateActionVariant("recommend");
+      const swapEval = await evaluateActionVariant("swap");
+
+      const canRecommend = Boolean(
+        recEval.response.verified &&
+          recEval.response.canApply &&
+          recEval.response.status === "recommended"
+      );
+      const canSwap = Boolean(
+        swapEval.response.verified &&
+          swapEval.response.canApply &&
+          swapEval.response.status === "recommended"
+      );
+
+      const recDecById = new Map(
+        (recEval.response.labelDecisions || []).map((d) => [d.id, d])
+      );
+      const swapDecById = new Map(
+        (swapEval.response.labelDecisions || []).map((d) => [d.id, d])
+      );
+      const holdDecById = new Map(
+        (holdEval.response.labelDecisions || []).map((d) => [d.id, d])
+      );
+
+      const correspondenceRows = [];
+      const recPairs = maAnalysis.recommendedAssignment?.pairs || [];
+      const swapPairs = maAnalysis.swappedAssignment?.pairs || [];
+      for (const recInfo of recPairs) {
+        const nodeId = recInfo.labelId;
+        const swapInfo = swapPairs.find((p) => p.labelId === nodeId) || null;
+        const holdDec = holdDecById.get(nodeId) || null;
+        const recDec = recDecById.get(nodeId) || null;
+        const swapDec = swapDecById.get(nodeId) || null;
+        correspondenceRows.push({
+          nodeId,
+          label: recDec?.label || holdDec?.label || recInfo.label || nodeId,
+          origShift: holdDec?.shift || [0, 0],
+          recommend: {
+            strokeIndex: recInfo?.strokeIndex ?? null,
+            plotExpr: recInfo?.plotExpr || null,
+            domain: Array.isArray(recInfo?.domain) ? [...recInfo.domain] : null,
+            curveShape: recInfo?.curveShape?.kindLabel || recInfo?.curveShape?.summary || null,
+            shift: recDec?.shift || holdDec?.shift || [0, 0],
+            movedPt: recDec?.movedPt ?? 0,
+            autoModified: Boolean(recDec?.autoModified),
+          },
+          swap: {
+            strokeIndex: swapInfo?.strokeIndex ?? null,
+            plotExpr: swapInfo?.plotExpr || null,
+            domain: Array.isArray(swapInfo?.domain) ? [...swapInfo.domain] : null,
+            curveShape: swapInfo?.curveShape?.kindLabel || swapInfo?.curveShape?.summary || null,
+            shift: swapDec?.shift || holdDec?.shift || [0, 0],
+            movedPt: swapDec?.movedPt ?? 0,
+            autoModified: Boolean(swapDec?.autoModified),
+          },
+          hold: {
+            strokeIndex: null,
+            shift: holdDec?.shift || [0, 0],
+            movedPt: 0,
+            autoModified: false,
+          },
+        });
+      }
+
+      let effectiveSelectedAction = "hold";
+      let selectedEval = holdEval;
+      if (multiAbstractActionRequested === "recommend" && canRecommend) {
+        effectiveSelectedAction = "recommend";
+        selectedEval = recEval;
+      } else if (multiAbstractActionRequested === "swap" && canSwap) {
+        effectiveSelectedAction = "swap";
+        selectedEval = swapEval;
+      }
+
+      const multiAbstractOption = {
+        detected: true,
+        supportedPair: true,
+        classificationType: maAnalysis.classificationType,
+        classificationCode: maAnalysis.classificationCode,
+        mathematicallyProven: Boolean(maAnalysis.mathematicallyProven),
+        requiresUserApproval: true,
+        requestedAction: multiAbstractActionRequested,
+        selectedAction: effectiveSelectedAction,
+        defaultAction: "hold",
+        canRecommend,
+        canSwap,
+        rawDistMarginPt: maAnalysis.rawDistMarginPt ?? null,
+        moderateMarginCaution: Boolean(maAnalysis.moderateMarginCaution),
+        scaleNormalizedThresholds: maAnalysis.scaleNormalizedThresholds || null,
+        signals: maAnalysis.signals || [],
+        holdReason: maAnalysis.holdReason || null,
+        summaryReason: maAnalysis.summaryReason || "",
+        correspondenceRows,
+        variants: {
+          hold: summarizeVariantPayload(holdEval.response, "hold"),
+          recommend: summarizeVariantPayload(recEval.response, "recommend"),
+          swap: summarizeVariantPayload(swapEval.response, "swap"),
+        },
+      };
+
+      return {
+        ...selectedEval.response,
+        multiAbstractActionRequested,
+        multiAbstractOption,
       };
     }
 
-    // 9) rawBody 에도 동일하게 안전 편집 적용 및 보존 재검증
-    let finalBody = candEffectiveBody;
-    if (circleAdjusted) {
-      const headerDelta = effectiveBody.indexOf("]") - rawBody.indexOf("]");
-      const rawEdits = editsToApply.map((e) => ({
-        ...e,
-        start: e.start - headerDelta,
-        end: e.end - headerDelta,
-      }));
-      finalBody = applyEdits(rawBody, rawEdits);
-      const rawPreservation = isV022
-        ? checkPreservationV022(rawBody, finalBody, rawEdits)
-        : checkPreservation(rawBody, finalBody, rawEdits);
-      if (!rawPreservation.ok) {
-        return {
-          ...baseResponse,
-          ok: false,
-          status: "reverted",
-          reasonCode: "raw-preservation-failed",
-          message: "원본 TikZ 블록 보존 검증에 실패하여 원본을 유지합니다.",
-          canApply: false,
-          verified: false,
-          errors: rawPreservation.issues,
-        };
-      }
-    }
-
-    if (anyAxisChanged) {
-      axisOptionInfo.applied = true;
-      axisOptionInfo.status = "applied";
-      axisOptionInfo.message = `x축·y축 길이 자동 연장 및 2차 충돌 검증 통과 (${[
-        xAxisChanged ? `x축 [${axisPlan.x.old.join(", ")}] → [${axisPlan.x.new.join(", ")}]` : null,
-        yAxisChanged ? `y축 [${axisPlan.y.old.join(", ")}] → [${axisPlan.y.new.join(", ")}]` : null,
-      ]
-        .filter(Boolean)
-        .join(", ")})`;
-    }
-    if (anyDomainChanged) {
-      domainOptionInfo.applied = true;
-      domainOptionInfo.status = "applied";
-      domainOptionInfo.message = `그래프 끝점 미세 연장 및 2차 충돌 검증 통과 (${(domainPlan.decisions || [])
-        .filter((d) => d.action === "extend")
-        .map(
-          (d) =>
-            `${d.label}: domain [${d.origDomain.join(", ")}] → [${d.newDomain.join(", ")}] (+${d.arcLengthPt}pt, 간격 ${d.origOwnGapPt}pt → ${d.newOwnGapPt}pt)`
-        )
-        .join(" · ")})`;
-    }
-
-    const finalFnAuditById = new Map(
-      (finalDiag.finalAudit?.functionLabelAudits || []).map((fa) => [fa.id, fa])
-    );
-    // v0.2.2-beta 에서는 노드 오프셋(@start)이 변경되어도 매칭되도록 라벨/순서 폴백 조회 지원
-    const getFinalAuditForDecision = (d) => {
-      if (finalFnAuditById.has(d.id)) return finalFnAuditById.get(d.id);
-      const byLabel = (finalDiag.finalAudit?.functionLabelAudits || []).find(
-        (fa) => fa.label === d.label
-      );
-      return byLabel || origFnAuditById.get(d.id);
+    // 유형 3 (Hold 강제): 3개 이상 추상 함수, 비대칭, 신호 모순, 교점 인접, 마진 협소 등
+    const multiAbstractOptionType3 = {
+      detected: true,
+      supportedPair: false,
+      classificationType: maAnalysis.classificationType || "유형 3: Hold 강제",
+      classificationCode: maAnalysis.classificationCode || "type3-hold-only",
+      mathematicallyProven: false,
+      requiresUserApproval: false,
+      requestedAction: multiAbstractActionRequested,
+      selectedAction: "hold",
+      defaultAction: "hold",
+      canRecommend: false,
+      canSwap: false,
+      rawDistMarginPt: maAnalysis.rawDistMarginPt ?? null,
+      moderateMarginCaution: false,
+      scaleNormalizedThresholds: maAnalysis.scaleNormalizedThresholds || null,
+      signals: maAnalysis.signals || [],
+      holdReason: maAnalysis.holdReason || maAnalysis.summaryReason || "유형 3 안전 보류",
+      summaryReason: maAnalysis.summaryReason || "유형 3 안전 보류(Hold 강제)",
+      correspondenceRows: [],
+      variants: {
+        hold: summarizeVariantPayload(holdEval.response, "hold"),
+        recommend: null,
+        swap: null,
+      },
     };
-    const finalAuditLookupMap = new Map(
-      (activePlan.labelDecisions || []).map((d) => [d.id, getFinalAuditForDecision(d)])
-    );
-    const decisions = buildEnrichedDecisions(activePlan.labelDecisions, finalAuditLookupMap);
-
-    const recommendedFullCode = prefix + finalBody + suffix;
-    const recSvgDataUri = "data:image/svg+xml;base64," + Buffer.from(render2.svg, "utf8").toString("base64");
-    const fnMovedCount = decisions.filter((d) => d.autoModified).length;
-    const tickMovedCount = (tickPlan.movedTicks || []).length;
-    const tickHeldCount = (tickPlan.heldTicks || []).length;
-    const originMovedCount = (originPlan.movedOrigins || []).length;
-    const originHeldCount = (originPlan.heldOrigins || []).length;
-    const movedCount = fnMovedCount + tickMovedCount + originMovedCount;
-    const heldCount = decisions.length - fnMovedCount;
-
-    const actionParts = [];
-    if (fnMovedCount > 0) actionParts.push(`함수식 라벨 ${fnMovedCount}개 추천 위치`);
-    if (anyDomainChanged) actionParts.push(`그래프 끝점 미세 연장(${domainEditsToApply.length}개 곡선)`);
-    if (tickMovedCount > 0) actionParts.push(`축 눈금 숫자 ${tickMovedCount}개 겹침 자동 조정(Unit 3-B)`);
-    if (originMovedCount > 0) actionParts.push(`원점 O ${originMovedCount}개 4방향 자동 배치(Unit 3-D)`);
-    if (anyAxisChanged) actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
-    let successMsg = `${actionParts.join(" 및 ")}이(가) 2차 렌더링 및 안전성 검증을 통과했습니다.`;
-
-    if (finalDiag.hasUnresolvedCollisions) {
-      successMsg += ` (⚠️ 주의: 이동하지 않은 라벨/일반 노드에 원본부터 존재하던 미해결 충돌 ${finalDiag.counts.preExistingUnresolved}건이 남아 있어 추가 수동 확인이 필요합니다.)`;
-    } else if (!finalDiag.measurementComplete) {
-      successMsg += ` (참고: SVG 측정 미확인 노드 ${finalDiag.counts.unmeasuredNodes}건 존재)`;
-    }
 
     return {
-      ...baseResponse,
-      ok: true,
-      status: "recommended",
-      reasonCode: finalDiag.hasUnresolvedCollisions
-        ? "verified-recommendation-with-unresolved-collisions"
-        : "verified-recommendation",
-      message: successMsg,
-      canApply: (movedCount > 0 || anyAxisChanged || anyDomainChanged) && recommendedFullCode !== rawInput,
-      verified: true,
-      recommendedCode: recommendedFullCode,
-      movedCount,
-      fnMovedCount,
-      tickMovedCount,
-      tickHeldCount,
-      originMovedCount,
-      originHeldCount,
-      heldCount,
-      labelDecisions: decisions,
-      tickDecisions: tickPlan.decisions || [],
-      originDecisions: originPlan.decisions || [],
-      placements: (activePlan.placements || []).map((p) => ({
-        id: p.id,
-        label: p.label,
-        action: p.action,
-        stroke: p.stroke ?? null,
-        strokeKind: p.strokeKind || null,
-        axisParallelKind: p.axisParallelKind || null,
-        side: p.side || null,
-        end: p.end ?? null,
-        alpha: p.alpha ?? null,
-        selectedEngine: p.selectedEngine || (isV022 ? "v0.2.2-beta" : "v0.2.1"),
-        agreedEngines: p.agreedEngines || [],
-        how: p.how,
-        confirmedAssignment: !!p.confirmedAssignment,
-        shift: p.shift,
-        reason: p.reason,
-        holdReason: p.holdReason || null,
-        nonMoveCategory: p.nonMoveCategory || null,
-      })),
-      shiftReport: activeShift.report || [],
-      preservation: vVariant.preservation,
-      collisionDiagnostics: finalDiag,
-      verification: {
-        compiled: vVariant.compiled,
-        svgMeasured: vVariant.svgMeasured,
-        collisionOk: vVariant.collisionCheck ? vVariant.collisionCheck.ok : false,
-        issues: vVariant.issues || [],
-        labelDetails: vVariant.collisionCheck?.labelDetails || [],
-      },
-      preview: {
-        originalSvgDataUri: origSvgDataUri,
-        recommendedSvgDataUri: recSvgDataUri,
-      },
+      ...holdEval.response,
+      multiAbstractActionRequested,
+      multiAbstractOption: multiAbstractOptionType3,
     };
   } catch (err) {
     return {
@@ -1482,6 +1780,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
   const clientInputHash = typeof requestBody.inputHash === "string" ? requestBody.inputHash : null;
   const applyAxis = Boolean(requestBody.applyAxis === true);
   const applyDomainExtension = Boolean(requestBody.applyDomainExtension === true);
+  const multiAbstractAction = normalizeMultiAbstractAction(requestBody.multiAbstractAction);
   // 파일럿 팀원(role === "pilot")은 요청 본문에 어떤 engineVersion 을 보내더라도 서버에서 v0.2.2-beta 로 강제 고정
   const engineVersion =
     authCheck.role === "pilot" ? "v0.2.2-beta" : normalizeEngineVersion(requestBody.engineVersion);
@@ -1525,6 +1824,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
       verify: true,
       applyAxis,
       applyDomainExtension,
+      multiAbstractAction,
       engineVersion,
       enableUnit3B,
     });

@@ -1,8 +1,12 @@
 "use client";
 
 import React from "react";
-import { evaluateProposalApplicability } from "@/lib/smart-label-beta/client-workflow";
+import {
+  evaluateProposalApplicability,
+  resolveActiveProposalForMultiAbstractChoice,
+} from "@/lib/smart-label-beta/client-workflow";
 import type {
+  MultiAbstractActionMode,
   SmartLabelAccessRole,
   SmartLabelBetaResponse,
   SmartLabelEngineVersion,
@@ -24,6 +28,8 @@ interface SmartLabelBetaModalProps {
   onToggleApplyAxisOption?: (next: boolean) => void;
   applyDomainExtensionOption?: boolean;
   onToggleApplyDomainExtensionOption?: (next: boolean) => void;
+  multiAbstractAction?: MultiAbstractActionMode;
+  onChangeMultiAbstractAction?: (next: MultiAbstractActionMode) => void;
   enableUnit3BOption?: boolean;
   onToggleEnableUnit3BOption?: (next: boolean) => void;
   engineVersion?: SmartLabelEngineVersion;
@@ -47,12 +53,30 @@ export function SmartLabelBetaModal({
   onToggleApplyAxisOption,
   applyDomainExtensionOption = false,
   onToggleApplyDomainExtensionOption,
+  multiAbstractAction,
+  onChangeMultiAbstractAction,
   enableUnit3BOption = true,
   onToggleEnableUnit3BOption,
   engineVersion = "v0.2.1",
   onChangeEngineVersion,
   isRecomputing = false,
 }: SmartLabelBetaModalProps) {
+  const [internalMaAction, setInternalMaAction] =
+    React.useState<MultiAbstractActionMode>("hold");
+
+  React.useEffect(() => {
+    setInternalMaAction("hold");
+  }, [proposal?.inputHash, proposal?.applyAxisRequested, proposal?.applyDomainExtensionRequested]);
+
+  const selectedMaAction: MultiAbstractActionMode =
+    multiAbstractAction ?? internalMaAction;
+
+  const handleSelectMaAction = (next: MultiAbstractActionMode) => {
+    setInternalMaAction(next);
+    if (onChangeMultiAbstractAction) {
+      onChangeMultiAbstractAction(next);
+    }
+  };
   if (restoreConfirmOpen) {
     return (
       <div
@@ -96,15 +120,26 @@ export function SmartLabelBetaModal({
 
   if (!proposal) return null;
 
-  const applicability = evaluateProposalApplicability(proposal, currentRawInput);
-  const isStale = currentRawInput !== proposal.originalCode;
-  const diag = proposal.collisionDiagnostics;
+  const activeProposal = resolveActiveProposalForMultiAbstractChoice(
+    proposal,
+    selectedMaAction
+  ) as SmartLabelBetaResponse;
+  const maOpt = activeProposal.multiAbstractOption;
+  const effectiveMaAction: MultiAbstractActionMode = maOpt?.detected
+    ? maOpt.selectedAction
+    : "hold";
+
+  const applicability = evaluateProposalApplicability(activeProposal, currentRawInput, {
+    multiAbstractAction: effectiveMaAction,
+  });
+  const isStale = currentRawInput !== activeProposal.originalCode;
+  const diag = activeProposal.collisionDiagnostics;
   const activeEngineVersion: SmartLabelEngineVersion =
-    proposal.engineVersion === "v0.2.2-beta" ? "v0.2.2-beta" : engineVersion;
+    activeProposal.engineVersion === "v0.2.2-beta" ? "v0.2.2-beta" : engineVersion;
   const effectiveUnit3BServerEnabled =
-    unit3BServerEnabled !== false && proposal.unit3BServerEnabled !== false;
+    unit3BServerEnabled !== false && activeProposal.unit3BServerEnabled !== false;
   const effectiveUnit3BDisabledReason =
-    proposal.unit3BDisabledReason ||
+    activeProposal.unit3BDisabledReason ||
     unit3BDisabledReason ||
     "서버 설정에 의해 Unit 3-B 눈금 겹침 자동 조정이 비활성화되어 있습니다. (함수식 라벨 자동 정렬은 정상 작동)";
   const hasUnresolvedIssues =
@@ -112,30 +147,32 @@ export function SmartLabelBetaModal({
     (Boolean(diag?.hasUnresolvedCollisions) || !Boolean(diag?.measurementComplete));
 
   const statusTone =
-    proposal.status === "recommended"
+    activeProposal.status === "recommended"
       ? hasUnresolvedIssues
         ? "border-amber-300 bg-amber-50 text-amber-950"
         : "border-emerald-300 bg-emerald-50 text-emerald-900"
-      : proposal.status === "unchanged"
+      : activeProposal.status === "unchanged"
       ? hasUnresolvedIssues
         ? "border-amber-300 bg-amber-50 text-amber-950"
         : "border-blue-300 bg-blue-50 text-blue-900"
-      : proposal.status === "unsupported"
+      : activeProposal.status === "unsupported"
       ? "border-amber-300 bg-amber-50 text-amber-900"
       : "border-rose-300 bg-rose-50 text-rose-900";
 
   const statusLabel =
-    proposal.status === "recommended"
+    activeProposal.status === "recommended"
       ? hasUnresolvedIssues
         ? "추천 완료 (2차 검증 통과 · 일부 기존 미해결 충돌 존재)"
         : "추천 완료 (2차 검증 통과)"
-      : proposal.status === "unchanged"
-      ? hasUnresolvedIssues
+      : activeProposal.status === "unchanged"
+      ? maOpt?.detected && maOpt.classificationCode === "type2-user-confirm-required"
+        ? "원본 위치 유지 (유형 2: 다중 추상 함수 기본 Hold — 아래에서 대응 선택 가능)"
+        : hasUnresolvedIssues
         ? "원본 위치 유지 (미해결 충돌 감지)"
         : "원본 위치 유지"
-      : proposal.status === "unsupported"
+      : activeProposal.status === "unsupported"
       ? "초기 베타 미지원 도형 (원본 유지)"
-      : proposal.status === "reverted"
+      : activeProposal.status === "reverted"
       ? "안전성 검증 미통과 (원본 유지)"
       : "추천 실패 (원본 유지)";
 
@@ -286,21 +323,24 @@ export function SmartLabelBetaModal({
             <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
               <span>[{statusLabel}]</span>
               <span className="text-[11px] font-normal">
-                이동 추천: {proposal.movedCount}개 (함수식 {proposal.fnMovedCount ?? proposal.movedCount}개
-                {typeof proposal.tickMovedCount === "number" && proposal.tickMovedCount > 0
-                  ? ` · 눈금 ${proposal.tickMovedCount}개`
+                이동 추천: {activeProposal.movedCount}개 (함수식{" "}
+                {activeProposal.fnMovedCount ?? activeProposal.movedCount}개
+                {typeof activeProposal.tickMovedCount === "number" &&
+                activeProposal.tickMovedCount > 0
+                  ? ` · 눈금 ${activeProposal.tickMovedCount}개`
                   : ""}
-                {typeof proposal.originMovedCount === "number" && proposal.originMovedCount > 0
-                  ? ` · 원점 O ${proposal.originMovedCount}개`
+                {typeof activeProposal.originMovedCount === "number" &&
+                activeProposal.originMovedCount > 0
+                  ? ` · 원점 O ${activeProposal.originMovedCount}개`
                   : ""}
-                ) · 원본 유지: {proposal.heldCount}개 · 끝점 연장:{" "}
-                {proposal.domainExtensionOption?.editsCount ?? 0}개 · 축 조정:{" "}
-                {proposal.axisOption?.editsCount ?? 0}개 · 2차 검증:{" "}
-                {proposal.verified ? "통과 (Verified)" : "미적용"}
+                ) · 원본 유지: {activeProposal.heldCount}개 · 끝점 연장:{" "}
+                {activeProposal.domainExtensionOption?.editsCount ?? 0}개 · 축 조정:{" "}
+                {activeProposal.axisOption?.editsCount ?? 0}개 · 2차 검증:{" "}
+                {activeProposal.verified ? "통과 (Verified)" : "미적용"}
               </span>
             </div>
             <p className="leading-relaxed" data-testid="smart-label-status-message">
-              {proposal.message}
+              {activeProposal.message}
             </p>
           </div>
 
@@ -486,6 +526,252 @@ export function SmartLabelBetaModal({
             </div>
           )}
 
+          {/* 다중 추상 함수 대응 확인 섹션 (유형 2: 사용자 선택 필수 / 유형 3: Hold 강제) */}
+          {activeEngineVersion === "v0.2.2-beta" && maOpt?.detected && (
+            <div
+              className={`rounded-lg border p-3.5 text-xs ${
+                maOpt.classificationCode === "type3-hold-only"
+                  ? "border-rose-300 bg-rose-50/70 text-rose-950"
+                  : effectiveMaAction === "recommend"
+                  ? "border-emerald-300 bg-emerald-50/60 text-slate-900"
+                  : effectiveMaAction === "swap"
+                  ? "border-indigo-300 bg-indigo-50/60 text-slate-900"
+                  : "border-amber-300 bg-amber-50/60 text-slate-900"
+              }`}
+              data-testid="smart-label-multi-abstract-card"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                <div className="flex flex-wrap items-center gap-1.5 font-bold">
+                  <span>
+                    🔀 다중 추상 함수 대응 확인 ({maOpt.classificationType || "유형 2: 사용자 확인 필요"})
+                  </span>
+                  <span
+                    className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-amber-900"
+                    data-testid="multi-abstract-proof-badge"
+                  >
+                    {maOpt.mathematicallyProven
+                      ? "수학적 항등 증명"
+                      : "추정 근거 (기하·정의역 전역 1:1 매칭 · 수학적 항등 증명 아님)"}
+                  </span>
+                  {typeof maOpt.rawDistMarginPt === "number" && (
+                    <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-white">
+                      전역 거리 합 우위: +{maOpt.rawDistMarginPt}pt
+                    </span>
+                  )}
+                </div>
+                <span className="rounded border border-slate-200 bg-white/90 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                  승인 전 기본값: ③ 원본 유지 (Hold) · 정의역(domain) 불변 잠금
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-700 leading-relaxed mb-2">
+                {maOpt.summaryReason}
+              </p>
+
+              {maOpt.moderateMarginCaution && (
+                <div
+                  className="mb-2.5 rounded border border-amber-300 bg-amber-100/80 px-2.5 py-1.5 text-[11px] font-semibold text-amber-950"
+                  data-testid="multi-abstract-margin-caution"
+                >
+                  ⚠️ 주의: 전역 1:1 거리 합 마진(+{maOpt.rawDistMarginPt}pt)이 보통 수준(12~25pt)이므로,
+                  하단 [① 추천 매칭]과 [② 대응 관계 교환(Swap)] 미리보기를 대조한 뒤 승인해 주세요.
+                </div>
+              )}
+
+              {maOpt.classificationCode === "type3-hold-only" && (
+                <div
+                  className="mb-2.5 rounded border border-rose-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-rose-900"
+                  data-testid="multi-abstract-type3-lock-banner"
+                >
+                  🔒 [유형 3: Hold 강제] {maOpt.holdReason || "근거 부족 또는 교점 인접으로 인해 자동 매칭 및 교환이 비활성화되었습니다."}
+                </div>
+              )}
+
+              {/* 3대 대응 선택 버튼 (Hold / Recommend / Swap) */}
+              <div className="mb-2.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <button
+                  type="button"
+                  disabled={isRecomputing}
+                  onClick={() => handleSelectMaAction("hold")}
+                  data-testid="btn-multi-abstract-hold"
+                  className={`rounded-lg border px-3 py-2 text-left transition ${
+                    effectiveMaAction === "hold"
+                      ? "border-slate-800 bg-slate-900 text-white shadow-sm"
+                      : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 font-bold text-[11px]">
+                    <span>③ 원본 유지 (Hold)</span>
+                    <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300">
+                      기본 선택
+                    </span>
+                  </div>
+                  <div
+                    className={`mt-0.5 text-[10px] ${
+                      effectiveMaAction === "hold" ? "text-slate-300" : "text-slate-500"
+                    }`}
+                  >
+                    추상 함수 라벨을 이동하지 않고 원본 위치를 안전하게 보존합니다.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!maOpt.canRecommend || isRecomputing}
+                  onClick={() => handleSelectMaAction("recommend")}
+                  data-testid="btn-multi-abstract-recommend"
+                  className={`rounded-lg border px-3 py-2 text-left transition ${
+                    !maOpt.canRecommend
+                      ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                      : effectiveMaAction === "recommend"
+                      ? "border-emerald-700 bg-emerald-700 text-white shadow-sm"
+                      : "border-emerald-300 bg-white text-slate-800 hover:bg-emerald-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 font-bold text-[11px]">
+                    <span>① 추천 매칭 적용 (Recommend)</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                        !maOpt.canRecommend
+                          ? "bg-slate-200 text-slate-500"
+                          : effectiveMaAction === "recommend"
+                          ? "bg-white/20 text-white"
+                          : "bg-emerald-100 text-emerald-800"
+                      }`}
+                    >
+                      {maOpt.canRecommend ? "2차 검증 통과" : "비활성"}
+                    </span>
+                  </div>
+                  <div
+                    className={`mt-0.5 text-[10px] ${
+                      !maOpt.canRecommend
+                        ? "text-slate-400"
+                        : effectiveMaAction === "recommend"
+                        ? "text-emerald-100"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    전역 최소 거리 1:1 대응으로 계산된 추천 위치를 미리보기에 표시합니다.
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!maOpt.canSwap || isRecomputing}
+                  onClick={() => handleSelectMaAction("swap")}
+                  data-testid="btn-multi-abstract-swap"
+                  className={`rounded-lg border px-3 py-2 text-left transition ${
+                    !maOpt.canSwap
+                      ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                      : effectiveMaAction === "swap"
+                      ? "border-indigo-700 bg-indigo-700 text-white shadow-sm"
+                      : "border-indigo-300 bg-white text-slate-800 hover:bg-indigo-50"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1 font-bold text-[11px]">
+                    <span>② 대응 관계 교환 (Swap)</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                        !maOpt.canSwap
+                          ? "bg-slate-200 text-slate-500"
+                          : effectiveMaAction === "swap"
+                          ? "bg-white/20 text-white"
+                          : "bg-indigo-100 text-indigo-800"
+                      }`}
+                    >
+                      {maOpt.canSwap ? "1클릭 반전 검증됨" : "비활성"}
+                    </span>
+                  </div>
+                  <div
+                    className={`mt-0.5 text-[10px] ${
+                      !maOpt.canSwap
+                        ? "text-slate-400"
+                        : effectiveMaAction === "swap"
+                        ? "text-indigo-100"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    두 추상 함수의 대응 곡선을 1:1 교환하여 재계산한 안전 위치를 표시합니다.
+                  </div>
+                </button>
+              </div>
+
+              {/* 추상 함수별 대응 곡선 및 재계산 shift 요약 표 */}
+              {maOpt.correspondenceRows && maOpt.correspondenceRows.length > 0 && (
+                <div
+                  className="rounded border border-slate-200 bg-white p-2.5"
+                  data-testid="multi-abstract-correspondence-table"
+                >
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-800">
+                    <span>📋 추상 함수 라벨 ↔ 대응 곡선 및 재계산 위치 비교</span>
+                    <span className="text-[10px] font-normal text-slate-500">
+                      위 버튼 선택은 모달 미리보기만 변경하며, 하단 [승인 및 적용] 클릭 전까지 에디터 코드는 변경되지 않습니다.
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {maOpt.correspondenceRows.map((row) => {
+                      const activeCell =
+                        effectiveMaAction === "recommend"
+                          ? row.recommend
+                          : effectiveMaAction === "swap"
+                          ? row.swap
+                          : null;
+                      return (
+                        <div
+                          key={`ma-row-${row.nodeId}`}
+                          data-testid="multi-abstract-correspondence-row"
+                          className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-slate-50/80 px-2.5 py-1.5 text-[11px]"
+                        >
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <code className="rounded bg-slate-900 px-1.5 py-0.5 text-[11px] font-mono text-white">
+                              {row.label}
+                            </code>
+                            {activeCell ? (
+                              <>
+                                <span className="font-bold text-indigo-700">➔</span>
+                                <span className="rounded bg-indigo-100 px-1.5 py-0.5 font-semibold text-indigo-900">
+                                  곡선 #{activeCell.strokeIndex} ({activeCell.curveShape || "plot 곡선"})
+                                </span>
+                                {activeCell.plotExpr && (
+                                  <code className="rounded bg-white px-1.5 py-0.5 text-[10px] font-mono border border-slate-200 text-slate-700">
+                                    plot: {activeCell.plotExpr}
+                                  </code>
+                                )}
+                                {activeCell.domain && (
+                                  <span className="font-mono text-[10px] text-slate-500">
+                                    domain=[{activeCell.domain[0]}, {activeCell.domain[1]}] (불변)
+                                  </span>
+                                )}
+                                <span className="rounded bg-emerald-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  선택 shift=[{activeCell.shift[0]}, {activeCell.shift[1]}]pt
+                                </span>
+                              </>
+                            ) : (
+                              <span className="rounded bg-slate-700 px-2 py-0.5 text-[10px] font-semibold text-white">
+                                현재 선택: ③ 원본 유지 (Hold · shift=[{row.origShift[0]}, {row.origShift[1]}]pt)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-slate-600 font-mono">
+                            <span>
+                              ①추천: #{row.recommend.strokeIndex} [{row.recommend.shift[0]},{" "}
+                              {row.recommend.shift[1]}]pt
+                            </span>
+                            <span>·</span>
+                            <span>
+                              ②Swap: #{row.swap.strokeIndex} [{row.swap.shift[0]},{" "}
+                              {row.swap.shift[1]}]pt
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 겹침 및 충돌 진단 리포트 */}
           {diag && (
             <div
@@ -643,7 +929,8 @@ export function SmartLabelBetaModal({
           )}
 
           {/* 원본 vs 추천 결과 SVG 비교 화면 (메인 svgUrl 과 완전히 분리) */}
-          {(proposal.preview?.originalSvgDataUri || proposal.preview?.recommendedSvgDataUri) && (
+          {(activeProposal.preview?.originalSvgDataUri ||
+            activeProposal.preview?.recommendedSvgDataUri) && (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="mb-2 flex items-center justify-between text-xs font-bold text-slate-700">
@@ -651,9 +938,9 @@ export function SmartLabelBetaModal({
                   <span className="text-[11px] font-normal text-slate-500">현재 코드 기준</span>
                 </div>
                 <div className="flex min-h-[220px] items-center justify-center rounded border border-slate-200 bg-white p-3">
-                  {proposal.preview.originalSvgDataUri ? (
+                  {activeProposal.preview.originalSvgDataUri ? (
                     <img
-                      src={proposal.preview.originalSvgDataUri}
+                      src={activeProposal.preview.originalSvgDataUri}
                       alt="Original TikZ Preview"
                       className="max-h-[280px] w-auto object-contain"
                     />
@@ -665,15 +952,25 @@ export function SmartLabelBetaModal({
 
               <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
                 <div className="mb-2 flex items-center justify-between text-xs font-bold text-indigo-900">
-                  <span>적용 후 (추천 미리보기)</span>
+                  <span>
+                    적용 후 (
+                    {maOpt?.detected
+                      ? effectiveMaAction === "recommend"
+                        ? "① 추천 매칭 미리보기"
+                        : effectiveMaAction === "swap"
+                        ? "② 대응 교환(Swap) 미리보기"
+                        : "③ 원본 유지(Hold) 미리보기"
+                      : "추천 미리보기"}
+                    )
+                  </span>
                   <span className="text-[11px] font-normal text-indigo-700">
-                    {proposal.canApply ? "2차 Kroki 렌더 검증 완료" : "변경 없음 (원본 유지)"}
+                    {activeProposal.canApply ? "2차 Kroki 렌더 검증 완료" : "변경 없음 (원본 유지)"}
                   </span>
                 </div>
                 <div className="flex min-h-[220px] items-center justify-center rounded border border-indigo-200 bg-white p-3">
-                  {proposal.preview.recommendedSvgDataUri ? (
+                  {activeProposal.preview.recommendedSvgDataUri ? (
                     <img
-                      src={proposal.preview.recommendedSvgDataUri}
+                      src={activeProposal.preview.recommendedSvgDataUri}
                       alt="Recommended TikZ Preview"
                       className="max-h-[280px] w-auto object-contain"
                     />
@@ -686,13 +983,13 @@ export function SmartLabelBetaModal({
           )}
 
           {/* 라벨별 판단 사유 리포트 */}
-          {proposal.labelDecisions && proposal.labelDecisions.length > 0 && (
+          {activeProposal.labelDecisions && activeProposal.labelDecisions.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-white p-3.5">
               <h4 className="mb-2.5 text-xs font-bold text-slate-800">
-                함수식 라벨별 판단 및 매칭 사유 ({proposal.labelDecisions.length}개)
+                함수식 라벨별 판단 및 매칭 사유 ({activeProposal.labelDecisions.length}개)
               </h4>
               <div className="space-y-2">
-                {proposal.labelDecisions.map((dec) => (
+                {activeProposal.labelDecisions.map((dec) => (
                   <div
                     key={dec.id}
                     data-testid="smart-label-decision-item"
@@ -885,7 +1182,15 @@ export function SmartLabelBetaModal({
                   : "cursor-not-allowed bg-slate-300 text-slate-500"
               }`}
             >
-              ✅ 추천 위치 승인 및 적용
+              {maOpt?.detected
+                ? effectiveMaAction === "recommend"
+                  ? "✅ ① 추천 매칭(Recommend) 위치 승인 및 적용"
+                  : effectiveMaAction === "swap"
+                  ? "✅ ② 대응 교환(Swap) 위치 승인 및 적용"
+                  : applicability.allowed
+                  ? "✅ 추상 함수 원본 유지(Hold) + 일반 정렬 승인 및 적용"
+                  : "🔒 원본 유지(Hold) 기본 선택됨 (적용할 변경 없음)"
+                : "✅ 추천 위치 승인 및 적용"}
             </button>
           </div>
         </div>

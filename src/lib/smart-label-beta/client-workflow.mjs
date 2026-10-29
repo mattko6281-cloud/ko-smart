@@ -103,39 +103,86 @@ export function shouldShowSmartLabelBetaUI(params) {
 }
 
 /**
+ * 다중 추상 함수(유형 2/3) 제안 객체에서 사용자의 모달 선택("hold" | "recommend" | "swap")에
+ * 해당하는 검증 완료 변형(variant)을 오버레이한 활성 제안 객체를 반환한다.
+ * - 이 함수는 순수 함수이며 에디터의 TikZ 코드를 직접 변경하지 않는다.
+ * - 유형 3(type3-hold-only)이거나 미검증 변형인 경우 강제로 "hold" 변형을 반환한다.
+ *
+ * @param {any} proposal
+ * @param {"hold" | "recommend" | "swap"} [selectedAction]
+ */
+export function resolveActiveProposalForMultiAbstractChoice(proposal, selectedAction) {
+  if (!proposal || typeof proposal !== "object") return proposal;
+  const maOpt = proposal.multiAbstractOption;
+  if (!maOpt || !maOpt.detected || !maOpt.variants) return proposal;
+
+  const requested =
+    selectedAction === "recommend" || selectedAction === "swap" || selectedAction === "hold"
+      ? selectedAction
+      : maOpt.selectedAction || "hold";
+
+  let effectiveAction = "hold";
+  if (maOpt.classificationCode === "type2-user-confirm-required" && maOpt.supportedPair) {
+    if (requested === "recommend" && maOpt.canRecommend && maOpt.variants.recommend) {
+      effectiveAction = "recommend";
+    } else if (requested === "swap" && maOpt.canSwap && maOpt.variants.swap) {
+      effectiveAction = "swap";
+    }
+  }
+
+  const chosenVariant = maOpt.variants[effectiveAction] || maOpt.variants.hold;
+  if (!chosenVariant) return proposal;
+
+  return {
+    ...proposal,
+    ...chosenVariant,
+    multiAbstractActionRequested: effectiveAction,
+    multiAbstractOption: {
+      ...maOpt,
+      selectedAction: effectiveAction,
+    },
+  };
+}
+
+/**
  * 현재 에디터 코드와 추천 결과 원본을 비교해 적용 가능 여부를 판정한다.
  * - 검증되지 않았거나(verified !== true), canApply !== true 인 결과는 차단한다.
  * - 추천 계산 중 또는 미리보기 중 에디터 내용이 변경된 경우(currentRawInput !== proposal.originalCode) 차단한다.
  *
  * @param {any} proposal
  * @param {string} currentRawInput
+ * @param {{multiAbstractAction?: "hold" | "recommend" | "swap"}} [opts]
  */
-export function evaluateProposalApplicability(proposal, currentRawInput) {
+export function evaluateProposalApplicability(proposal, currentRawInput, opts = {}) {
   if (!proposal || typeof proposal !== "object") {
     return { allowed: false, reasonCode: "no-proposal", reason: "추천 결과가 없습니다." };
   }
-  if (proposal.originalCode !== currentRawInput) {
+  const activeProposal = resolveActiveProposalForMultiAbstractChoice(
+    proposal,
+    opts?.multiAbstractAction ?? proposal?.multiAbstractOption?.selectedAction
+  );
+  if (activeProposal.originalCode !== currentRawInput) {
     return {
       allowed: false,
       reasonCode: "input-changed",
       reason: "추천 계산 도중 또는 미리보기 중에 에디터 코드가 변경되어 이전 추천을 적용할 수 없습니다. 다시 자동 정렬을 실행해 주세요.",
     };
   }
-  if (!proposal.verified) {
+  if (!activeProposal.verified) {
     return {
       allowed: false,
       reasonCode: "unverified-blocked",
       reason: "2차 렌더링 및 안전성 검증을 통과하지 않은 결과는 적용할 수 없습니다.",
     };
   }
-  if (!proposal.canApply || proposal.status !== "recommended") {
+  if (!activeProposal.canApply || activeProposal.status !== "recommended") {
     return {
       allowed: false,
       reasonCode: "not-applicable",
-      reason: proposal.message || "적용 가능한 추천 변경 사항이 없습니다.",
+      reason: activeProposal.message || "적용 가능한 추천 변경 사항이 없습니다.",
     };
   }
-  if (!proposal.recommendedCode || proposal.recommendedCode === proposal.originalCode) {
+  if (!activeProposal.recommendedCode || activeProposal.recommendedCode === activeProposal.originalCode) {
     return {
       allowed: false,
       reasonCode: "no-diff",
@@ -151,9 +198,14 @@ export function evaluateProposalApplicability(proposal, currentRawInput) {
  *
  * @param {any} proposal
  * @param {string} currentRawInput
+ * @param {{multiAbstractAction?: "hold" | "recommend" | "swap"}} [opts]
  */
-export function applyApprovedProposal(proposal, currentRawInput) {
-  const check = evaluateProposalApplicability(proposal, currentRawInput);
+export function applyApprovedProposal(proposal, currentRawInput, opts = {}) {
+  const activeProposal = resolveActiveProposalForMultiAbstractChoice(
+    proposal,
+    opts?.multiAbstractAction ?? proposal?.multiAbstractOption?.selectedAction
+  );
+  const check = evaluateProposalApplicability(activeProposal, currentRawInput, opts);
   if (!check.allowed) {
     return {
       applied: false,
@@ -165,14 +217,17 @@ export function applyApprovedProposal(proposal, currentRawInput) {
   }
   const backup = {
     originalCode: currentRawInput,
-    appliedRecommendedCode: proposal.recommendedCode,
-    inputHash: proposal.inputHash || null,
+    appliedRecommendedCode: activeProposal.recommendedCode,
+    inputHash: activeProposal.inputHash || null,
+    multiAbstractAction: activeProposal.multiAbstractOption?.detected
+      ? activeProposal.multiAbstractOption.selectedAction
+      : null,
     appliedAt: Date.now(),
   };
   return {
     applied: true,
     reasonCode: "applied",
-    newRawInput: proposal.recommendedCode,
+    newRawInput: activeProposal.recommendedCode,
     backup,
   };
 }

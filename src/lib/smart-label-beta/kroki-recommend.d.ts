@@ -7,8 +7,10 @@ export const DEFAULT_KROKI_TIMEOUT_MS: number;
 
 export type SmartLabelEngineVersion = "v0.2.1" | "v0.2.2-beta";
 export type SmartLabelAccessRole = "developer" | "pilot" | "none";
+export type MultiAbstractActionMode = "hold" | "recommend" | "swap";
 
 export function normalizeEngineVersion(engineVersion?: any): SmartLabelEngineVersion;
+export function normalizeMultiAbstractAction(action?: any): MultiAbstractActionMode;
 
 export function computeInputHash(rawInput: string): string;
 
@@ -55,6 +57,20 @@ export interface SmartLabelDecisionSummary {
   agreedEngines: string[];
   how: string | null;
   confirmedAssignment: boolean;
+  matchedStroke?: number | null;
+  strokeKind?: string | null;
+  plotExpr?: string | null;
+  curveShape?: string | null;
+  isMultiAbstractPair?: boolean;
+  multiAbstractAction?: MultiAbstractActionMode | null;
+  step2ClassificationType?: string | null;
+  step2ClassificationCode?: string | null;
+  step2MathematicallyProven?: boolean;
+  step2RequiresUserApproval?: boolean;
+  step2Signals?: string[];
+  step2RawDistMarginPt?: number | null;
+  step2RecommendedStroke?: number | null;
+  step2SwappedStroke?: number | null;
   shift: [number, number];
   movedPt: number;
   nonMoveCategory: string | null;
@@ -234,6 +250,108 @@ export interface SmartLabelOriginDecisionSummary {
   holdReason?: string | null;
 }
 
+export interface MultiAbstractCorrespondenceRow {
+  nodeId: string;
+  label: string;
+  origShift: [number, number];
+  recommend: {
+    strokeIndex: number | null;
+    plotExpr: string | null;
+    domain: [number, number] | null;
+    curveShape: string | null;
+    shift: [number, number];
+    movedPt: number;
+    autoModified: boolean;
+  };
+  swap: {
+    strokeIndex: number | null;
+    plotExpr: string | null;
+    domain: [number, number] | null;
+    curveShape: string | null;
+    shift: [number, number];
+    movedPt: number;
+    autoModified: boolean;
+  };
+  hold: {
+    strokeIndex: null;
+    shift: [number, number];
+    movedPt: number;
+    autoModified: false;
+  };
+}
+
+export interface MultiAbstractVariantSummary {
+  actionMode: MultiAbstractActionMode;
+  ok: boolean;
+  status: "recommended" | "unchanged" | "unsupported" | "reverted" | "failed";
+  reasonCode: string | null;
+  message: string;
+  canApply: boolean;
+  verified: boolean;
+  recommendedCode: string;
+  movedCount: number;
+  fnMovedCount?: number;
+  tickMovedCount?: number;
+  tickHeldCount?: number;
+  originMovedCount?: number;
+  originHeldCount?: number;
+  heldCount: number;
+  labelDecisions: SmartLabelDecisionSummary[];
+  tickDecisions?: SmartLabelTickDecisionSummary[];
+  originDecisions?: SmartLabelOriginDecisionSummary[];
+  placements: any[];
+  shiftReport: any[];
+  axisOption: AxisOptionInfo;
+  domainExtensionOption?: DomainExtensionOptionInfo;
+  collisionDiagnostics: CollisionDiagnosticsSummary | null;
+  verification: {
+    compiled: boolean;
+    svgMeasured: boolean;
+    collisionOk: boolean;
+    issues: string[];
+    labelDetails?: any[];
+  } | null;
+  preview: {
+    originalSvgDataUri: string | null;
+    recommendedSvgDataUri: string | null;
+  };
+}
+
+export interface MultiAbstractOptionInfo {
+  detected: boolean;
+  supportedPair: boolean;
+  classificationType: string | null;
+  classificationCode: "type1-auto-confirmable" | "type2-user-confirm-required" | "type3-hold-only" | null;
+  mathematicallyProven: boolean;
+  requiresUserApproval: boolean;
+  requestedAction: MultiAbstractActionMode;
+  selectedAction: MultiAbstractActionMode;
+  defaultAction: "hold";
+  canRecommend: boolean;
+  canSwap: boolean;
+  rawDistMarginPt: number | null;
+  moderateMarginCaution?: boolean;
+  scaleNormalizedThresholds?: {
+    minIntersectionSepPt: number;
+    minGlobalMarginPt: number;
+    onCurveTolPt: number;
+    moderateMarginCautionPt?: number;
+    avgNodeScale: number;
+    avgLabelHeightPt: number;
+    xU: number;
+    yU: number;
+  } | null;
+  signals: string[];
+  holdReason: string | null;
+  summaryReason: string;
+  correspondenceRows: MultiAbstractCorrespondenceRow[];
+  variants: {
+    hold: MultiAbstractVariantSummary;
+    recommend: MultiAbstractVariantSummary | null;
+    swap: MultiAbstractVariantSummary | null;
+  } | null;
+}
+
 export interface SmartLabelBetaProposal {
   engineVersion?: SmartLabelEngineVersion;
   algorithmVersion: string;
@@ -255,6 +373,8 @@ export interface SmartLabelBetaProposal {
   axisOption: AxisOptionInfo;
   applyDomainExtensionRequested?: boolean;
   domainExtensionOption?: DomainExtensionOptionInfo;
+  multiAbstractActionRequested?: MultiAbstractActionMode;
+  multiAbstractOption?: MultiAbstractOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
   inputHash: string;
   originalCode: string;
@@ -301,6 +421,7 @@ export function recommendSmartLabelBeta(
     verify?: boolean;
     applyAxis?: boolean;
     applyDomainExtension?: boolean;
+    multiAbstractAction?: MultiAbstractActionMode;
     engineVersion?: SmartLabelEngineVersion;
     enableUnit3B?: boolean;
     enableUnit3D?: boolean;

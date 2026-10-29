@@ -409,8 +409,17 @@ export function buildV022LabelDecisions(scene, plan, shiftResult) {
         sk?.category === "unmatched-stroke"
       ) {
         const isParseFail = how === "parse-failure" || asgn?.nonMoveCode === "parse-failure";
-        nonMoveCategory = isParseFail ? "수식 파싱 실패" : "매칭 불확실";
-        nonMoveCode = isParseFail ? "parse-failure" : "uncertain-match";
+        const isMultiAbstractHold = Boolean(asgn?.isMultiAbstractPair);
+        nonMoveCategory = isParseFail
+          ? "수식 파싱 실패"
+          : isMultiAbstractHold
+            ? asgn?.nonMoveCategory || "매칭 불확실 (유형 2: 사용자 확인 필요)"
+            : "매칭 불확실";
+        nonMoveCode = isParseFail
+          ? "parse-failure"
+          : isMultiAbstractHold
+            ? asgn?.nonMoveCode || "multi-abstract-user-confirm-required"
+            : "uncertain-match";
         const advNote =
           advItem && Array.isArray(advItem.shift)
             ? ` (참고 안전 후보 shift=[${advItem.shift.join(", ")}]pt 존재하나 확정 매칭 규칙 미비로 자동 이동 차단)`
@@ -466,6 +475,18 @@ export function buildV022LabelDecisions(scene, plan, shiftResult) {
             ? "matched-held-no-safe-candidate"
             : "matched-held-optimal-original"
           : null,
+      isMultiAbstractPair: Boolean(asgn?.isMultiAbstractPair),
+      multiAbstractAction: asgn?.multiAbstractAction || null,
+      step2ClassificationType: asgn?.step2ClassificationType || null,
+      step2ClassificationCode: asgn?.step2ClassificationCode || null,
+      step2MathematicallyProven: Boolean(asgn?.step2MathematicallyProven),
+      step2RequiresUserApproval: Boolean(asgn?.step2RequiresUserApproval),
+      step2Signals: asgn?.step2Signals || [],
+      step2RawDistMarginPt: asgn?.step2RawDistMarginPt ?? null,
+      step2RecommendedStroke: asgn?.step2RecommendedStroke ?? null,
+      step2SwappedStroke: asgn?.step2SwappedStroke ?? null,
+      curveShape: asgn?.curveShape || null,
+      plotExpr: asgn?.plotExpr || null,
     };
 
     labelDecisions.push(decisionObj);
@@ -615,6 +636,8 @@ export function runPlanningV022(
   activePlan.tickPlan = tickPlan;
   activePlan.originPlan = originPlan;
   activePlan.domainPlan = domainPlan;
+  activePlan.multiAbstractAnalysis =
+    scene.multiAbstractAnalysis || activePlan.multiAbstractAnalysis || null;
 
   // placements 배열에도 shift 와 selectedEngine 보강
   const shiftById = new Map((activeShift.report || []).map((r) => [r.id, r]));
@@ -644,6 +667,7 @@ export function runPlanningV022(
     originPlan,
     labelDecisions,
     decisionsByNodeId,
+    multiAbstractAnalysis: activePlan.multiAbstractAnalysis,
   };
 }
 
@@ -1844,10 +1868,11 @@ export function planDomainMicroExtensionsV022(
         })
       : { minOtherPt: null, labelGapPt: null };
 
-    // Gate 1: 매칭 확정 및 단일 plot 곡선 확인
+    // Gate 1: 매칭 확정 및 단일 plot 곡선 확인 (다중 추상 함수 쌍은 domain 잠금)
     if (
       !asg ||
       !asg.confirmed ||
+      asg.isMultiAbstractPair ||
       !stroke ||
       !stroke.stmt ||
       stroke.stmt.type !== "plot" ||
@@ -1871,10 +1896,14 @@ export function planDomainMicroExtensionsV022(
         newMinOtherPt: origClear.minOtherPt,
         origShift: baseShiftPair,
         newShift: baseShiftPair,
-        holdCode: "unconfirmed-or-non-plot",
-        reason: !asg?.confirmed
-          ? `라벨-곡선 매칭 미확정(${asg?.how || "unmatched"})으로 그래프 끝점 연장을 보류함 (Gate 1)`
-          : "대응 도형이 domain 기반 plot 곡선이 아니므로 끝점 연장 대상이 아님 (Gate 1)",
+        holdCode: asg?.isMultiAbstractPair
+          ? "multi-abstract-domain-locked"
+          : "unconfirmed-or-non-plot",
+        reason: asg?.isMultiAbstractPair
+          ? "다중 추상 함수(유형 2)는 사용자 대응 승인 시에도 라벨 위치만 재배치하며 원본 그래프의 정의역(domain)은 자동 변경하지 않는 보수적 안전 정책을 적용함 (Gate 1)"
+          : !asg?.confirmed
+            ? `라벨-곡선 매칭 미확정(${asg?.how || "unmatched"})으로 그래프 끝점 연장을 보류함 (Gate 1)`
+            : "대응 도형이 domain 기반 plot 곡선이 아니므로 끝점 연장 대상이 아님 (Gate 1)",
       });
       continue;
     }

@@ -67,6 +67,9 @@ export const DEFAULT_UNIT2_FLAGS = {
   enableResidualSingleCurve: true, // CASE-002: 구체 함수식 확정 후 남은 1:1 파생 추상 함수(y=-f'(x) 등) 잔여 곡선 매칭
   enableDiagonalSvgRecovery: true, // 대각 앵커(below left 등) + scale>=1.8 제한적 SVG 노드 복구
   enableRightAxisTipLineBelow: true, // 우측 x축 화살표 끝점 근방에서 우하향하는 감소 직선의 하단 여유 배치(후보 A)
+  enableStep2MultiAbstractAnalysis: true, // CASE-004, CASE-010 등 다중 추상 함수 전역 1:1 매칭 및 3유형 안전 분류
+  multiAbstractAction: "hold", // "hold" (기본값: 원본 유지) | "recommend" (사용자 추천 승인) | "swap" (사용자 교환 승인)
+  allowFiniteSampleDerivativeType1: false, // 유한 샘플 수치 미분만으로 유형 1 자동 확정을 확대하지 않음 (기본 false -> 유형 2/Hold 처리)
 };
 
 function resolveFlags(flags = {}) {
@@ -2298,14 +2301,855 @@ export function assignStrokesUnit2(scene, targets, flags = DEFAULT_UNIT2_FLAGS) 
       info.reason = `[${prep.notes.join("; ")}] ${info.reason || ""}`;
     }
   }
-  if (false) {
-    if (false) {
-      res.set("__noop__", {
-        reason: "",
-      });
+
+  // ⑤ [Step 2: 다중 추상 함수식(y=f(x), y=g(x) / y=f'(x), y=g'(x) 등) 전역 1:1 매칭 및 3유형 안전 분류]
+  // - 구체 함수식 및 1:1 잔여 곡선이 모두 먼저 확정된 이후,
+  //   남은 미확정 추상 함수 라벨이 2개 이상인 경우 전역 1:1 이분 매칭 및 7대 신호를 평가한다.
+  // - 기본값(multiAbstractAction === "hold")에서는 절대 자동 확정하지 않으며 원본 위치(Hold)를 유지한다.
+  // - 오직 유형 2(type2-user-confirm-required)에서 사용자가 명시적으로 "recommend" 또는 "swap"을 승인한 경우에만
+  //   해당 1:1 대응 관계를 confirmed=true 로 활성화하여 안전 배치를 계산한다.
+  // - 유형 3(type3-hold-only: 3개 이상, 신호 모순, 교점 근방, 마진 부족)에서는 어떤 옵션이 전달되더라도 Hold를 강제한다.
+  if (F.enableStep2MultiAbstractAnalysis !== false) {
+    const allConfirmedStrokes = new Set();
+    for (const [, info] of res.entries()) {
+      if (info && info.confirmed && info.stroke) {
+        allConfirmedStrokes.add(info.stroke.index);
+        if (Array.isArray(info.periodicBranches)) {
+          for (const bIdx of info.periodicBranches) allConfirmedStrokes.add(bIdx);
+        }
+      }
+    }
+
+    const unconfirmedAbstractNodes = rawTargets.filter((n) => {
+      const info = res.get(n.id);
+      if (info && info.confirmed) return false;
+      const prep = prepMap.get(n.id) || preprocessLabelForMatchingUnit2(n.label, scene, F);
+      const tpl = parseLabelStructureTemplateUnit2(prep.effectiveLabel, F);
+      return Boolean(tpl && tpl.isAbstractFunctionLabel);
+    });
+
+    if (unconfirmedAbstractNodes.length >= 2) {
+      const unclaimedPlotCands = strokes
+        .filter((s) => {
+          if (!s || s.kind === "axis" || allConfirmedStrokes.has(s.index)) return false;
+          if (!s.stmt || s.stmt.type !== "plot") return false;
+          if (s.kind === "dashed" || /\bdashed\b/.test(String(s.stmt.optsRaw || ""))) return false;
+          const ms = analyzePlotMathStructureUnit2(s.stmt, F);
+          if (ms && ms.degree === 0) return false;
+          return true;
+        })
+        .map((s) => ({
+          stroke: s,
+          strokeKind: classifyStrokeKind(s),
+          mathStruct: analyzePlotMathStructureUnit2(s.stmt, F),
+        }));
+
+      const step2Analysis = evaluateMultiAbstractMatchingStep2(
+        scene,
+        unconfirmedAbstractNodes,
+        unclaimedPlotCands,
+        F
+      );
+      if (scene) {
+        scene.multiAbstractAnalysis = step2Analysis;
+        scene.step2MultiAbstractAnalysis = step2Analysis;
+      }
+
+      if (step2Analysis) {
+        const rawRequestedAction =
+          typeof F.multiAbstractAction === "string"
+            ? F.multiAbstractAction.toLowerCase()
+            : F.step2SwapOrderOverride
+            ? "swap"
+            : F.applyStep2Tier1AutoConfirm
+            ? "recommend"
+            : "hold";
+
+        // 유형 3(type3-hold-only)이거나 2:2 쌍이 아닌 경우에는 추천/Swap 요청이 들어와도 무조건 Hold 강제!
+        const canUserSelect =
+          step2Analysis.supportedPair &&
+          (step2Analysis.classificationCode === "type2-user-confirm-required" ||
+            step2Analysis.classificationCode === "type1-auto-confirmable");
+
+        const isType1StrictAutoConfirm = Boolean(
+          step2Analysis.supportedPair &&
+            step2Analysis.classificationCode === "type1-auto-confirmable" &&
+            step2Analysis.mathematicallyProven &&
+            F.allowFiniteSampleDerivativeType1 === true
+        );
+
+        const effectiveAction = !canUserSelect
+          ? "hold"
+          : rawRequestedAction === "swap"
+          ? "swap"
+          : rawRequestedAction === "recommend" || isType1StrictAutoConfirm
+          ? "recommend"
+          : "hold";
+
+        if (step2Analysis.supportedPair) {
+          const chosenAssign =
+            effectiveAction === "swap"
+              ? step2Analysis.swappedAssignment
+              : step2Analysis.recommendedAssignment;
+          const shouldConfirm = effectiveAction === "recommend" || effectiveAction === "swap";
+
+          for (const pair of chosenAssign.pairs) {
+            const stObj = unclaimedPlotCands.find((c) => c.stroke.index === pair.strokeIndex);
+            if (!stObj) continue;
+            const sigList = [];
+            if (pair.inlineOnThisPlot) sigList.push("TikZ 인라인 경로 결합");
+            if (pair.signal1OnCurveExact) sigList.push(`곡선 위 점 일치(오차 ${pair.onCurveErrorPt}pt)`);
+            if (pair.signal2DomainEndpointMatch) sigList.push(`정의역 끝점 일치(${pair.matchedDomainEnd})`);
+            if (pair.signal3OrderMatch) sigList.push("TikZ 선언 순서 일치");
+            if (pair.signal4CommentMatch) sigList.push(`주석(${pair.commentHint}) 일치`);
+            if (chosenAssign.derivativeProof?.verified) {
+              sigList.push(`수치 미분 보조 신호(${chosenAssign.derivativeProof.detail})`);
+            }
+
+            const howCode = shouldConfirm
+              ? effectiveAction === "swap"
+                ? "multi-abstract-user-swap"
+                : "multi-abstract-user-recommend"
+              : step2Analysis.classificationCode === "type3-hold-only"
+              ? "multi-abstract-type3-hold"
+              : "ambiguous-structural";
+
+            const reasonText = shouldConfirm
+              ? effectiveAction === "swap"
+                ? `[유형 2 · 사용자 대응 교환(Swap) 승인] ${pair.label} ↔ 곡선 #${stObj.stroke.index}(${pair.plotExpr || "plot"}, ${pair.curveShape?.kindLabel || "곡선"}) 1:1 교환 대응 적용 (수학적 항등 증명이 아닌 사용자 선택 기준)`
+                : `[유형 2 · 사용자 추천 매칭(Recommend) 승인] 전역 1:1 매칭(거리 합 마진 +${step2Analysis.rawDistMarginPt}pt) 및 추정 근거(${sigList.join(", ") || "전역 1:1 거리"})에 따라 ${pair.label} → 곡선 #${stObj.stroke.index}(${pair.plotExpr || "plot"}, ${pair.curveShape?.kindLabel || "곡선"}) 대응 적용 (수학적 증명이 아닌 기하·정의역 추정 근거)`
+              : step2Analysis.classificationCode === "type3-hold-only"
+              ? `[유형 3 · 원본 유지(Hold) 강제] ${step2Analysis.reason || "신호 모순·교점 근접·마진 부족으로 자동 대응 및 추천 비활성화"}`
+              : `[유형 2 · 사용자 확인 필요 (기본값 Hold)] 전역 1:1 추천 후보는 곡선 #${stObj.stroke.index}(${pair.curveShape?.kindLabel || "곡선"}, 마진 +${step2Analysis.rawDistMarginPt}pt, 근거: ${sigList.join(", ") || "전역 거리"})이나 수학적으로 증명된 대응이 아니므로 사용자 명시적 승인 전까지 원본 위치(Hold)를 유지함`;
+
+            res.set(pair.labelId, {
+              how: howCode,
+              stroke: stObj.stroke,
+              strokeKind: stObj.strokeKind,
+              confirmed: shouldConfirm,
+              uncertain: !shouldConfirm,
+              isMultiAbstractPair: true,
+              multiAbstractAction: effectiveAction,
+              nonMoveCategory: shouldConfirm ? null : "매칭 불확실",
+              nonMoveCode: shouldConfirm ? null : "uncertain-match",
+              step2ClassificationType: step2Analysis.classificationType,
+              step2ClassificationCode: step2Analysis.classificationCode,
+              step2MathematicallyProven: step2Analysis.mathematicallyProven,
+              step2RequiresUserApproval: step2Analysis.requiresUserApproval,
+              step2Tier: step2Analysis.tier,
+              step2TierCode: step2Analysis.tierCode,
+              step2Signals: sigList,
+              step2RawDistMarginPt: step2Analysis.rawDistMarginPt,
+              step2RecommendedStroke: step2Analysis.recommendedAssignment.pairs.find(
+                (p) => p.labelId === pair.labelId
+              )?.strokeIndex ?? null,
+              step2SwappedStroke: step2Analysis.swappedAssignment.pairs.find(
+                (p) => p.labelId === pair.labelId
+              )?.strokeIndex ?? null,
+              curveShape: pair.curveShape || null,
+              plotExpr: pair.plotExpr || "",
+              distancePt: pair.distCurvePt,
+              reason: reasonText,
+            });
+          }
+        } else {
+          // 3개 이상 다중 추상 함수 또는 비대칭 카디널리티 -> Type 3 강제 Hold
+          for (const nd of unconfirmedAbstractNodes) {
+            const prev = res.get(nd.id);
+            res.set(nd.id, {
+              ...(prev || {}),
+              how: "multi-abstract-type3-hold",
+              stroke: prev?.stroke || null,
+              strokeKind: prev?.strokeKind || "unknown",
+              confirmed: false,
+              uncertain: true,
+              isMultiAbstractPair: true,
+              multiAbstractAction: "hold",
+              nonMoveCategory: "매칭 불확실",
+              nonMoveCode: "uncertain-match",
+              step2ClassificationType: step2Analysis.classificationType,
+              step2ClassificationCode: "type3-hold-only",
+              step2MathematicallyProven: false,
+              step2RequiresUserApproval: false,
+              reason: `[유형 3 · 원본 유지(Hold) 강제] ${step2Analysis.reason}`,
+            });
+          }
+        }
+      }
     }
   }
+
   return res;
+}
+
+// ============================================================================
+// 5-B. 다중 추상 함수식(y=f(x), y=g(x) / y=f'(x), y=g'(x)) 전역 1:1 매칭 및 3유형 판정기
+// ============================================================================
+
+function findActualDrawStartUnit2(body, stmtStart) {
+  if (!body || typeof stmtStart !== "number") return stmtStart;
+  const tail = body.slice(stmtStart, Math.min(body.length, stmtStart + 400));
+  const m = /\\(?:draw|path|fill|filldraw)\b/.exec(tail);
+  return m ? stmtStart + m.index : stmtStart;
+}
+
+function extractCommentHintForPlotStmtUnit2(body, stmtStart) {
+  if (!body || typeof stmtStart !== "number") return null;
+  const actualStart = findActualDrawStartUnit2(body, stmtStart);
+  const lookbackStart = Math.max(0, actualStart - 220);
+  const prefix = body.slice(lookbackStart, actualStart);
+  const lines = prefix.split(/\r?\n/).reverse();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("%")) {
+      const m = /y\s*=\s*([-+]?[fghFGH]'*\(\s*x\s*\))/.exec(trimmed);
+      if (m) return `y=${m[1].replace(/\s+/g, "")}`;
+    } else {
+      break;
+    }
+  }
+  return null;
+}
+
+function extractCommentDegreeHintForPlotStmtUnit2(body, stmtStart) {
+  if (!body || typeof stmtStart !== "number") return null;
+  const actualStart = findActualDrawStartUnit2(body, stmtStart);
+  const lookbackStart = Math.max(0, actualStart - 220);
+  const prefix = body.slice(lookbackStart, actualStart);
+  const lines = prefix.split(/\r?\n/).reverse();
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith("%")) {
+      if (/(?:일차|1차|직선|linear)/i.test(trimmed)) return 1;
+      if (/(?:이차|2차|포물선|quadratic)/i.test(trimmed)) return 2;
+      if (/(?:삼차|3차|cubic)/i.test(trimmed)) return 3;
+      if (/(?:사차|4차|quartic)/i.test(trimmed)) return 4;
+    } else {
+      break;
+    }
+  }
+  return null;
+}
+
+export function parseAbstractFunctionSymbolStep2(labelStr) {
+  const cleaned = String(labelStr || "")
+    .replace(/^\$+|\$+$/g, "")
+    .replace(/\\(?:rm|mathrm|mathit|mathbf|displaystyle)\b/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\s+/g, "");
+  const m = /^(?:y=)?([+-])?([fghFGH])('*)?\(x\)$/.exec(cleaned);
+  if (!m) {
+    return {
+      valid: false,
+      sign: 1,
+      baseSymbol: null,
+      derivOrder: 0,
+      normalized: cleaned,
+    };
+  }
+  return {
+    valid: true,
+    sign: m[1] === "-" ? -1 : 1,
+    baseSymbol: m[2].toLowerCase(),
+    derivOrder: m[3] ? m[3].length : 0,
+    normalized: `y=${m[1] === "-" ? "-" : ""}${m[2]}${m[3] || ""}(x)`,
+  };
+}
+
+export function verifyDerivativeRelationBetweenPlotsStep2(labelA, labelB, candA, candB) {
+  const symA = parseAbstractFunctionSymbolStep2(labelA.trimmed || labelA.label);
+  const symB = parseAbstractFunctionSymbolStep2(labelB.trimmed || labelB.label);
+  if (!symA.valid || !symB.valid || symA.baseSymbol !== symB.baseSymbol) {
+    return { verified: false, reason: "서로 다른 독립 추상 함수 기호(미분 종속 관계 없음)" };
+  }
+  if (Math.abs(symA.derivOrder - symB.derivOrder) !== 1) {
+    return { verified: false, reason: "원함수-1계도함수 차수 관계가 아님" };
+  }
+
+  const isABase = symA.derivOrder < symB.derivOrder;
+  const baseSym = isABase ? symA : symB;
+  const derivSym = isABase ? symB : symA;
+  const baseCand = isABase ? candA : candB;
+  const derivCand = isABase ? candB : candA;
+
+  const fnBase = baseCand?.stroke?.stmt?.fn;
+  const fnDeriv = derivCand?.stroke?.stmt?.fn;
+  const domBase = baseCand?.stroke?.stmt?.domain;
+  const domDeriv = derivCand?.stroke?.stmt?.domain;
+  if (typeof fnBase !== "function" || typeof fnDeriv !== "function" || !domBase || !domDeriv) {
+    return { verified: false, reason: "plot 수치 함수 또는 정의역 없음" };
+  }
+
+  const x0 = Math.max(domBase[0], domDeriv[0]);
+  const x1 = Math.min(domBase[1], domDeriv[1]);
+  if (!(x1 - x0 >= 0.5)) {
+    return { verified: false, reason: "공통 정의역 구간 부족" };
+  }
+
+  const signRatio = derivSym.sign / baseSym.sign;
+  const h = 1e-4;
+  let maxForwardErr = 0;
+  let maxReverseErr = 0;
+  let validSamples = 0;
+
+  for (let k = 1; k <= 7; k++) {
+    const x = x0 + ((x1 - x0) * k) / 8;
+    try {
+      const dBase = (fnBase(x + h) - fnBase(x - h)) / (2 * h);
+      const yDeriv = fnDeriv(x);
+      const dDeriv = (fnDeriv(x + h) - fnDeriv(x - h)) / (2 * h);
+      const yBase = fnBase(x);
+      if (!Number.isFinite(dBase) || !Number.isFinite(yDeriv) || !Number.isFinite(dDeriv) || !Number.isFinite(yBase)) {
+        continue;
+      }
+      validSamples++;
+      const errFwd = Math.abs(signRatio * dBase - yDeriv);
+      const errRev = Math.abs(signRatio * dDeriv - yBase);
+      if (errFwd > maxForwardErr) maxForwardErr = errFwd;
+      if (errRev > maxReverseErr) maxReverseErr = errRev;
+    } catch {}
+  }
+
+  if (validSamples >= 5 && maxForwardErr <= 0.015 && maxReverseErr > 0.1) {
+    return {
+      verified: true,
+      finiteSampleOnly: true,
+      proofType: "derivative-finite-sample-match",
+      baseLabel: isABase ? labelA.label : labelB.label,
+      derivLabel: isABase ? labelB.label : labelA.label,
+      baseStrokeIndex: baseCand.stroke.index,
+      derivStrokeIndex: derivCand.stroke.index,
+      maxForwardErr: r2(maxForwardErr),
+      detail: `${isABase ? labelA.trimmed || labelA.label : labelB.trimmed || labelB.label}(곡선 #${baseCand.stroke.index})의 유한 샘플 수치 도함수가 ${isABase ? labelB.trimmed || labelB.label : labelA.trimmed || labelA.label}(곡선 #${derivCand.stroke.index})와 근사 일치(오차 ${r2(maxForwardErr)}, 유한 샘플 추정 근거)`,
+    };
+  }
+
+  return {
+    verified: false,
+    maxForwardErr: r2(maxForwardErr),
+    reason: `원함수-도함수 미분 관계 불일치(최대 오차 ${r2(maxForwardErr)})`,
+  };
+}
+
+export function summarizeCurveShapeProfileStep2(cand) {
+  const st = cand?.stroke;
+  const ms = cand?.mathStruct;
+  const fn = st?.stmt?.fn;
+  const dom = st?.stmt?.domain;
+  const exprStr = String(st?.stmt?.expr || "");
+  let degree = ms && typeof ms.degree === "number" ? ms.degree : null;
+
+  if (
+    degree === null &&
+    typeof fn === "function" &&
+    Array.isArray(dom) &&
+    dom.length === 2 &&
+    dom[1] > dom[0] &&
+    !/\b(?:sin|cos|tan|ln|log|exp|sqrt)\b/i.test(exprStr)
+  ) {
+    try {
+      const samples = [0, 1, 2, 3, 4, 5].map((k) => fn(dom[0] + ((dom[1] - dom[0]) * k) / 5));
+      if (samples.every((v) => Number.isFinite(v))) {
+        const diff = (arr) => arr.slice(1).map((v, i) => v - arr[i]);
+        const d1 = diff(samples);
+        const d2 = diff(d1);
+        const d3 = diff(d2);
+        const d4 = diff(d3);
+        const maxAbs = (arr) => Math.max(...arr.map((v) => Math.abs(v)));
+        const spread = (arr) => Math.max(...arr) - Math.min(...arr);
+        if (maxAbs(d3) > 1e-4 && spread(d3) <= 1e-3) {
+          degree = 3;
+        } else if (maxAbs(d4) > 1e-4 && spread(d4) <= 1e-3) {
+          degree = 4;
+        }
+      }
+    } catch {}
+  }
+
+  let extremaCount = 0;
+  let monotonicity = "unknown";
+  if (typeof fn === "function" && Array.isArray(dom) && dom.length === 2 && dom[1] > dom[0]) {
+    const N = 32;
+    let prevSign = 0;
+    let posCount = 0;
+    let negCount = 0;
+    for (let i = 0; i < N; i++) {
+      const u0 = dom[0] + ((dom[1] - dom[0]) * i) / N;
+      const u1 = dom[0] + ((dom[1] - dom[0]) * (i + 1)) / N;
+      try {
+        const dy = fn(u1) - fn(u0);
+        if (Math.abs(dy) > 1e-4) {
+          const sgn = dy > 0 ? 1 : -1;
+          if (sgn > 0) posCount++;
+          else negCount++;
+          if (prevSign !== 0 && sgn !== prevSign) extremaCount++;
+          prevSign = sgn;
+        }
+      } catch {}
+    }
+    if (posCount > 0 && negCount === 0) monotonicity = "단조증가";
+    else if (negCount > 0 && posCount === 0) monotonicity = "단조감소";
+    else if (posCount > 0 && negCount > 0) monotonicity = "비단조(극점 존재)";
+  }
+
+  const kindLabel =
+    degree === 1
+      ? "1차 직선"
+      : degree === 2
+      ? "2차 포물선"
+      : degree === 3
+      ? "3차 다항곡선"
+      : degree === 4
+      ? "4차 다항곡선"
+      : ms?.kind === "non-polynomial"
+      ? "초월함수 곡선"
+      : "일반 plot 곡선";
+
+  return {
+    degree,
+    kindLabel,
+    monotonicity,
+    extremaCount,
+    summary: `${kindLabel} (${monotonicity}, 정의역 내 극점 ${extremaCount}개)`,
+  };
+}
+
+export function evaluateMultiAbstractMatchingStep2(
+  scene,
+  abstractNodes,
+  plotCandidates,
+  flags = DEFAULT_UNIT2_FLAGS
+) {
+  const F = resolveFlags(flags);
+  if (!scene || !Array.isArray(abstractNodes) || abstractNodes.length < 2) return null;
+
+  const { xU = 28.45, yU = 28.45, everyNodeScale = 2.2 } = scene.units || {};
+  const sortedLabels = [...abstractNodes].sort((a, b) => a.start - b.start);
+  const sortedStrokes = [...(plotCandidates || [])].sort(
+    (a, b) => (a.stroke.stmt?.start || 0) - (b.stroke.stmt?.start || 0)
+  );
+
+  // 그래프 스케일(xU, yU) 및 라벨 크기(bbox 높이, nodeScale)에 적응하는 일반화 안전 임계값 계산:
+  // - 출발점: 교점 근방 분리 임계값 8.0pt, 전역 1:1 마진 임계값 12.0pt, 곡선 위 점 일치 임계값 1.5pt
+  // - 라벨 크기가 크거나(scale > 2.2) 스케일이 다른 도형에서도 오매칭이 발생하지 않도록 비례 보정
+  const labelHeights = sortedLabels
+    .map((nd) => (nd.bbox ? nd.bbox.y1 - nd.bbox.y0 : 18.0))
+    .filter((h) => Number.isFinite(h) && h > 0);
+  const avgLabelHeightPt =
+    labelHeights.length > 0
+      ? r2(labelHeights.reduce((a, b) => a + b, 0) / labelHeights.length)
+      : 18.0;
+  const nodeScales = sortedLabels
+    .map((nd) => (Array.isArray(nd.scale) ? Math.max(nd.scale[0] || 1, nd.scale[1] || 1) : everyNodeScale || 2.2))
+    .filter((s) => Number.isFinite(s) && s > 0);
+  const avgNodeScale =
+    nodeScales.length > 0
+      ? r2(nodeScales.reduce((a, b) => a + b, 0) / nodeScales.length)
+      : 2.2;
+
+  const scaleRatio = Math.min(1.3, Math.max(0.85, avgNodeScale / 2.2));
+  const minIntersectionSepPt = r2(Math.max(8.0, Math.min(14.0, avgLabelHeightPt * 0.42)));
+  const minGlobalMarginPt = r2(Math.max(12.0, 12.0 * scaleRatio));
+  const onCurveTolPt = r2(Math.max(1.5, Math.min(2.2, 1.5 * Math.max(0.85, Math.min(1.25, yU / 28.45)))));
+  const scaleNormalizedThresholds = {
+    xUPt: r2(xU),
+    yUPt: r2(yU),
+    avgNodeScale,
+    avgLabelHeightPt,
+    minIntersectionSepPt,
+    minGlobalMarginPt,
+    onCurveTolPt,
+    moderateMarginCautionPt: 25.0,
+  };
+
+  if (sortedLabels.length !== 2 || sortedStrokes.length !== 2) {
+    const reasonMsg =
+      sortedLabels.length >= 3
+        ? `추상 함수 라벨이 ${sortedLabels.length}개(3개 이상 다중 추상 함수) 존재하여 경우의 수(${sortedLabels.length}!가지) 폭발 및 오매칭 방지를 위해 원본 유지(Hold)를 강제함`
+        : `추상 함수 라벨(${sortedLabels.length}개)과 미배정 함수 곡선(${sortedStrokes.length}개)의 개수가 2:2 일대일 구조가 아니어서 원본 유지(Hold)를 강제함`;
+    return {
+      supportedPair: false,
+      classificationType: "Type 3 (원본 유지 — 3개 이상 다중 추상 함수 또는 비대칭 카디널리티 Hold 강제)",
+      classificationCode: "type3-hold-only",
+      mathematicallyProven: false,
+      proofMethod: null,
+      requiresUserApproval: false,
+      defaultUnapprovedAction: "hold",
+      tier: "Tier 3 (Low / Ambiguous - Hold)",
+      tierCode: "tier3-hold",
+      autoConfirmSafe: false,
+      scaleNormalizedThresholds,
+      cardinalityInfo: {
+        labelCount: sortedLabels.length,
+        curveCount: sortedStrokes.length,
+      },
+      contradictions: [reasonMsg],
+      uncertaintyFactors: [reasonMsg],
+      reason: reasonMsg,
+    };
+  }
+
+  const [L0, L1] = sortedLabels;
+  const [S0, S1] = sortedStrokes;
+  const labels = [L0, L1];
+  const strokes = [S0, S1];
+  const shapeProfiles = strokes.map((c) => summarizeCurveShapeProfileStep2(c));
+  const labelSymbols = labels.map((nd) => parseAbstractFunctionSymbolStep2(nd.trimmed || nd.label));
+
+  const pairMatrix = labels.map((nd, li) => {
+    const normLabel = String(nd.trimmed || nd.label || "")
+      .replace(/^\$+|\$+$/g, "")
+      .replace(/\s+/g, "");
+    const anchorPt =
+      nd.at ||
+      nd.inlineAnchor ||
+      nd.anchor ||
+      (nd.bbox ? [(nd.bbox.x0 + nd.bbox.x1) / 2, (nd.bbox.y0 + nd.bbox.y1) / 2] : null);
+    const mathAt = anchorPt ? [anchorPt[0] / xU, anchorPt[1] / yU] : null;
+
+    let curveVerticalSeparationPtAtX0 = null;
+    if (mathAt && strokes[0].stroke.stmt?.fn && strokes[1].stroke.stmt?.fn) {
+      try {
+        const yA = strokes[0].stroke.stmt.fn(mathAt[0]);
+        const yB = strokes[1].stroke.stmt.fn(mathAt[0]);
+        if (Number.isFinite(yA) && Number.isFinite(yB)) {
+          curveVerticalSeparationPtAtX0 = r2(Math.abs(yA - yB) * yU);
+        }
+      } catch {}
+    }
+
+    return strokes.map((cand, sj) => {
+      const st = cand.stroke;
+      const fn = st.stmt?.fn;
+      const dom = st.stmt?.domain || null;
+      const otherSt = strokes[1 - sj].stroke;
+      const otherFn = otherSt.stmt?.fn;
+      const otherDom = otherSt.stmt?.domain || null;
+
+      const distCurvePt = anchorPt
+        ? r2(minDistPolylines([{ pts: [anchorPt, anchorPt], closed: false }], [{ pts: st.pts, closed: false }]))
+        : 999;
+
+      let onCurveErrorMath = null;
+      let onCurveErrorPt = null;
+      let signal1OnCurveExact = false;
+      if (mathAt && fn && dom && mathAt[0] >= dom[0] - 0.05 && mathAt[0] <= dom[1] + 0.05) {
+        try {
+          const yVal = fn(mathAt[0]);
+          if (Number.isFinite(yVal)) {
+            onCurveErrorMath = r2(Math.abs(mathAt[1] - yVal));
+            onCurveErrorPt = r2(Math.abs(mathAt[1] - yVal) * yU);
+            if (onCurveErrorPt <= onCurveTolPt) {
+              signal1OnCurveExact = true;
+            }
+          }
+        } catch {}
+      }
+
+      let isExactPointOnOtherCurve = false;
+      if (mathAt && otherFn && otherDom && mathAt[0] >= otherDom[0] - 0.05 && mathAt[0] <= otherDom[1] + 0.05) {
+        try {
+          const yOther = otherFn(mathAt[0]);
+          if (Number.isFinite(yOther) && Math.abs(mathAt[1] - yOther) * yU <= onCurveTolPt) {
+            isExactPointOnOtherCurve = true;
+          }
+        } catch {}
+      }
+
+      let signal2DomainEndpointMatch = false;
+      let matchedDomainEnd = null;
+      if (mathAt && dom && !isExactPointOnOtherCurve) {
+        const matchD0 = Math.abs(mathAt[0] - dom[0]) <= 0.02;
+        const matchD1 = Math.abs(mathAt[0] - dom[1]) <= 0.02;
+        const otherMatchD0 = otherDom ? Math.abs(mathAt[0] - otherDom[0]) <= 0.02 : false;
+        const otherMatchD1 = otherDom ? Math.abs(mathAt[0] - otherDom[1]) <= 0.02 : false;
+        if (matchD1 && !otherMatchD1) {
+          signal2DomainEndpointMatch = true;
+          matchedDomainEnd = `d1=${dom[1]}`;
+        } else if (matchD0 && !otherMatchD0) {
+          signal2DomainEndpointMatch = true;
+          matchedDomainEnd = `d0=${dom[0]}`;
+        }
+      }
+
+      const signal3OrderMatch = li === sj;
+      const charGapAfterPlot = nd.start - (st.stmt?.end || 0);
+      const signal3AdjacentDecl = charGapAfterPlot >= 0 && charGapAfterPlot <= 80;
+      const inlineOnThisPlot = Boolean(
+        nd.kind === "inline" &&
+          st.stmt &&
+          nd.start >= st.stmt.start &&
+          nd.end <= st.stmt.end
+      );
+
+      const commentHint = extractCommentHintForPlotStmtUnit2(scene.body, st.stmt?.start || 0);
+      const signal4CommentMatch = Boolean(commentHint && commentHint === normLabel);
+      const commentDegreeHint = extractCommentDegreeHintForPlotStmtUnit2(scene.body, st.stmt?.start || 0);
+      const curveDegree = shapeProfiles[sj].degree;
+      const commentDegreeConsistent =
+        commentDegreeHint === null || curveDegree === null || commentDegreeHint === curveDegree;
+
+      const hasHardMathGeomSignal = signal1OnCurveExact || signal2DomainEndpointMatch || inlineOnThisPlot;
+
+      const effectiveCost = r2(
+        distCurvePt -
+          (signal1OnCurveExact ? 12.0 : 0) -
+          (signal2DomainEndpointMatch ? 10.0 : 0) -
+          (inlineOnThisPlot ? 50.0 : 0)
+      );
+
+      return {
+        labelId: nd.id,
+        label: nd.label,
+        labelSymbol: labelSymbols[li],
+        strokeIndex: st.index,
+        plotExpr: st.stmt?.expr || "",
+        domain: dom,
+        curveShape: shapeProfiles[sj],
+        mathAt: mathAt ? [r2(mathAt[0]), r2(mathAt[1])] : null,
+        distCurvePt,
+        onCurveErrorMath,
+        onCurveErrorPt,
+        signal1OnCurveExact,
+        signal2DomainEndpointMatch,
+        matchedDomainEnd,
+        signal3OrderMatch,
+        signal3AdjacentDecl,
+        inlineOnThisPlot,
+        charGapAfterPlot,
+        commentHint,
+        signal4CommentMatch,
+        commentDegreeHint,
+        commentDegreeConsistent,
+        hasHardMathGeomSignal,
+        curveVerticalSeparationPtAtX0,
+        effectiveCost,
+      };
+    });
+  });
+
+  const derivCheckA = verifyDerivativeRelationBetweenPlotsStep2(L0, L1, S0, S1);
+  const derivCheckB = verifyDerivativeRelationBetweenPlotsStep2(L0, L1, S1, S0);
+
+  // 주의: 유한 샘플 수치 미분 일치(derivCheck)는 allowFiniteSampleDerivativeType1 === true 일 때만
+  // 수학적 증명으로 취급하며, 기본값(false)에서는 명시적 TikZ 인라인 경로 결합만 수학적/구조적 증명으로 인정한다!
+  const isProvenA = Boolean(
+    pairMatrix[0][0].inlineOnThisPlot && pairMatrix[1][1].inlineOnThisPlot
+  ) || Boolean(F.allowFiniteSampleDerivativeType1 && derivCheckA.verified);
+  const isProvenB = Boolean(
+    pairMatrix[0][1].inlineOnThisPlot && pairMatrix[1][0].inlineOnThisPlot
+  ) || Boolean(F.allowFiniteSampleDerivativeType1 && derivCheckB.verified);
+
+  const assignA = {
+    name: "Assignment A (L0→S0, L1→S1)",
+    pairs: [pairMatrix[0][0], pairMatrix[1][1]],
+    rawDistSumPt: r2(pairMatrix[0][0].distCurvePt + pairMatrix[1][1].distCurvePt),
+    effectiveCostSum: r2(
+      pairMatrix[0][0].effectiveCost +
+        pairMatrix[1][1].effectiveCost -
+        (derivCheckA.verified ? 40.0 : 0)
+    ),
+    hardSignalCount:
+      (pairMatrix[0][0].hasHardMathGeomSignal ? 1 : 0) +
+      (pairMatrix[1][1].hasHardMathGeomSignal ? 1 : 0) +
+      (derivCheckA.verified ? 1 : 0),
+    orderConsistent: true,
+    commentConsistent:
+      (!pairMatrix[0][0].commentHint || pairMatrix[0][0].signal4CommentMatch) &&
+      (!pairMatrix[1][1].commentHint || pairMatrix[1][1].signal4CommentMatch) &&
+      pairMatrix[0][0].commentDegreeConsistent &&
+      pairMatrix[1][1].commentDegreeConsistent,
+    derivativeProof: derivCheckA,
+    inlineProof: Boolean(pairMatrix[0][0].inlineOnThisPlot || pairMatrix[1][1].inlineOnThisPlot),
+    mathematicallyProven: isProvenA,
+  };
+
+  const assignB = {
+    name: "Assignment B (L0→S1, L1→S0)",
+    pairs: [pairMatrix[0][1], pairMatrix[1][0]],
+    rawDistSumPt: r2(pairMatrix[0][1].distCurvePt + pairMatrix[1][0].distCurvePt),
+    effectiveCostSum: r2(
+      pairMatrix[0][1].effectiveCost +
+        pairMatrix[1][0].effectiveCost -
+        (derivCheckB.verified ? 40.0 : 0)
+    ),
+    hardSignalCount:
+      (pairMatrix[0][1].hasHardMathGeomSignal ? 1 : 0) +
+      (pairMatrix[1][0].hasHardMathGeomSignal ? 1 : 0) +
+      (derivCheckB.verified ? 1 : 0),
+    orderConsistent: false,
+    commentConsistent:
+      (!pairMatrix[0][1].commentHint || pairMatrix[0][1].signal4CommentMatch) &&
+      (!pairMatrix[1][0].commentHint || pairMatrix[1][0].signal4CommentMatch) &&
+      pairMatrix[0][1].commentDegreeConsistent &&
+      pairMatrix[1][0].commentDegreeConsistent,
+    derivativeProof: derivCheckB,
+    inlineProof: Boolean(pairMatrix[0][1].inlineOnThisPlot || pairMatrix[1][0].inlineOnThisPlot),
+    mathematicallyProven: isProvenB,
+  };
+
+  const naiveL0 = pairMatrix[0][0].distCurvePt <= pairMatrix[0][1].distCurvePt ? S0.stroke.index : S1.stroke.index;
+  const naiveL1 = pairMatrix[1][0].distCurvePt <= pairMatrix[1][1].distCurvePt ? S0.stroke.index : S1.stroke.index;
+  const naiveCollision = naiveL0 === naiveL1;
+
+  const bestAssign = assignA.effectiveCostSum <= assignB.effectiveCostSum ? assignA : assignB;
+  const altAssign = bestAssign === assignA ? assignB : assignA;
+
+  const rawDistMarginPt = r2(altAssign.rawDistSumPt - bestAssign.rawDistSumPt);
+  const effectiveCostMargin = r2(altAssign.effectiveCostSum - bestAssign.effectiveCostSum);
+
+  const contradictions = [];
+  if (rawDistMarginPt < 0 && !bestAssign.mathematicallyProven) {
+    contradictions.push(`전역 거리 합(${bestAssign.rawDistSumPt}pt)이 대안 배정(${altAssign.rawDistSumPt}pt)보다 큼`);
+  }
+  if (altAssign.hardSignalCount > 0 && !bestAssign.mathematicallyProven) {
+    contradictions.push(`차순위 배정에도 기하/정의역 신호(${altAssign.hardSignalCount}개)가 존재하여 유일성을 보장할 수 없음`);
+  }
+  if (!bestAssign.commentConsistent) {
+    contradictions.push("TikZ 주석의 함수명/차수 힌트와 기하학적 배정이 서로 모순됨");
+  }
+  for (const p of bestAssign.pairs) {
+    if (p.curveVerticalSeparationPtAtX0 !== null && p.curveVerticalSeparationPtAtX0 < minIntersectionSepPt) {
+      contradictions.push(
+        `라벨 ${p.label} 의 x좌표에서 두 곡선 간 수직 간격이 ${p.curveVerticalSeparationPtAtX0}pt (< ${minIntersectionSepPt}pt, 교점 근방)로 매우 좁아 오매칭 위험`
+      );
+    }
+  }
+
+  let tier = "Tier 3 (Low / Ambiguous - Hold)";
+  let tierCode = "tier3-hold";
+  let autoConfirmSafe = false;
+  let classificationType = "Type 3 (원본 유지 — 근거 부족·모호·충돌 차단)";
+  let classificationCode = "type3-hold-only";
+  let mathematicallyProven = false;
+  let proofMethod = null;
+  let requiresUserApproval = false;
+  let defaultUnapprovedAction = "hold";
+
+  if (contradictions.length === 0 && bestAssign.mathematicallyProven) {
+    mathematicallyProven = true;
+    proofMethod = bestAssign.inlineProof ? "inline-plot-node" : "derivative-pair-verified";
+    classificationType = "Type 1 (자동 확정 가능 — 명시적 구조 연결 증명)";
+    classificationCode = "type1-auto-confirmable";
+    requiresUserApproval = false;
+    defaultUnapprovedAction = "auto-confirm";
+    tier = "Tier 1 (High Confidence — 명시적 구조 증명 완료)";
+    tierCode = "tier1-high";
+    autoConfirmSafe = true;
+  } else if (
+    contradictions.length === 0 &&
+    bestAssign.hardSignalCount >= 2 &&
+    rawDistMarginPt >= minGlobalMarginPt &&
+    effectiveCostMargin >= 30.0
+  ) {
+    classificationType = "Type 2 (사용자 확인 필요 — 기하·정의역 1:1 강추천 제공, 미승인 시 기본값 Hold)";
+    classificationCode = "type2-user-confirm-required";
+    mathematicallyProven = false;
+    requiresUserApproval = true;
+    defaultUnapprovedAction = "hold";
+    tier = "Tier 1 (High Confidence — 다중 기하·정의역·전역 1:1 신호 일치, 사용자 승인 대상)";
+    tierCode = "tier1-high";
+    autoConfirmSafe = false; // 자동 확정 금지 원칙: 사용자 명시적 승인 전에는 자동 확정하지 않음!
+  } else if (
+    contradictions.length === 0 &&
+    rawDistMarginPt >= minGlobalMarginPt &&
+    bestAssign.hardSignalCount >= 1
+  ) {
+    classificationType = "Type 2 (사용자 확인 필요 — 전역 1:1 우세하나 일부 결정적 신호 부족, 기본값 Hold)";
+    classificationCode = "type2-user-confirm-required";
+    mathematicallyProven = false;
+    requiresUserApproval = true;
+    defaultUnapprovedAction = "hold";
+    tier = "Tier 2 (Medium Confidence — 전역 1:1 우세하나 일부 결정적 신호 부족, 사용자 승인 대상)";
+    tierCode = "tier2-medium-approval";
+    autoConfirmSafe = false;
+  }
+
+  const moderateMarginCaution =
+    classificationCode === "type2-user-confirm-required" &&
+    rawDistMarginPt < scaleNormalizedThresholds.moderateMarginCautionPt;
+
+  const uncertaintyFactors = [];
+  if (!mathematicallyProven) {
+    uncertaintyFactors.push(
+      `추상 함수 기호(${labels.map((l) => l.trimmed || l.label).join(", ")})는 라벨 수식 내부에 구체 다항식/초월식 계수가 없어 기호 이름만으로는 대수적 항등 증명이 불가능함 (기하·정의역 추정 근거)`
+    );
+  }
+  if (bestAssign.derivativeProof?.verified && !F.allowFiniteSampleDerivativeType1) {
+    uncertaintyFactors.push(
+      `유한 샘플 수치 미분 일치(${bestAssign.derivativeProof.detail})가 감지되었으나, 유한 좌표 샘플만으로 수학적 항등 증명으로 간주하지 않고 사용자 확인(유형 2, 기본값 Hold)으로 안전 처리함`
+    );
+  }
+  if (naiveCollision) {
+    uncertaintyFactors.push(
+      `단순 최근접 매칭 적용 시 두 라벨 모두 곡선 #${naiveL0}에 중복 배정되는 기하학적 근접 함정이 존재함 (전역 1:1 이분 매칭으로 중복 배정 방지)`
+    );
+  }
+  if (moderateMarginCaution) {
+    uncertaintyFactors.push(
+      `전역 1:1 후보 간 점수(거리 합) 차이(+${rawDistMarginPt}pt)가 상대적으로 크지 않으므로(< ${scaleNormalizedThresholds.moderateMarginCautionPt}pt), 반드시 미리보기에서 곡선 개형과 대응 관계를 확인한 뒤 선택해야 함`
+    );
+  }
+  if (rawDistMarginPt < minGlobalMarginPt) {
+    uncertaintyFactors.push(
+      `전역 1:1 거리 합 마진(${rawDistMarginPt}pt)이 스케일 보정 안전 임계값(${minGlobalMarginPt}pt) 미만으로 두 대안 배정 간 거리 차이가 작아 추천을 차단하고 Hold를 강제함`
+    );
+  }
+  if (bestAssign.hardSignalCount < 2 && !mathematicallyProven) {
+    uncertaintyFactors.push(
+      `결정적 기하·정의역 신호(곡선 위 점 일치 또는 고유 끝점 일치)가 ${bestAssign.hardSignalCount}/2개임`
+    );
+  }
+  for (const c of contradictions) {
+    uncertaintyFactors.push(`모순/위험 감지: ${c}`);
+  }
+
+  const reasonSummary =
+    classificationCode === "type3-hold-only"
+      ? contradictions.length > 0
+        ? `신호 모순 또는 교점 근접 감지(${contradictions.join("; ")})로 인해 추천/Swap을 제한하고 원본 유지(Hold)를 강제함`
+        : `기하·정의역 결정적 근거 부족(신호 ${bestAssign.hardSignalCount}개, 마진 +${rawDistMarginPt}pt < ${minGlobalMarginPt}pt)으로 인해 원본 유지(Hold)를 강제함`
+      : `전역 1:1 매칭 후보(${bestAssign.pairs.map((p) => `${p.label}→#${p.strokeIndex}`).join(", ")}, 마진 +${rawDistMarginPt}pt)가 산출되었으나 수학적 항등 증명이 아니므로 사용자 승인 전까지 기본값 Hold를 유지함`;
+
+  const topSignalTags = [];
+  if (bestAssign.pairs.some((p) => p.signal1OnCurveExact)) topSignalTags.push("on-curve-exact");
+  if (bestAssign.pairs.some((p) => p.signal2DomainEndpointMatch)) topSignalTags.push("domain-endpoint-match");
+  if (bestAssign.pairs.some((p) => p.signal3OrderMatch)) topSignalTags.push("order-match");
+  if (bestAssign.pairs.some((p) => p.signal4CommentMatch)) topSignalTags.push("comment-match");
+  if (bestAssign.derivativeProof?.verified) topSignalTags.push("derivative-relation-finite-sample-agreement");
+
+  return {
+    supportedPair: true,
+    classificationType,
+    classificationCode,
+    mathematicallyProven,
+    proofMethod,
+    requiresUserApproval,
+    defaultUnapprovedAction,
+    moderateMarginCaution,
+    scaleNormalizedThresholds,
+    tier,
+    tierCode,
+    autoConfirmSafe,
+    signals: topSignalTags,
+    holdReason: classificationCode === "type3-hold-only" ? reasonSummary : null,
+    summaryReason: reasonSummary,
+    naiveNearestResult: {
+      L0Stroke: naiveL0,
+      L1Stroke: naiveL1,
+      naiveDuplicateError: naiveCollision,
+    },
+    rawDistMarginPt,
+    effectiveCostMargin,
+    contradictions,
+    uncertaintyFactors,
+    recommendedAssignment: bestAssign,
+    swappedAssignment: altAssign,
+    pairMatrix,
+    reason: reasonSummary,
+  };
 }
 
 /**
@@ -3055,6 +3899,7 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
     addC(best.bb);
   }
 
+  plan.multiAbstractAnalysis = scene.multiAbstractAnalysis || null;
   plan.assignments = Object.fromEntries(
     [...assigned.entries()].map(([k, v]) => [
       k,
@@ -3064,6 +3909,19 @@ export function planLabelsUnit2(scene, P = PARAMS, axisPt = null, flags = DEFAUL
         strokeKind: v.strokeKind || "unknown",
         confirmed: !!v.confirmed,
         uncertain: !!v.uncertain,
+        isMultiAbstractPair: !!v.isMultiAbstractPair,
+        multiAbstractAction: v.multiAbstractAction || null,
+        step2ClassificationType: v.step2ClassificationType || null,
+        step2ClassificationCode: v.step2ClassificationCode || null,
+        step2MathematicallyProven: !!v.step2MathematicallyProven,
+        step2RequiresUserApproval: !!v.step2RequiresUserApproval,
+        step2Tier: v.step2Tier || null,
+        step2TierCode: v.step2TierCode || null,
+        step2Signals: v.step2Signals || [],
+        step2RawDistMarginPt: v.step2RawDistMarginPt ?? null,
+        step2RecommendedStroke: v.step2RecommendedStroke ?? null,
+        step2SwappedStroke: v.step2SwappedStroke ?? null,
+        curveShape: v.curveShape || null,
         normalizedExpr: v.normalizedExpr || null,
         plotExpr: v.plotExpr || null,
         parseError: v.parseError || null,
