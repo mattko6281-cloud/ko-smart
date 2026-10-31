@@ -602,6 +602,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
   const enablePointLabelOverlapFixRequested =
     isV022 && Boolean(opts.enablePointLabelOverlapFix === true || opts.enableUnit3E === true);
   const enableUnit3E = enablePointLabelOverlapFixRequested;
+  const applySafeShrinkRequested = isV022 && Boolean(opts.applySafeShrink === true);
 
   const baseResponse = {
     engineVersion,
@@ -616,6 +617,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     unit3DDisabledReason: unit3DServerStatus.enabled ? null : unit3DServerStatus.reason,
     enablePointLabelOverlapFixRequested,
     unit3EEnabled: enableUnit3E,
+    applySafeShrinkRequested,
     ok: false,
     status: "failed",
     reasonCode: null,
@@ -634,6 +636,21 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       message: applyAxisRequested
         ? "축 길이 조정 대기 중"
         : "축 길이 자동 조정 옵션 OFF (함수식 라벨만 정렬)",
+    },
+    safeShrinkOption: {
+      requested: applySafeShrinkRequested,
+      applied: false,
+      status: applySafeShrinkRequested ? "not-needed" : "disabled",
+      modeNote: "8단계 안전 게이트 + 양의 줄기 비례 하한(45%, 46pt) 4방향 독립 축소",
+      shrunkPt: 0,
+      extendedPt: 0,
+      x: null,
+      y: null,
+      directions: {},
+      editsCount: 0,
+      message: applySafeShrinkRequested
+        ? "축 길이 안전 축소 대기 중"
+        : "축 길이 안전하게 줄이기 옵션 OFF (원본 축 범위 유지)",
     },
     applyDomainExtensionRequested,
     domainExtensionOption: {
@@ -856,7 +873,11 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
 
     // 6~9) 주어진 multiAbstractAction ("hold" | "recommend" | "swap")에 대해
     //      플래닝 → 1차 보존 검사 → 2차 Kroki 렌더링 및 충돌 검증 → 결과 객체 생성을 수행하는 내부 헬퍼
-    const evaluateActionVariant = async (actionMode = "hold") => {
+    const evaluateActionVariant = async (
+      actionMode = "hold",
+      useSafeShrink = applySafeShrinkRequested,
+      safeShrinkFallbackReason = null
+    ) => {
       const unit2FlagsForAction = {
         enableOriginPlacement: enableUnit3D,
         multiAbstractAction: actionMode,
@@ -865,6 +886,19 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       let activePlan;
       let axisPlan;
       let axisEditsToApply = [];
+      let safeShrinkPlan = {
+        requested: Boolean(applySafeShrinkRequested),
+        ok: true,
+        gate1Passed: true,
+        anyShrunk: false,
+        anyExtended: false,
+        totalShrunkPt: 0,
+        totalExtendedPt: 0,
+        x: null,
+        y: null,
+        directions: {},
+        edits: [],
+      };
       let domainPlan = { requested: false, applied: false, edits: [], decisions: [] };
       let domainEditsToApply = [];
       let activeShift;
@@ -892,11 +926,13 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           enableUnit3B,
           enableUnit3D,
           applyDomainExtensionRequested,
-          enableUnit3E
+          enableUnit3E,
+          useSafeShrink
         );
         activePlan = v022Plan.activePlan;
         axisPlan = v022Plan.axisPlan;
         axisEditsToApply = v022Plan.axisEditsToApply;
+        safeShrinkPlan = v022Plan.safeShrinkPlan || safeShrinkPlan;
         domainPlan = v022Plan.domainPlan || domainPlan;
         domainEditsToApply = v022Plan.domainEditsToApply || [];
         activeShift = v022Plan.activeShift;
@@ -958,6 +994,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const xAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-x");
       const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
       const anyAxisChanged = axisEditsToApply.length > 0;
+      const anySafeShrinkChanged = Boolean(useSafeShrink && safeShrinkPlan?.anyShrunk);
       const anyDomainChanged = domainEditsToApply.length > 0;
       const anyPointLabelChanged = pointLabelEditsOnEffective.length > 0;
       const hasAxisRequiredHold = (domainPlan.decisions || []).some(
@@ -1000,32 +1037,74 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           : anyAxisChanged
           ? "pending-verification"
           : "not-needed",
-        modeNote: "길이 연장 전용 (축 축소 없음)",
+        modeNote: useSafeShrink
+          ? "4방향 축 연장 + 안전 축소 공동 최적화"
+          : "길이 연장 전용 (축 축소 없음)",
         x: axisPlan.x
           ? {
               old: axisPlan.x.old,
-              new: applyAxisRequested ? axisPlan.x.new : axisPlan.x.old,
-              changed: applyAxisRequested && xAxisChanged,
+              new: applyAxisRequested || useSafeShrink ? axisPlan.x.new : axisPlan.x.old,
+              changed: (applyAxisRequested || useSafeShrink) && xAxisChanged,
             }
           : null,
         y: axisPlan.y
           ? {
               old: axisPlan.y.old,
-              new: applyAxisRequested ? axisPlan.y.new : axisPlan.y.old,
-              changed: applyAxisRequested && yAxisChanged,
+              new: applyAxisRequested || useSafeShrink ? axisPlan.y.new : axisPlan.y.old,
+              changed: (applyAxisRequested || useSafeShrink) && yAxisChanged,
             }
           : null,
         editsCount: axisEditsToApply.length,
         message: !applyAxisRequested
           ? "축 길이 자동 조정 옵션 OFF (함수식 라벨만 정렬)"
           : anyAxisChanged
-          ? `축 길이 연장 후보 산출됨 (${[
+          ? `축 길이 조정 후보 산출됨 (${[
               xAxisChanged ? `x축 [${axisPlan.x.old.join(", ")}] → [${axisPlan.x.new.join(", ")}]` : null,
               yAxisChanged ? `y축 [${axisPlan.y.old.join(", ")}] → [${axisPlan.y.new.join(", ")}]` : null,
             ]
               .filter(Boolean)
               .join(", ")})`
           : "현재 x축·y축 길이가 이미 충분하여 축 길이 조정이 불필요합니다 (길이 연장 전용, 축소 없음).",
+      };
+
+      const shrunkDirsSummary = Object.values(safeShrinkPlan?.directions || {})
+        .filter((d) => d && d.action === "shrink")
+        .map((d) => {
+          const dirKor =
+            d.direction === "left"
+              ? "-x(왼쪽)"
+              : d.direction === "right"
+              ? "+x(오른쪽)"
+              : d.direction === "bottom"
+              ? "-y(아래쪽)"
+              : "+y(위쪽)";
+          return `${dirKor}: ${d.origMath} → ${d.newMath} (-${d.shrunkPt}pt${d.propFloorApplied ? ", 비례하한 적용" : ""})`;
+        });
+
+      const safeShrinkOptionInfo = {
+        requested: applySafeShrinkRequested,
+        applied: false,
+        status: !applySafeShrinkRequested
+          ? "disabled"
+          : safeShrinkFallbackReason
+          ? "held-safety-fallback"
+          : anySafeShrinkChanged
+          ? "pending-verification"
+          : "not-needed",
+        modeNote: "8단계 안전 게이트 + 양의 줄기 비례 하한(45%, 46pt) 4방향 독립 축소",
+        shrunkPt: safeShrinkPlan?.totalShrunkPt || 0,
+        extendedPt: safeShrinkPlan?.totalExtendedPt || 0,
+        x: safeShrinkPlan?.x || axisOptionInfo.x,
+        y: safeShrinkPlan?.y || axisOptionInfo.y,
+        directions: safeShrinkPlan?.directions || {},
+        editsCount: anySafeShrinkChanged ? axisEditsToApply.length : 0,
+        message: !applySafeShrinkRequested
+          ? "축 길이 안전하게 줄이기 옵션 OFF (원본 축 범위 유지)"
+          : safeShrinkFallbackReason
+          ? `2차 렌더링 충돌 방지를 위해 축 축소만 자동 취소하고 기존 안전 결과를 유지했습니다 (${safeShrinkFallbackReason})`
+          : anySafeShrinkChanged
+          ? `불필요하게 긴 축 여백 안전 축소 후보 산출됨 (총 -${safeShrinkPlan.totalShrunkPt}pt: ${shrunkDirsSummary.join(" · ")})`
+          : "4방향 축 여백이 이미 적절하거나 8단계 안전/비례 가드에 의해 모든 방향의 축소를 보류(Hold)합니다.",
       };
 
       const pointLabelOptionInfo = {
@@ -1059,6 +1138,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const variantBase = {
         ...baseResponse,
         axisOption: axisOptionInfo,
+        safeShrinkOption: safeShrinkOptionInfo,
         domainExtensionOption: domainOptionInfo,
         pointLabelOption: pointLabelOptionInfo,
         collisionDiagnostics: variantOrigDiag,
@@ -1213,6 +1293,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         ? checkPreservationV022(effectiveBody, candEffectiveBody, editsToApply)
         : checkPreservation(effectiveBody, candEffectiveBody, editsToApply);
       if (!prePreservation.ok) {
+        if (anySafeShrinkChanged) {
+          return evaluateActionVariant(actionMode, false, prePreservation.issues.join("; "));
+        }
         if (anyAxisChanged) {
           axisOptionInfo.status = "blocked-unsafe";
           axisOptionInfo.applied = false;
@@ -1348,6 +1431,11 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         !vVariant.collisionCheck?.ok ||
         !finalDiag.safetyPassed
       ) {
+        // Safe Shrink가 적용된 상태에서 2차 렌더링 충돌이 감지된 경우:
+        // Safe Shrink 변경분만 자동 취소하고 기존 유효 결과(함수식/점 이름/눈금/원점/축 연장)는 보존한다.
+        if (anySafeShrinkChanged) {
+          return evaluateActionVariant(actionMode, false, allSafetyIssues.join("; ") || "2차 렌더링 안전성 검증 미통과");
+        }
         if (anyAxisChanged) {
           axisOptionInfo.status = "blocked-unsafe";
           axisOptionInfo.applied = false;
@@ -1409,6 +1497,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           ? checkPreservationV022(rawBody, finalBody, rawEdits)
           : checkPreservation(rawBody, finalBody, rawEdits);
         if (!rawPreservation.ok) {
+          if (anySafeShrinkChanged) {
+            return evaluateActionVariant(actionMode, false, rawPreservation.issues.join("; "));
+          }
           return {
             actionMode,
             multiAbstractAnalysis,
@@ -1426,15 +1517,20 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         }
       }
 
-      if (anyAxisChanged) {
+      if (anyAxisChanged && applyAxisRequested) {
         axisOptionInfo.applied = true;
         axisOptionInfo.status = "applied";
-        axisOptionInfo.message = `x축·y축 길이 자동 연장 및 2차 충돌 검증 통과 (${[
+        axisOptionInfo.message = `x축·y축 길이 자동 조정 및 2차 충돌 검증 통과 (${[
           xAxisChanged ? `x축 [${axisPlan.x.old.join(", ")}] → [${axisPlan.x.new.join(", ")}]` : null,
           yAxisChanged ? `y축 [${axisPlan.y.old.join(", ")}] → [${axisPlan.y.new.join(", ")}]` : null,
         ]
           .filter(Boolean)
           .join(", ")})`;
+      }
+      if (anySafeShrinkChanged) {
+        safeShrinkOptionInfo.applied = true;
+        safeShrinkOptionInfo.status = "applied";
+        safeShrinkOptionInfo.message = `4방향 불필요 축 여백 안전 축소 및 2차 충돌 검증 통과 (총 -${safeShrinkPlan.totalShrunkPt}pt: ${shrunkDirsSummary.join(" · ")})`;
       }
       if (anyDomainChanged) {
         domainOptionInfo.applied = true;
@@ -1499,7 +1595,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       if (tickMovedCount > 0) actionParts.push(`축 눈금 숫자 ${tickMovedCount}개 겹침 자동 조정(Unit 3-B)`);
       if (originMovedCount > 0) actionParts.push(`원점 O ${originMovedCount}개 4방향 자동 배치(Unit 3-D)`);
       if (pointLabelMovedCount > 0) actionParts.push(`점 이름(유형 A) ${pointLabelMovedCount}개 겹침 자동 정렬(Unit 3-E)`);
-      if (anyAxisChanged) actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
+      if (anyAxisChanged) {
+        if (anySafeShrinkChanged && safeShrinkPlan?.anyExtended) {
+          actionParts.push(`축 길이 연장·안전 축소(${axisEditsToApply.length}개 축, 축소 -${safeShrinkPlan.totalShrunkPt}pt)`);
+        } else if (anySafeShrinkChanged) {
+          actionParts.push(`축 길이 안전 축소(${axisEditsToApply.length}개 축, -${safeShrinkPlan.totalShrunkPt}pt)`);
+        } else {
+          actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
+        }
+      }
       let successMsg = `${actionParts.join(" 및 ")}이(가) 2차 렌더링 및 안전성 검증을 통과했습니다.`;
 
       if (finalDiag.hasUnresolvedCollisions) {
@@ -1605,6 +1709,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       placements: resp.placements,
       shiftReport: resp.shiftReport,
       axisOption: resp.axisOption,
+      safeShrinkOption: resp.safeShrinkOption,
       domainExtensionOption: resp.domainExtensionOption,
       pointLabelOption: resp.pointLabelOption,
       collisionDiagnostics: resp.collisionDiagnostics,
@@ -1811,6 +1916,7 @@ export async function handleSmartLabelGet(deps) {
       availableEngines: isDeveloper ? SUPPORTED_ENGINE_VERSIONS : ["v0.2.2-beta"],
       defaultEnableUnit3B: unit3BFlag.enabled ? authCheck.defaultEnableUnit3B : false,
       defaultApplyAxis: false,
+      defaultApplySafeShrink: false,
       defaultApplyDomainExtension: false,
       defaultEnablePointLabelOverlapFix: false,
       unit3BServerEnabled: unit3BFlag.enabled,
@@ -1878,6 +1984,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
   const rawTikz = typeof requestBody.tikz === "string" ? requestBody.tikz : "";
   const clientInputHash = typeof requestBody.inputHash === "string" ? requestBody.inputHash : null;
   const applyAxis = Boolean(requestBody.applyAxis === true);
+  const applySafeShrink = Boolean(requestBody.applySafeShrink === true);
   const applyDomainExtension = Boolean(requestBody.applyDomainExtension === true);
   const multiAbstractAction = normalizeMultiAbstractAction(requestBody.multiAbstractAction);
   // 파일럿 팀원(role === "pilot")은 요청 본문에 어떤 engineVersion 을 보내더라도 서버에서 v0.2.2-beta 로 강제 고정
@@ -1925,6 +2032,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
       env: deps.env,
       verify: true,
       applyAxis,
+      applySafeShrink,
       applyDomainExtension,
       multiAbstractAction,
       engineVersion,

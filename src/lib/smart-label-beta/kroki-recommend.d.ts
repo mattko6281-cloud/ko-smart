@@ -93,6 +93,39 @@ export interface AxisOptionInfo {
   message: string;
 }
 
+export interface SafeShrinkDirectionSummary {
+  direction: "left" | "right" | "bottom" | "top";
+  action: "shrink" | "extend" | "hold";
+  origMath: number;
+  newMath: number;
+  origPt: number;
+  newPt: number;
+  contentBoundMath: number;
+  contentBoundPt: number;
+  origMarginPt: number;
+  newMarginPt: number;
+  shrunkPt: number;
+  extendedPt: number;
+  holdCode: string | null;
+  propFloorApplied?: boolean;
+  propFloorPt?: number | null;
+  reason: string;
+}
+
+export interface SafeShrinkOptionInfo {
+  requested: boolean;
+  applied: boolean;
+  status: "disabled" | "not-needed" | "pending-verification" | "applied" | "held-safety-fallback";
+  modeNote: string;
+  shrunkPt: number;
+  extendedPt: number;
+  x: { old: [number, number]; new: [number, number]; changed: boolean } | null;
+  y: { old: [number, number]; new: [number, number]; changed: boolean } | null;
+  directions: Record<string, SafeShrinkDirectionSummary>;
+  editsCount: number;
+  message: string;
+}
+
 export interface DomainExtensionDecisionItem {
   nodeId: string;
   label: string;
@@ -353,6 +386,7 @@ export interface MultiAbstractVariantSummary {
   placements: any[];
   shiftReport: any[];
   axisOption: AxisOptionInfo;
+  safeShrinkOption?: SafeShrinkOptionInfo;
   domainExtensionOption?: DomainExtensionOptionInfo;
   pointLabelOption?: PointLabelOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
@@ -417,6 +451,7 @@ export interface SmartLabelBetaProposal {
   unit3DDisabledReason?: string | null;
   enablePointLabelOverlapFixRequested?: boolean;
   unit3EEnabled?: boolean;
+  applySafeShrinkRequested?: boolean;
   ok: boolean;
   status: "recommended" | "unchanged" | "unsupported" | "reverted" | "failed";
   reasonCode: string | null;
@@ -425,6 +460,7 @@ export interface SmartLabelBetaProposal {
   verified: boolean;
   applyAxisRequested: boolean;
   axisOption: AxisOptionInfo;
+  safeShrinkOption?: SafeShrinkOptionInfo;
   applyDomainExtensionRequested?: boolean;
   domainExtensionOption?: DomainExtensionOptionInfo;
   pointLabelOption?: PointLabelOptionInfo;
@@ -478,6 +514,7 @@ export function recommendSmartLabelBeta(
     params?: any;
     verify?: boolean;
     applyAxis?: boolean;
+    applySafeShrink?: boolean;
     applyDomainExtension?: boolean;
     multiAbstractAction?: MultiAbstractActionMode;
     engineVersion?: SmartLabelEngineVersion;

@@ -50,7 +50,7 @@ import {
 import {
   planTypeAPointLabelsUnit3E,
 } from "./unit3e-point-labels.mjs";
-import { maskComments } from "../../../../experiments/smart-label-engine/src/tikz-nodes.mjs";
+import { maskComments, extractTikzNodes } from "../../../../experiments/smart-label-engine/src/tikz-nodes.mjs";
 import { compileExpr } from "../../../../experiments/smart-label-prototype/src/expr.mjs";
 
 export const AXIS_4DIR_PARAMS_V022 = {
@@ -338,7 +338,837 @@ const bboxGapRect = (a, b) =>
   );
 const r2 = (n) =>
   typeof n === "number" && Number.isFinite(n) ? Math.round(n * 100) / 100 : n;
+const r1 = (n) =>
+  typeof n === "number" && Number.isFinite(n) ? Math.round(n * 10) / 10 : n;
 const normShift = (sh) => [r2(sh?.[0] || 0), r2(sh?.[1] || 0)];
+
+export const DEFAULT_SAFE_SHRINK_CONFIG_V022 = {
+  // 평가원 스타일 4방향 목표 안전 여백 (pt)
+  targetRightMarginPt: 18.0,     // +x 화살표 끝까지 필요한 여유 (화살표 15pt + 축라벨 $x$ 여유)
+  targetTopMarginPt: 19.5,       // +y 화살표 끝까지 필요한 여유 (화살표 15pt + 축라벨 $y$ 여유)
+  targetLeftMarginPt: 14.0,      // -x 음의 꼬리 끝까지 필요한 여유
+  targetBottomMarginPt: 14.0,    // -y 음의 꼬리 끝까지 필요한 여유
+
+  // 원점 O(0,0)로부터 최소 유지해야 하는 축 줄기 길이 (pt) 및 양/음 반축 비례 하한 (Proportional Stem Floor)
+  minPosAxisStemFromOriginPt: 46.0, // +x, +y 화살표 방향 최소 물리 줄기 길이 (pt)
+  minPosToNegStemRatio: 0.45,       // +x/+y 양의 반축이 반대편 음의 반축(|-x|/|-y|) 대비 최소 유지해야 할 비율 (45%)
+  minNegAxisTailFromOriginPt: 18.0, // -x, -y 음의 방향 최소 꼬리 길이 (pt)
+
+  // 잉여 축 길이(excessPt)가 이 임계값 이상일 때만 축소 후보로 채택 (미세 떨림 방지)
+  minShrinkTriggerDeltaPt: 16.0,    // 최소 16pt 이상 줄일 수 있을 때만 축소 실행
+  minShrinkTriggerMathUnit: 0.3,    // 또한 수학 좌표 단위로 최소 0.3 이상 차이가 날 때만 축소
+
+  // 끝점 의도성 잠금 및 마커/점선 보호 반경 (pt)
+  intentionalEndLockTolPt: 2.5,     // 곡선/점선/음영 끝점이 원본 축 끝과 2.5pt 이내로 맞닿아 있으면 의도적 정렬로 잠금
+  clipAlignedLockTolPt: 2.5,        // \clip 경계가 원본 축 끝과 2.5pt 이내로 맞닿아 있으면 잠금
+  markerSafetyRadiusPt: 5.5,        // 점 마커(닫힌 점/빈 점) 반경 + 안전 여유 (pt)
+
+  // 이동 후 축라벨($x$, $y$) 및 화살표 헤드 충돌 검사 임계값 (pt)
+  movedAxisLabelMinStrokeClearPt: 3.5, // 이동된 축라벨($x$, $y$)과 비-축 곡선/점선 사이의 최소 안전 간격 (pt)
+  movedAxisLabelMinNodeGapPt: 8.0,     // 이동된 축라벨($x$, $y$)과 다른 모든 라벨/눈금/원점 O/점 이름 사이의 최소 간격 (pt)
+  arrowTipMinStrokeClearPt: 3.0,       // 새 화살표 헤드 영역(끝점 안쪽 15pt)과 타 곡선/보조선 충돌 여유 (pt)
+};
+
+/**
+ * TikZ 본문에서 \coordinate (NAME) at (x, y); 정의를 파싱하고,
+ * 모든 기하 요소(곡선, 보조선, 음영, 점 마커, 함수식 라벨, Unit 3-B 이동 눈금, Unit 3-D 원점, Unit 3-E 점 이름)의
+ * 물리 경계(pt) 목록을 추출한다.
+ */
+export function extractAllGeometricProtectedBoundsPtV022(
+  scene,
+  body,
+  plan = null,
+  tickMoves = [],
+  originMoves = [],
+  pointLabelMoves = []
+) {
+  const units = scene?.units || { xU: 28.45274, yU: 28.45274 };
+  const { xU, yU } = units;
+  const masked = maskComments(String(body || scene?.body || ""));
+
+  // 1) \coordinate (Name) at (x, y) 맵 구축
+  const coordMap = new Map();
+  const coordRe = /\\coordinate\s*\(\s*([^)]+?)\s*\)\s*at\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)\s*;/g;
+  const evalNum = (raw) => {
+    const s = String(raw || "").trim().replace(/^\{+|\}+$/g, "").trim();
+    if (!s) return null;
+    const n = Number(s);
+    if (Number.isFinite(n)) return n;
+    if (typeof scene?.compileExpr === "function") {
+      const fn = scene.compileExpr(s);
+      if (fn) {
+        try {
+          const v = fn(0);
+          if (Number.isFinite(v)) return v;
+        } catch {
+          // ignore
+        }
+      }
+    }
+    return null;
+  };
+
+  for (const m of masked.matchAll(coordRe)) {
+    const name = m[1].trim();
+    const cx = evalNum(m[2]);
+    const cy = evalNum(m[3]);
+    if (cx !== null && cy !== null) {
+      coordMap.set(name, [cx * xU, cy * yU]);
+    }
+  }
+
+  const items = [];
+  const addItem = (kind, label, x0, y0, x1, y1, extra = {}) => {
+    if (![x0, y0, x1, y1].every(Number.isFinite)) return;
+    items.push({
+      kind,
+      label,
+      x0: Math.min(x0, x1),
+      y0: Math.min(y0, y1),
+      x1: Math.max(x0, x1),
+      y1: Math.max(y0, y1),
+      ...extra,
+    });
+  };
+
+  // 2) 비-축 strokes (곡선 plot, 직선, 점선 보조선 등)
+  for (const s of scene?.strokes || []) {
+    if (!s || s.kind === "axis" || !Array.isArray(s.pts) || s.pts.length === 0) continue;
+    let sx0 = Infinity,
+      sy0 = Infinity,
+      sx1 = -Infinity,
+      sy1 = -Infinity;
+    for (const p of s.pts) {
+      if (p[0] < sx0) sx0 = p[0];
+      if (p[0] > sx1) sx1 = p[0];
+      if (p[1] < sy0) sy0 = p[1];
+      if (p[1] > sy1) sy1 = p[1];
+    }
+    const p0 = s.pts[0];
+    const p1 = s.pts[s.pts.length - 1];
+    const hw = s.halfWidth || 0.75;
+    addItem(
+      s.stmt?.type === "plot" ? "plot-stroke" : "aux-stroke",
+      `stroke#${s.index}`,
+      sx0 - hw,
+      sy0 - hw,
+      sx1 + hw,
+      sy1 + hw,
+      {
+        strokeIndex: s.index,
+        endPts: [p0, p1],
+        isDashed: Boolean(s.stmt?.optsRaw && /dashed|dotted/.test(s.stmt.optsRaw)),
+      }
+    );
+  }
+
+  // 3) SVG filled paths (\fill, \filldraw 음영 영역 및 마커 path)
+  for (const p of scene?.geom?.paths || []) {
+    if (!p || !p.bbox) continue;
+    if (p.kind === "filled" || p.kind === "marker") {
+      const ax = scene?.axes?.x;
+      const ay = scene?.axes?.y;
+      const xr = ax ? Math.max(ax.from, ax.to) * xU : Infinity;
+      const yt = ay ? Math.max(ay.from, ay.to) * yU : Infinity;
+      const cx = (p.bbox.x0 + p.bbox.x1) / 2;
+      const cy = (p.bbox.y0 + p.bbox.y1) / 2;
+      const w = p.bbox.x1 - p.bbox.x0;
+      const h = p.bbox.y1 - p.bbox.y0;
+      const isXArrowHead = w <= 18 && h <= 14 && Math.abs(cy) <= 8 && Math.abs(cx - xr) <= 18;
+      const isYArrowHead = w <= 14 && h <= 18 && Math.abs(cx) <= 8 && Math.abs(cy - yt) <= 18;
+      if (isXArrowHead || isYArrowHead) continue;
+
+      addItem(
+        p.kind === "filled" ? "shaded-region" : "svg-marker",
+        `path#${p.index}`,
+        p.bbox.x0,
+        p.bbox.y0,
+        p.bbox.x1,
+        p.bbox.y1,
+        {
+          endPts: [
+            [p.bbox.x0, p.bbox.y0],
+            [p.bbox.x1, p.bbox.y1],
+          ],
+        }
+      );
+    }
+  }
+
+  // 4) TikZ 소스 상의 마커 노드 (\node[circle, fill=black...] at (A) 또는 at (x, y))
+  const parsedNodes = extractTikzNodes(body).nodes || [];
+  for (const sn of parsedNodes) {
+    if (!sn.isEmptyMarker) continue;
+    let pt = null;
+    if (sn.at && Number.isFinite(sn.at.xPt) && Number.isFinite(sn.at.yPt)) {
+      pt = [sn.at.xPt, sn.at.yPt];
+    } else if (sn.atRaw) {
+      const refName = sn.atRaw.replace(/^\(\s*|\s*\)$/g, "").trim();
+      if (coordMap.has(refName)) {
+        pt = coordMap.get(refName);
+      } else {
+        const parts = refName.split(",");
+        if (parts.length === 2) {
+          const mx = evalNum(parts[0]);
+          const my = evalNum(parts[1]);
+          if (mx !== null && my !== null) pt = [mx * xU, my * yU];
+        }
+      }
+    }
+    if (pt) {
+      const r = 3.5;
+      addItem("point-marker", sn.atRaw || "marker", pt[0] - r, pt[1] - r, pt[0] + r, pt[1] + r, {
+        centerPt: pt,
+      });
+    }
+  }
+
+  // 5) TikZ 소스 상의 일반 \draw (A) -- (B) 또는 수식 좌표 선분 보강
+  for (const st of scene?.stmts || []) {
+    if (st.cmd !== "\\draw" && st.cmd !== "\\fill" && st.cmd !== "\\filldraw") continue;
+    if (st === scene?.axes?.x?.stmt || st === scene?.axes?.y?.stmt) continue;
+    const coordTokens = [...String(st.after || "").matchAll(/\(\s*([^)]+?)\s*\)/g)];
+    for (const tok of coordTokens) {
+      const inner = tok[1].trim();
+      if (inner.includes("\\x")) continue;
+      if (coordMap.has(inner)) {
+        const pt = coordMap.get(inner);
+        addItem("named-coord-ref", `(${inner})`, pt[0] - 1, pt[1] - 1, pt[0] + 1, pt[1] + 1);
+      } else {
+        const parts = inner.split(",");
+        if (parts.length === 2) {
+          const mx = evalNum(parts[0]);
+          const my = evalNum(parts[1]);
+          if (mx !== null && my !== null) {
+            addItem("expr-coord-ref", `(${inner})`, mx * xU - 1, my * yU - 1, mx * xU + 1, my * yU + 1);
+          }
+        }
+      }
+    }
+  }
+
+  // 6) 모든 텍스트/수식 노드 (함수식 라벨, 일반 노드 A/B/C/P/Q, 눈금 숫자/문자, 원점 O)
+  //    단, 축 끝에 인라인으로 붙어 축과 함께 이동하는 축라벨($x$, $y$, $\theta$)은 별도 이동 시뮬레이션으로 처리
+  const placedById = new Map((plan?.placements || []).map((p) => [p.id, p]));
+  const tickMoveById = new Map((tickMoves || []).map((t) => [t.id, t]));
+  const originMoveById = new Map((originMoves || []).map((o) => [o.id, o]));
+  const pointLabelMoveById = new Map((pointLabelMoves || []).map((p) => [p.id, p]));
+
+  for (const n of scene?.nodes || []) {
+    if (!n.bbox || n.role === "marker") continue;
+    if (n.role === "axisLabel") continue;
+    const pl = placedById.get(n.id);
+    const tk = tickMoveById.get(n.id);
+    const om = originMoveById.get(n.id);
+    const plm = pointLabelMoveById.get(n.id);
+
+    const b =
+      pl && pl.action === "move" && pl.bbox
+        ? pl.bbox
+        : tk && (tk.newBBox || tk.bbox)
+          ? tk.newBBox || tk.bbox
+          : om && (om.newBBox || om.bbox)
+            ? om.newBBox || om.bbox
+            : plm && (plm.newBBox || plm.bbox)
+              ? plm.newBBox || plm.bbox
+              : n.bbox;
+
+    addItem(`node-${n.role}`, n.label, b.x0, b.y0, b.x1, b.y1, {
+      nodeId: n.id,
+      role: n.role,
+    });
+
+    // Unit 3-E 점 이름 이동 시 원본 위치 범위도 함께 외곽 보호 경계에 포함시켜
+    // 점 이름 이동 때문에 기존에 보류되던 축이 깎이는 현상을 원천 방지하고, 이동 후 바깥쪽 위치도 함께 보호한다.
+    if (plm && n.bbox && b !== n.bbox) {
+      addItem("point-label-orig-bound", n.label, n.bbox.x0, n.bbox.y0, n.bbox.x1, n.bbox.y1, {
+        nodeId: n.id,
+        role: n.role,
+      });
+    }
+  }
+
+  return items;
+}
+
+/**
+ * 축 끝점이 이동할 때 인라인 축라벨($x$/$\theta$ 또는 $y$)의 이동 후 예상 bbox를 계산하고,
+ * 주변 곡선/선분/노드(이동된 점 이름 포함)와의 충돌 여부를 사전 검사한다 (Gate 2 & Gate 7).
+ */
+export function checkMovedAxisLabelAndArrowSafetyV022(
+  scene,
+  direction,
+  oldEndMath,
+  newEndMath,
+  protectedItems,
+  config = DEFAULT_SAFE_SHRINK_CONFIG_V022
+) {
+  const { xU, yU } = scene.units;
+  const isX = direction === "right" || direction === "left";
+  const deltaPt = isX ? (newEndMath - oldEndMath) * xU : (newEndMath - oldEndMath) * yU;
+
+  if (direction === "right" || direction === "top") {
+    const axisStmt = isX ? scene.axes.x?.stmt : scene.axes.y?.stmt;
+    const axisLabelNode = (scene.nodes || []).find(
+      (n) =>
+        n.role === "axisLabel" &&
+        n.bbox &&
+        ((axisStmt && n.stmt === axisStmt) ||
+          (isX && /^(x|\\theta|t)$/i.test(n.trimmed)) ||
+          (!isX && /^y$/i.test(n.trimmed)))
+    );
+
+    if (axisLabelNode && axisLabelNode.bbox) {
+      const movedBbox = isX
+        ? {
+            x0: axisLabelNode.bbox.x0 + deltaPt,
+            x1: axisLabelNode.bbox.x1 + deltaPt,
+            y0: axisLabelNode.bbox.y0,
+            y1: axisLabelNode.bbox.y1,
+          }
+        : {
+            x0: axisLabelNode.bbox.x0,
+            x1: axisLabelNode.bbox.x1,
+            y0: axisLabelNode.bbox.y0 + deltaPt,
+            y1: axisLabelNode.bbox.y1 + deltaPt,
+          };
+
+      const poly = [rectPoly(movedBbox)];
+      for (const s of scene.strokes || []) {
+        if (!s || s.kind === "axis" || !Array.isArray(s.pts) || s.pts.length < 2) continue;
+        const cl = minDistPolylines(poly, [{ pts: s.pts, closed: false }]) - (s.halfWidth || 0.5);
+        if (cl < config.movedAxisLabelMinStrokeClearPt) {
+          return {
+            ok: false,
+            code: "moved-axis-label-stroke-collision",
+            reason: `축소 후 이동된 축라벨(${axisLabelNode.label})이 곡선/보조선(#${s.index})과 가까워짐 (간격 ${r2(cl)}pt < ${config.movedAxisLabelMinStrokeClearPt}pt)`,
+          };
+        }
+      }
+
+      for (const item of protectedItems) {
+        if (!item.kind.startsWith("node-")) continue;
+        const gap = bboxGapRect(movedBbox, item);
+        if (gap < config.movedAxisLabelMinNodeGapPt) {
+          return {
+            ok: false,
+            code: "moved-axis-label-node-collision",
+            reason: `축소 후 이동된 축라벨(${axisLabelNode.label})이 노드(${item.label})와 가까워짐 (간격 ${r2(gap)}pt < ${config.movedAxisLabelMinNodeGapPt}pt)`,
+          };
+        }
+      }
+    }
+
+    const tipEndPt = isX ? newEndMath * xU : newEndMath * yU;
+    const arrowBox = isX
+      ? { x0: tipEndPt - 15.0, x1: tipEndPt + 1.0, y0: -4.8, y1: 4.8 }
+      : { x0: -4.8, x1: 4.8, y0: tipEndPt - 15.0, y1: tipEndPt + 1.0 };
+    const arrowPoly = [rectPoly(arrowBox)];
+
+    for (const s of scene.strokes || []) {
+      if (!s || s.kind === "axis" || !Array.isArray(s.pts) || s.pts.length < 2) continue;
+      const cl = minDistPolylines(arrowPoly, [{ pts: s.pts, closed: false }]) - (s.halfWidth || 0.5);
+      if (cl < config.arrowTipMinStrokeClearPt) {
+        return {
+          ok: false,
+          code: "arrow-tip-stroke-collision",
+          reason: `축소 후 새 화살표 헤드 위치가 곡선/보조선(#${s.index})과 겹치거나 근접함 (간격 ${r2(cl)}pt < ${config.arrowTipMinStrokeClearPt}pt)`,
+        };
+      }
+    }
+  }
+
+  return { ok: true, code: "ok", reason: "이동 후 축라벨 및 화살표 안전 여백 확보" };
+}
+
+/**
+ * 8단계 안전 게이트(Gate 1 ~ Gate 8) 및 비례 안전 가드(Proportional Stem Floor)에 기반하여
+ * 4방향(-x 왼쪽, +x 오른쪽, -y 아래쪽, +y 위쪽) 독립 축 축소/연장 계획을 산출한다.
+ */
+export function planSafeAxisShrinkV022(scene, activePlan, opts = {}) {
+  const config = { ...DEFAULT_SAFE_SHRINK_CONFIG_V022, ...(opts.config || {}) };
+  const mode = opts.mode || "joint";
+  const allowExtend = mode === "joint" && opts.applyAxisExtension !== false;
+  const tickMoves = opts.tickMoves || activePlan?.tickPlan?.movedTicks || [];
+  const originMoves = opts.originMoves || activePlan?.originPlan?.movedOrigins || [];
+  const pointLabelMoves =
+    opts.pointLabelMoves || activePlan?.pointLabelPlan?.movedPointLabels || [];
+
+  // Gate 1: 정확히 식별할 수 있는 표준 직교 x축/y축 및 신뢰 가능한 좌표 스케일인지 확인
+  if (!scene?.ok || !scene?.axes?.x || !scene?.axes?.y || !scene?.units?.coordsReliable) {
+    return {
+      ok: false,
+      gate1Passed: false,
+      status: "held-gate1-unidentifiable-axes",
+      reason: "표준 직교 x축/y축 또는 좌표 스케일을 확정할 수 없어 원본 축 길이를 유지합니다.",
+      anyShrunk: false,
+      anyExtended: false,
+      totalShrunkPt: 0,
+      totalExtendedPt: 0,
+      directions: {},
+      x: null,
+      y: null,
+      edits: [],
+    };
+  }
+
+  const { xU, yU } = scene.units;
+  const ax = scene.axes.x;
+  const ay = scene.axes.y;
+
+  // 화살표가 양의 방향(from < 0 < to)인 표준 4사분면 화살표 축 구조 확인 (Gate 1 & Gate 2)
+  if (!(ax.from < 0 && ax.to > 0 && ay.from < 0 && ay.to > 0)) {
+    return {
+      ok: false,
+      gate1Passed: false,
+      status: "held-gate2-nonstandard-axis-orientation",
+      reason: "원점(0,0)을 관통하는 표준 4사분면 화살표 축 구조가 아니므로 안전을 위해 보류합니다.",
+      anyShrunk: false,
+      anyExtended: false,
+      totalShrunkPt: 0,
+      totalExtendedPt: 0,
+      directions: {},
+      x: { old: [ax.from, ax.to], new: [ax.from, ax.to], changed: false },
+      y: { old: [ay.from, ay.to], new: [ay.from, ay.to], changed: false },
+      edits: [],
+    };
+  }
+
+  const xlOrigPt = ax.from * xU;
+  const xrOrigPt = ax.to * xU;
+  const ybOrigPt = ay.from * yU;
+  const ytOrigPt = ay.to * yU;
+
+  const effectivePlan = mode === "shrink-only" ? { placements: [] } : activePlan;
+  const effectiveTickMoves = mode === "shrink-only" ? [] : tickMoves;
+  const effectiveOriginMoves = mode === "shrink-only" ? [] : originMoves;
+  const effectivePointLabelMoves = mode === "shrink-only" ? [] : pointLabelMoves;
+
+  const protectedItems = extractAllGeometricProtectedBoundsPtV022(
+    scene,
+    scene.body,
+    effectivePlan,
+    effectiveTickMoves,
+    effectiveOriginMoves,
+    effectivePointLabelMoves
+  );
+
+  let minContentX0 = 0;
+  let maxContentX1 = 0;
+  let minContentY0 = 0;
+  let maxContentY1 = 0;
+
+  for (const item of protectedItems) {
+    if (item.x0 < minContentX0) minContentX0 = item.x0;
+    if (item.x1 > maxContentX1) maxContentX1 = item.x1;
+    if (item.y0 < minContentY0) minContentY0 = item.y0;
+    if (item.y1 > maxContentY1) maxContentY1 = item.y1;
+  }
+
+  // Gate 6: \clip 사각형과 원본 축 끝의 정렬 상태 확인
+  const clipRects = extractClipRectanglesPt(scene.body, scene.units);
+  const clipLocks = {
+    left: clipRects.some((c) => Math.abs(c.pt.x0 - xlOrigPt) <= config.clipAlignedLockTolPt),
+    right: clipRects.some((c) => Math.abs(c.pt.x1 - xrOrigPt) <= config.clipAlignedLockTolPt),
+    bottom: clipRects.some((c) => Math.abs(c.pt.y0 - ybOrigPt) <= config.clipAlignedLockTolPt),
+    top: clipRects.some((c) => Math.abs(c.pt.y1 - ytOrigPt) <= config.clipAlignedLockTolPt),
+  };
+
+  // Gate 3 & Gate 5: 곡선/선분/점선/음영 끝점이 원본 축 끝점과 의도적으로 맞닿아 있는지 확인
+  const endpointLocks = { left: false, right: false, bottom: false, top: false };
+  for (const item of protectedItems) {
+    if (!item.endPts) continue;
+    for (const ep of item.endPts) {
+      if (Math.abs(ep[0] - xlOrigPt) <= config.intentionalEndLockTolPt) endpointLocks.left = true;
+      if (Math.abs(ep[0] - xrOrigPt) <= config.intentionalEndLockTolPt) endpointLocks.right = true;
+      if (Math.abs(ep[1] - ybOrigPt) <= config.intentionalEndLockTolPt) endpointLocks.bottom = true;
+      if (Math.abs(ep[1] - ytOrigPt) <= config.intentionalEndLockTolPt) endpointLocks.top = true;
+    }
+  }
+
+  const reqRightPt = Math.max(maxContentX1 + config.targetRightMarginPt, config.minPosAxisStemFromOriginPt);
+  const reqTopPt = Math.max(maxContentY1 + config.targetTopMarginPt, config.minPosAxisStemFromOriginPt);
+  const reqLeftPt = Math.min(minContentX0 - config.targetLeftMarginPt, -config.minNegAxisTailFromOriginPt);
+  const reqBottomPt = Math.min(minContentY0 - config.targetBottomMarginPt, -config.minNegAxisTailFromOriginPt);
+
+  const ceil1 = (v) => Math.ceil((v - 1e-9) * 10) / 10;
+  const floor1 = (v) => Math.floor((v + 1e-9) * 10) / 10;
+
+  const evaluateDirection = ({
+    dir,
+    origMath,
+    origPt,
+    contentBoundPt,
+    reqPt,
+    unitPt,
+    isPositive,
+    endpointLocked,
+    clipLocked,
+    extNewMath,
+    oppAbsPt = 0,
+  }) => {
+    const needsExtension = isPositive
+      ? extNewMath > origMath + 1e-6
+      : extNewMath < origMath - 1e-6;
+
+    if (needsExtension && allowExtend) {
+      const extPt = extNewMath * unitPt;
+      return {
+        direction: dir,
+        action: "extend",
+        origMath,
+        newMath: extNewMath,
+        origPt: r2(origPt),
+        newPt: r2(extPt),
+        contentBoundMath: r2(contentBoundPt / unitPt),
+        contentBoundPt: r2(contentBoundPt),
+        origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        newMarginPt: r2(isPositive ? extPt - contentBoundPt : contentBoundPt - extPt),
+        shrunkPt: 0,
+        extendedPt: r2(Math.abs(extPt - origPt)),
+        holdCode: null,
+        reason: "도형/라벨 여백 확보를 위해 기존 4방향 축 연장 규칙 적용",
+      };
+    }
+
+    if (endpointLocked) {
+      return {
+        direction: dir,
+        action: "hold",
+        origMath,
+        newMath: origMath,
+        origPt: r2(origPt),
+        newPt: r2(origPt),
+        contentBoundMath: r2(contentBoundPt / unitPt),
+        contentBoundPt: r2(contentBoundPt),
+        origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        newMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        shrunkPt: 0,
+        extendedPt: 0,
+        holdCode: "gate3-endpoint-aligned-lock",
+        reason: "그래프 곡선 또는 보조선 끝점이 원본 축 끝과 맞닿아 있어 의도된 범위 보존을 위해 축소 보류",
+      };
+    }
+
+    if (clipLocked) {
+      return {
+        direction: dir,
+        action: "hold",
+        origMath,
+        newMath: origMath,
+        origPt: r2(origPt),
+        newPt: r2(origPt),
+        contentBoundMath: r2(contentBoundPt / unitPt),
+        contentBoundPt: r2(contentBoundPt),
+        origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        newMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        shrunkPt: 0,
+        extendedPt: 0,
+        holdCode: "gate6-clip-boundary-aligned-lock",
+        reason: "\\clip 가시 영역 경계가 원본 축 끝과 일치하여 조판 일관성 보호를 위해 축소 보류",
+      };
+    }
+
+    if (needsExtension) {
+      return {
+        direction: dir,
+        action: "hold",
+        origMath,
+        newMath: origMath,
+        origPt: r2(origPt),
+        newPt: r2(origPt),
+        contentBoundMath: r2(contentBoundPt / unitPt),
+        contentBoundPt: r2(contentBoundPt),
+        origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        newMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        shrunkPt: 0,
+        extendedPt: 0,
+        holdCode: "needs-extension-not-shrink",
+        reason: "현재 방향은 여백이 부족하여 축소 대상이 아님 (축 연장 OFF 상태로 원본 유지)",
+      };
+    }
+
+    const rawCandMath = isPositive ? ceil1(reqPt / unitPt) : floor1(reqPt / unitPt);
+    const rawCandPt = rawCandMath * unitPt;
+    const rawShrinkDeltaPt = isPositive ? origPt - rawCandPt : rawCandPt - origPt;
+    const rawShrinkDeltaMath = isPositive ? r1(origMath - rawCandMath) : r1(rawCandMath - origMath);
+
+    if (
+      rawShrinkDeltaPt < config.minShrinkTriggerDeltaPt ||
+      rawShrinkDeltaMath < config.minShrinkTriggerMathUnit
+    ) {
+      return {
+        direction: dir,
+        action: "hold",
+        origMath,
+        newMath: origMath,
+        origPt: r2(origPt),
+        newPt: r2(origPt),
+        contentBoundMath: r2(contentBoundPt / unitPt),
+        contentBoundPt: r2(contentBoundPt),
+        origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        newMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        shrunkPt: 0,
+        extendedPt: 0,
+        holdCode: "already-appropriate-axis-length",
+        reason: `원본 축 여백이 이미 적절함 (축소 가능 여유 ${r2(Math.max(0, rawShrinkDeltaPt))}pt < 임계값 ${config.minShrinkTriggerDeltaPt}pt)`,
+      };
+    }
+
+    // 양의 방향 화살표 줄기(+x, +y) 비례 안전 가드 (Proportional Stem Floor):
+    // 반대편 음의 반축 길이(oppAbsPt)의 일정 비율(minPosToNegStemRatio = 45%) 및 최소 물리 길이(46pt)를 보장하되,
+    // 원본 축이 이미 그 비례 하한보다 짧거나 축소 시 비례가 나빠지면 연장하지 않고 원본을 Hold한다.
+    let effectiveReqPt = reqPt;
+    let propFloorApplied = false;
+    if (isPositive && oppAbsPt > 0 && config.minPosToNegStemRatio > 0) {
+      const propFloorPt = Math.max(
+        config.minPosAxisStemFromOriginPt,
+        config.minPosToNegStemRatio * oppAbsPt
+      );
+      if (propFloorPt > effectiveReqPt) {
+        effectiveReqPt = propFloorPt;
+        propFloorApplied = true;
+      }
+    }
+
+    const candMath = isPositive ? ceil1(effectiveReqPt / unitPt) : floor1(effectiveReqPt / unitPt);
+    const candPt = candMath * unitPt;
+    const shrinkDeltaPt = isPositive ? origPt - candPt : candPt - origPt;
+    const shrinkDeltaMath = isPositive ? r1(origMath - candMath) : r1(candMath - origMath);
+
+    if (
+      shrinkDeltaPt < config.minShrinkTriggerDeltaPt ||
+      shrinkDeltaMath < config.minShrinkTriggerMathUnit
+    ) {
+      return {
+        direction: dir,
+        action: "hold",
+        origMath,
+        newMath: origMath,
+        origPt: r2(origPt),
+        newPt: r2(origPt),
+        contentBoundMath: r2(contentBoundPt / unitPt),
+        contentBoundPt: r2(contentBoundPt),
+        origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        newMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        shrunkPt: 0,
+        extendedPt: 0,
+        holdCode: propFloorApplied
+          ? "proportional-stem-floor-lock"
+          : "already-appropriate-axis-length",
+        reason: propFloorApplied
+          ? `반대편 음의 반축(${r2(oppAbsPt)}pt) 대비 양의 화살표 줄기 최소 비례 하한(${r2(effectiveReqPt)}pt, ${Math.round(config.minPosToNegStemRatio * 100)}%) 보호를 위해 축소 보류`
+          : `원본 축 여백이 이미 적절함 (축소 가능 여유 ${r2(Math.max(0, shrinkDeltaPt))}pt < 임계값 ${config.minShrinkTriggerDeltaPt}pt)`,
+      };
+    }
+
+    const stepUnit = isPositive ? 0.1 : -0.1;
+    let chosenMath = null;
+    let lastFailReason = null;
+
+    for (let k = 0; k <= 30; k++) {
+      const tryMath = r1(candMath + k * stepUnit);
+      const tryPt = tryMath * unitPt;
+      const tryShrinkPt = isPositive ? origPt - tryPt : tryPt - origPt;
+      const tryShrinkMath = isPositive ? r1(origMath - tryMath) : r1(tryMath - origMath);
+      if (
+        tryShrinkPt < config.minShrinkTriggerDeltaPt ||
+        tryShrinkMath < config.minShrinkTriggerMathUnit
+      ) {
+        break;
+      }
+
+      const arrowCheck = checkMovedAxisLabelAndArrowSafetyV022(
+        scene,
+        dir,
+        origMath,
+        tryMath,
+        protectedItems,
+        config
+      );
+      if (arrowCheck.ok) {
+        chosenMath = tryMath;
+        break;
+      } else {
+        lastFailReason = arrowCheck.reason;
+      }
+    }
+
+    if (chosenMath === null) {
+      return {
+        direction: dir,
+        action: "hold",
+        origMath,
+        newMath: origMath,
+        origPt: r2(origPt),
+        newPt: r2(origPt),
+        contentBoundMath: r2(contentBoundPt / unitPt),
+        contentBoundPt: r2(contentBoundPt),
+        origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        newMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+        shrunkPt: 0,
+        extendedPt: 0,
+        holdCode: "gate2-moved-axis-label-or-arrow-collision",
+        reason: lastFailReason || "축소 시 이동되는 화살표/축라벨이 기존 도형·라벨과 가까워져 안전 보류",
+      };
+    }
+
+    const chosenPt = chosenMath * unitPt;
+    const finalShrunkPt = r2(isPositive ? origPt - chosenPt : chosenPt - origPt);
+
+    return {
+      direction: dir,
+      action: "shrink",
+      origMath,
+      newMath: chosenMath,
+      origPt: r2(origPt),
+      newPt: r2(chosenPt),
+      contentBoundMath: r2(contentBoundPt / unitPt),
+      contentBoundPt: r2(contentBoundPt),
+      origMarginPt: r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt),
+      newMarginPt: r2(isPositive ? chosenPt - contentBoundPt : contentBoundPt - chosenPt),
+      shrunkPt: finalShrunkPt,
+      extendedPt: 0,
+      holdCode: null,
+      propFloorApplied,
+      propFloorPt: propFloorApplied ? r2(effectiveReqPt) : null,
+      reason: propFloorApplied
+        ? `불필요한 축 여백 ${r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt)}pt → 양의 줄기 비례 하한(${r2(effectiveReqPt)}pt) 반영하여 ${finalShrunkPt}pt 안전 축소`
+        : `불필요한 축 여백 ${r2(isPositive ? origPt - contentBoundPt : contentBoundPt - origPt)}pt → 평가원 표준 여백 ${r2(isPositive ? chosenPt - contentBoundPt : contentBoundPt - chosenPt)}pt 로 ${finalShrunkPt}pt 안전 축소`,
+    };
+  };
+
+  const extAxisPlan = opts.baseAxisPlan || {
+    x: { old: [ax.from, ax.to], new: [ax.from, ax.to] },
+    y: { old: [ay.from, ay.to], new: [ay.from, ay.to] },
+  };
+
+  const dirLeft = evaluateDirection({
+    dir: "left",
+    origMath: ax.from,
+    origPt: xlOrigPt,
+    contentBoundPt: minContentX0,
+    reqPt: reqLeftPt,
+    unitPt: xU,
+    isPositive: false,
+    endpointLocked: endpointLocks.left,
+    clipLocked: clipLocks.left,
+    extNewMath: extAxisPlan.x?.new?.[0] ?? ax.from,
+  });
+
+  const dirBottom = evaluateDirection({
+    dir: "bottom",
+    origMath: ay.from,
+    origPt: ybOrigPt,
+    contentBoundPt: minContentY0,
+    reqPt: reqBottomPt,
+    unitPt: yU,
+    isPositive: false,
+    endpointLocked: endpointLocks.bottom,
+    clipLocked: clipLocks.bottom,
+    extNewMath: extAxisPlan.y?.new?.[0] ?? ay.from,
+  });
+
+  const dirRight = evaluateDirection({
+    dir: "right",
+    origMath: ax.to,
+    origPt: xrOrigPt,
+    contentBoundPt: maxContentX1,
+    reqPt: reqRightPt,
+    unitPt: xU,
+    isPositive: true,
+    endpointLocked: endpointLocks.right,
+    clipLocked: clipLocks.right,
+    extNewMath: extAxisPlan.x?.new?.[1] ?? ax.to,
+    oppAbsPt: Math.abs(dirLeft.newMath * xU),
+  });
+
+  const dirTop = evaluateDirection({
+    dir: "top",
+    origMath: ay.to,
+    origPt: ytOrigPt,
+    contentBoundPt: maxContentY1,
+    reqPt: reqTopPt,
+    unitPt: yU,
+    isPositive: true,
+    endpointLocked: endpointLocks.top,
+    clipLocked: clipLocks.top,
+    extNewMath: extAxisPlan.y?.new?.[1] ?? ay.to,
+    oppAbsPt: Math.abs(dirBottom.newMath * yU),
+  });
+
+  const newX = [dirLeft.newMath, dirRight.newMath];
+  const newY = [dirBottom.newMath, dirTop.newMath];
+
+  const axisPlanForEdits = {
+    x: { old: [ax.from, ax.to], new: newX },
+    y: { old: [ay.from, ay.to], new: newY },
+    xStmt: ax.stmt,
+    yStmt: ay.stmt,
+  };
+  const edits = axisEdits(scene, axisPlanForEdits);
+
+  const anyShrunk =
+    dirLeft.action === "shrink" ||
+    dirRight.action === "shrink" ||
+    dirBottom.action === "shrink" ||
+    dirTop.action === "shrink";
+  const anyExtended =
+    dirLeft.action === "extend" ||
+    dirRight.action === "extend" ||
+    dirBottom.action === "extend" ||
+    dirTop.action === "extend";
+
+  return {
+    ok: true,
+    gate1Passed: true,
+    mode,
+    anyShrunk,
+    anyExtended,
+    totalShrunkPt: r2(dirLeft.shrunkPt + dirRight.shrunkPt + dirBottom.shrunkPt + dirTop.shrunkPt),
+    totalExtendedPt: r2(
+      dirLeft.extendedPt + dirRight.extendedPt + dirBottom.extendedPt + dirTop.extendedPt
+    ),
+    x: {
+      old: [ax.from, ax.to],
+      new: newX,
+      changed: newX[0] !== ax.from || newX[1] !== ax.to,
+      shrunkLeftPt: dirLeft.shrunkPt,
+      shrunkRightPt: dirRight.shrunkPt,
+      extendedLeftPt: dirLeft.extendedPt,
+      extendedRightPt: dirRight.extendedPt,
+    },
+    y: {
+      old: [ay.from, ay.to],
+      new: newY,
+      changed: newY[0] !== ay.from || newY[1] !== ay.to,
+      shrunkBottomPt: dirBottom.shrunkPt,
+      shrunkTopPt: dirTop.shrunkPt,
+      extendedBottomPt: dirBottom.extendedPt,
+      extendedTopPt: dirTop.extendedPt,
+    },
+    directions: {
+      left: dirLeft,
+      right: dirRight,
+      bottom: dirBottom,
+      top: dirTop,
+    },
+    contentBoundsMath: {
+      x0: r2(minContentX0 / xU),
+      x1: r2(maxContentX1 / xU),
+      y0: r2(minContentY0 / yU),
+      y1: r2(maxContentY1 / yU),
+    },
+    contentBoundsPt: {
+      x0: r2(minContentX0),
+      x1: r2(maxContentX1),
+      y0: r2(minContentY0),
+      y1: r2(maxContentY1),
+    },
+    protectedItemsCount: protectedItems.length,
+    edits,
+  };
+}
 
 /**
  * 1차/2차 Kroki 스테이징 SVG로 생성된 scene 에 Unit 1 안정성 가드 및 Unit 2/2+ 확장을 적용한다.
@@ -514,7 +1344,8 @@ export function runPlanningV022(
   enableUnit3B = false,
   enableUnit3D = true,
   applyDomainExtension = false,
-  enableUnit3E = false
+  enableUnit3E = false,
+  applySafeShrink = false
 ) {
   const plan0 = planLabelsUnit2(scene, P, null, { ...flags, applyAxisRequested });
   let activePlan = plan0;
@@ -674,12 +1505,77 @@ export function runPlanningV022(
     }
   }
 
+  // Safe Shrink 적용 전 기존 축 연장 플랜/편집 백업 (2차 Kroki 렌더링 충돌 시 Safe Shrink만 롤백하기 위함)
+  const baseAxisPlanBeforeShrink = {
+    ...axisPlan,
+    x: axisPlan.x ? { ...axisPlan.x, old: [...axisPlan.x.old], new: [...axisPlan.x.new] } : null,
+    y: axisPlan.y ? { ...axisPlan.y, old: [...axisPlan.y.old], new: [...axisPlan.y.new] } : null,
+  };
+  const baseAxisEditsBeforeShrink = [...axisEditsToApply];
+
+  // Safe Shrink (안전한 축 길이 자동 축소 — 기본 OFF, 체크 시에만 4방향 독립 축소 실행)
+  let safeShrinkPlan = {
+    requested: Boolean(applySafeShrink),
+    ok: true,
+    gate1Passed: true,
+    mode: "joint",
+    anyShrunk: false,
+    anyExtended: false,
+    totalShrunkPt: 0,
+    totalExtendedPt: 0,
+    x: axisPlan.x ? { ...axisPlan.x, changed: false, shrunkLeftPt: 0, shrunkRightPt: 0, extendedLeftPt: 0, extendedRightPt: 0 } : null,
+    y: axisPlan.y ? { ...axisPlan.y, changed: false, shrunkBottomPt: 0, shrunkTopPt: 0, extendedBottomPt: 0, extendedTopPt: 0 } : null,
+    directions: {},
+    edits: [],
+  };
+
+  if (applySafeShrink) {
+    safeShrinkPlan = {
+      ...planSafeAxisShrinkV022(sceneForPostPlan, activePlan, {
+        mode: "joint",
+        applyAxisExtension: Boolean(applyAxisRequested),
+        baseAxisPlan: axisPlan,
+        tickMoves: tickPlan.movedTicks,
+        originMoves: originPlan.movedOrigins,
+        pointLabelMoves: pointLabelPlan.movedPointLabels,
+      }),
+      requested: true,
+    };
+
+    if (safeShrinkPlan.ok && safeShrinkPlan.x && safeShrinkPlan.y) {
+      axisPlan = {
+        ...axisPlan,
+        x: {
+          ...(axisPlan.x || {}),
+          old: safeShrinkPlan.x.old,
+          new: safeShrinkPlan.x.new,
+          shrunkLeftPt: safeShrinkPlan.x.shrunkLeftPt,
+          shrunkRightPt: safeShrinkPlan.x.shrunkRightPt,
+          extendedLeftPt: safeShrinkPlan.x.extendedLeftPt,
+          extendedRightPt: safeShrinkPlan.x.extendedRightPt,
+        },
+        y: {
+          ...(axisPlan.y || {}),
+          old: safeShrinkPlan.y.old,
+          new: safeShrinkPlan.y.new,
+          shrunkBottomPt: safeShrinkPlan.y.shrunkBottomPt,
+          shrunkTopPt: safeShrinkPlan.y.shrunkTopPt,
+          extendedBottomPt: safeShrinkPlan.y.extendedBottomPt,
+          extendedTopPt: safeShrinkPlan.y.extendedTopPt,
+        },
+        safeShrinkDirections: safeShrinkPlan.directions,
+      };
+      axisEditsToApply = safeShrinkPlan.edits || [];
+    }
+  }
+
   activePlan.labelDecisions = labelDecisions;
   activePlan.decisionsByNodeId = decisionsByNodeId;
   activePlan.tickPlan = tickPlan;
   activePlan.originPlan = originPlan;
   activePlan.pointLabelPlan = pointLabelPlan;
   activePlan.domainPlan = domainPlan;
+  activePlan.safeShrinkPlan = safeShrinkPlan;
   activePlan.multiAbstractAnalysis =
     scene.multiAbstractAnalysis || activePlan.multiAbstractAnalysis || null;
 
@@ -704,6 +1600,9 @@ export function runPlanningV022(
     activePlan,
     axisPlan,
     axisEditsToApply,
+    baseAxisPlanBeforeShrink,
+    baseAxisEditsBeforeShrink,
+    safeShrinkPlan,
     domainPlan,
     domainEditsToApply,
     activeShift,

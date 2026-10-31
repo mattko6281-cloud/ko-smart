@@ -26,6 +26,8 @@ interface SmartLabelBetaModalProps {
   unit3BDisabledReason?: string | null;
   applyAxisOption?: boolean;
   onToggleApplyAxisOption?: (next: boolean) => void;
+  applySafeShrinkOption?: boolean;
+  onToggleApplySafeShrinkOption?: (next: boolean) => void;
   applyDomainExtensionOption?: boolean;
   onToggleApplyDomainExtensionOption?: (next: boolean) => void;
   multiAbstractAction?: MultiAbstractActionMode;
@@ -53,6 +55,8 @@ export function SmartLabelBetaModal({
   unit3BDisabledReason = null,
   applyAxisOption = false,
   onToggleApplyAxisOption,
+  applySafeShrinkOption = false,
+  onToggleApplySafeShrinkOption,
   applyDomainExtensionOption = false,
   onToggleApplyDomainExtensionOption,
   multiAbstractAction,
@@ -73,6 +77,7 @@ export function SmartLabelBetaModal({
   }, [
     proposal?.inputHash,
     proposal?.applyAxisRequested,
+    proposal?.applySafeShrinkRequested,
     proposal?.applyDomainExtensionRequested,
     proposal?.enablePointLabelOverlapFixRequested,
   ]);
@@ -312,6 +317,22 @@ export function SmartLabelBetaModal({
                 <span>그래프 끝점 미세 연장</span>
               </label>
             )}
+            {activeEngineVersion === "v0.2.2-beta" && onToggleApplySafeShrinkOption && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 rounded-md border border-violet-700/70 bg-violet-950/60 px-2.5 py-1 text-[11px] font-medium text-violet-200 hover:border-violet-400"
+                title="체크 시 8단계 안전 게이트와 양의 줄기 비례 하한(45%, 46pt)을 통과한 방향의 불필요한 축 여백만 4방향 독립으로 안전하게 줄입니다 (기본 OFF)"
+                data-testid="modal-checkbox-apply-safe-shrink"
+              >
+                <input
+                  type="checkbox"
+                  checked={applySafeShrinkOption}
+                  disabled={isRecomputing}
+                  onChange={(e) => onToggleApplySafeShrinkOption(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded accent-violet-500"
+                />
+                <span>축 길이 안전하게 줄이기</span>
+              </label>
+            )}
             {onToggleApplyAxisOption && (
               <label
                 className="flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200 hover:border-indigo-400"
@@ -364,8 +385,11 @@ export function SmartLabelBetaModal({
                   : ""}
                 ) · 원본 유지: {activeProposal.heldCount}개 · 끝점 연장:{" "}
                 {activeProposal.domainExtensionOption?.editsCount ?? 0}개 · 축 조정:{" "}
-                {activeProposal.axisOption?.editsCount ?? 0}개 · 2차 검증:{" "}
-                {activeProposal.verified ? "통과 (Verified)" : "미적용"}
+                {activeProposal.axisOption?.editsCount ?? 0}개
+                {activeProposal.safeShrinkOption?.applied
+                  ? ` (축소 -${activeProposal.safeShrinkOption.shrunkPt}pt)`
+                  : ""}{" "}
+                · 2차 검증: {activeProposal.verified ? "통과 (Verified)" : "미적용"}
               </span>
             </div>
             <p className="leading-relaxed" data-testid="smart-label-status-message">
@@ -394,12 +418,12 @@ export function SmartLabelBetaModal({
           )}
 
           {/* 축 길이 자동 조정 상태 카드 */}
-          {proposal.axisOption && (
+          {activeProposal.axisOption && (
             <div
               className={`rounded-lg border p-3.5 text-xs ${
-                proposal.axisOption.status === "applied"
+                activeProposal.axisOption.status === "applied"
                   ? "border-indigo-200 bg-indigo-50/60 text-indigo-950"
-                  : proposal.axisOption.status === "blocked-unsafe"
+                  : activeProposal.axisOption.status === "blocked-unsafe"
                   ? "border-rose-300 bg-rose-50 text-rose-900"
                   : "border-slate-200 bg-slate-50 text-slate-700"
               }`}
@@ -408,43 +432,130 @@ export function SmartLabelBetaModal({
               <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
                 <span>
                   📏 x축·y축 길이 자동 조정 옵션:{" "}
-                  {proposal.axisOption.requested ? "ON (활성화)" : "OFF (기본 labelOnly)"}
+                  {activeProposal.axisOption.requested ? "ON (활성화)" : "OFF (기본 labelOnly)"}
                 </span>
                 <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-semibold border border-slate-200 text-slate-600">
-                  {proposal.axisOption.modeNote}
+                  {activeProposal.axisOption.modeNote}
                 </span>
               </div>
               <p className="text-[11px] leading-relaxed mb-1.5">
-                {proposal.axisOption.message}
+                {activeProposal.axisOption.message}
               </p>
-              {(proposal.axisOption.x?.changed || proposal.axisOption.y?.changed) && (
+              {(activeProposal.axisOption.x?.changed || activeProposal.axisOption.y?.changed) && (
                 <div className="mt-2 space-y-1">
-                  {proposal.axisOption.x?.changed && (
+                  {activeProposal.axisOption.x?.changed && (
                     <div className="flex flex-wrap items-center gap-2 rounded bg-white px-2.5 py-1.5 text-[11px] font-mono border border-indigo-200 text-slate-800">
-                      <span className="font-bold text-indigo-700">x축 구간 연장:</span>
+                      <span className="font-bold text-indigo-700">x축 구간 변경:</span>
                       <span className="text-slate-500">
-                        [{proposal.axisOption.x.old[0]}, {proposal.axisOption.x.old[1]}]
+                        [{activeProposal.axisOption.x.old[0]}, {activeProposal.axisOption.x.old[1]}]
                       </span>
                       <span className="text-indigo-600 font-bold">➔</span>
                       <span className="font-semibold text-emerald-700">
-                        [{proposal.axisOption.x.new[0]}, {proposal.axisOption.x.new[1]}]
+                        [{activeProposal.axisOption.x.new[0]}, {activeProposal.axisOption.x.new[1]}]
                       </span>
                     </div>
                   )}
-                  {proposal.axisOption.y?.changed && (
+                  {activeProposal.axisOption.y?.changed && (
                     <div className="flex flex-wrap items-center gap-2 rounded bg-white px-2.5 py-1.5 text-[11px] font-mono border border-indigo-200 text-slate-800">
-                      <span className="font-bold text-indigo-700">y축 구간 연장:</span>
+                      <span className="font-bold text-indigo-700">y축 구간 변경:</span>
                       <span className="text-slate-500">
-                        [{proposal.axisOption.y.old[0]}, {proposal.axisOption.y.old[1]}]
+                        [{activeProposal.axisOption.y.old[0]}, {activeProposal.axisOption.y.old[1]}]
                       </span>
                       <span className="text-indigo-600 font-bold">➔</span>
                       <span className="font-semibold text-emerald-700">
-                        [{proposal.axisOption.y.new[0]}, {proposal.axisOption.y.new[1]}]
+                        [{activeProposal.axisOption.y.new[0]}, {activeProposal.axisOption.y.new[1]}]
                       </span>
                     </div>
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* 안전한 축 길이 자동 축소 (Safe Shrink) 상태 카드 (v0.2.2-beta 전용) */}
+          {activeEngineVersion === "v0.2.2-beta" && activeProposal.safeShrinkOption && (
+            <div
+              className={`rounded-lg border p-3.5 text-xs ${
+                activeProposal.safeShrinkOption.status === "applied"
+                  ? "border-violet-300 bg-violet-50/60 text-violet-950"
+                  : activeProposal.safeShrinkOption.status === "held-safety-fallback"
+                  ? "border-amber-300 bg-amber-50/60 text-amber-950"
+                  : "border-slate-200 bg-slate-50 text-slate-700"
+              }`}
+              data-testid="smart-label-safe-shrink-option-card"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
+                <span>
+                  ✂️ 축 길이 안전하게 줄이기 옵션:{" "}
+                  {activeProposal.safeShrinkOption.requested
+                    ? activeProposal.safeShrinkOption.applied
+                      ? `ON (적용됨 · 총 -${activeProposal.safeShrinkOption.shrunkPt}pt 안전 축소)`
+                      : "ON (활성화 · 모든 방향 안전 보류 Hold)"
+                    : "OFF (기본 원본 축 범위 유지)"}
+                </span>
+                <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-semibold border border-slate-200 text-slate-600">
+                  {activeProposal.safeShrinkOption.modeNote}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed mb-1.5">
+                {activeProposal.safeShrinkOption.message}
+              </p>
+              {activeProposal.safeShrinkOption.requested &&
+                activeProposal.safeShrinkOption.directions &&
+                Object.keys(activeProposal.safeShrinkOption.directions).length > 0 && (
+                  <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                    {(["left", "right", "bottom", "top"] as const).map((dirKey) => {
+                      const d = activeProposal.safeShrinkOption?.directions?.[dirKey];
+                      if (!d) return null;
+                      const dirLabel =
+                        dirKey === "left"
+                          ? "-x (왼쪽)"
+                          : dirKey === "right"
+                          ? "+x (오른쪽)"
+                          : dirKey === "bottom"
+                          ? "-y (아래쪽)"
+                          : "+y (위쪽)";
+                      return (
+                        <div
+                          key={`shrink-dir-${dirKey}`}
+                          data-testid={`smart-label-safe-shrink-dir-${dirKey}`}
+                          className={`rounded border px-2.5 py-1.5 text-[11px] ${
+                            d.action === "shrink"
+                              ? "border-violet-200 bg-white text-slate-800"
+                              : d.action === "extend"
+                              ? "border-indigo-200 bg-white text-slate-800"
+                              : "border-slate-200 bg-white/70 text-slate-600"
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-1.5 mb-0.5">
+                            <span className="font-bold text-slate-800">{dirLabel}</span>
+                            {d.action === "shrink" ? (
+                              <span className="rounded bg-violet-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                안전 축소: {d.origMath} ➔ {d.newMath} (-{d.shrunkPt}pt)
+                              </span>
+                            ) : d.action === "extend" ? (
+                              <span className="rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                축 연장: {d.origMath} ➔ {d.newMath} (+{d.extendedPt}pt)
+                              </span>
+                            ) : (
+                              <span className="rounded bg-slate-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                원본 유지 ({d.origMath} · Hold)
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-600 leading-relaxed">
+                            {d.propFloorApplied && (
+                              <span className="mr-1 rounded bg-amber-100 px-1 py-0.5 font-semibold text-amber-900">
+                                비례 하한 가드 적용
+                              </span>
+                            )}
+                            {d.reason}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
             </div>
           )}
 

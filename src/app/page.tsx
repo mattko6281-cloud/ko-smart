@@ -377,6 +377,7 @@ export default function Home() {
   const [unit3BDisabledReason, setUnit3BDisabledReason] = useState<string | null>(null);
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
   const [applyAxisBeta, setApplyAxisBeta] = useState(false);
+  const [applySafeShrinkBeta, setApplySafeShrinkBeta] = useState(false);
   const [applyDomainExtensionBeta, setApplyDomainExtensionBeta] = useState(false);
   const [enablePointLabelOverlapFixBeta, setEnablePointLabelOverlapFixBeta] = useState(false);
   const [multiAbstractActionBeta, setMultiAbstractActionBeta] = useState<MultiAbstractActionMode>("hold");
@@ -433,6 +434,7 @@ export default function Home() {
         // 개발자는 기본 ON(단 서버 비활성 시 OFF), 파일럿 팀원은 초기 기본 OFF
         setEnableUnit3BBeta(u3bAllowed ? Boolean(data.defaultEnableUnit3B) : false);
         setApplyAxisBeta(false);
+        setApplySafeShrinkBeta(false);
         setApplyDomainExtensionBeta(false);
         setEnablePointLabelOverlapFixBeta(false);
       })
@@ -501,7 +503,8 @@ export default function Home() {
     overrideEngineVersion?: SmartLabelEngineVersion,
     overrideEnableUnit3B?: boolean,
     overrideApplyDomainExtension?: boolean,
-    overrideEnablePointLabelOverlapFix?: boolean
+    overrideEnablePointLabelOverlapFix?: boolean,
+    overrideApplySafeShrink?: boolean
   ) => {
     if (!showSmartLabelBeta || isSmartLabelLoading) return;
     if (!rawInput.trim()) {
@@ -528,6 +531,9 @@ export default function Home() {
         : enablePointLabelOverlapFixBeta;
     const useEnablePointLabelOverlapFix =
       useEngineVersion === "v0.2.2-beta" ? rawEnablePointLabelFix : false;
+    const rawApplySafeShrink =
+      typeof overrideApplySafeShrink === "boolean" ? overrideApplySafeShrink : applySafeShrinkBeta;
+    const useApplySafeShrink = useEngineVersion === "v0.2.2-beta" ? rawApplySafeShrink : false;
     const snapshotCode = rawInput;
     setIsSmartLabelLoading(true);
     try {
@@ -537,6 +543,7 @@ export default function Home() {
         body: JSON.stringify({
           tikz: snapshotCode,
           applyAxis: useApplyAxis,
+          applySafeShrink: useApplySafeShrink,
           applyDomainExtension: useApplyDomainExtension,
           engineVersion: useEngineVersion,
           enableUnit3B: useEnableUnit3B,
@@ -2006,6 +2013,24 @@ const getProcessedInput = (code: string) => {
                       <span>
                         {unit3BServerEnabled ? "Unit 3-B 눈금 조정" : "Unit 3-B 눈금 조정 (비활성)"}
                       </span>
+                    </label>
+                  )}
+                  {(engineVersionBeta === "v0.2.2-beta" || !smartLabelAccess.canSelectEngine) && (
+                    <label
+                      id="label-smart-label-safe-shrink"
+                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight cursor-pointer select-none
+                        bg-zinc-900/80 hover:bg-zinc-800/80 border border-violet-700/60 text-violet-200"
+                      title="체크 시 8단계 안전 게이트와 양의 줄기 비례 하한을 통과한 방향의 불필요한 축 여백만 4방향 독립으로 안전하게 줄입니다 (기본값 OFF)"
+                    >
+                      <input
+                        id="chk-smart-label-safe-shrink"
+                        type="checkbox"
+                        checked={applySafeShrinkBeta}
+                        disabled={isSmartLabelLoading}
+                        onChange={(e) => setApplySafeShrinkBeta(e.target.checked)}
+                        className="h-3 w-3 rounded accent-violet-500 cursor-pointer"
+                      />
+                      <span>축 길이 안전하게 줄이기</span>
                     </label>
                   )}
                   <label
@@ -3554,6 +3579,7 @@ const getProcessedInput = (code: string) => {
           unit3BServerEnabled={unit3BServerEnabled}
           unit3BDisabledReason={unit3BDisabledReason}
           applyAxisOption={applyAxisBeta}
+          applySafeShrinkOption={applySafeShrinkBeta}
           applyDomainExtensionOption={applyDomainExtensionBeta}
           multiAbstractAction={multiAbstractActionBeta}
           onChangeMultiAbstractAction={setMultiAbstractActionBeta}
@@ -3568,7 +3594,19 @@ const getProcessedInput = (code: string) => {
               engineVersionBeta,
               enableUnit3BBeta,
               applyDomainExtensionBeta,
-              enablePointLabelOverlapFixBeta
+              enablePointLabelOverlapFixBeta,
+              applySafeShrinkBeta
+            );
+          }}
+          onToggleApplySafeShrinkOption={(next) => {
+            setApplySafeShrinkBeta(next);
+            handleRunSmartLabelBeta(
+              applyAxisBeta,
+              engineVersionBeta,
+              enableUnit3BBeta,
+              applyDomainExtensionBeta,
+              enablePointLabelOverlapFixBeta,
+              next
             );
           }}
           onToggleApplyDomainExtensionOption={(next) => {
@@ -3578,7 +3616,8 @@ const getProcessedInput = (code: string) => {
               engineVersionBeta,
               enableUnit3BBeta,
               next,
-              enablePointLabelOverlapFixBeta
+              enablePointLabelOverlapFixBeta,
+              applySafeShrinkBeta
             );
           }}
           onToggleEnablePointLabelOverlapFixOption={(next) => {
@@ -3588,7 +3627,8 @@ const getProcessedInput = (code: string) => {
               engineVersionBeta,
               enableUnit3BBeta,
               applyDomainExtensionBeta,
-              next
+              next,
+              applySafeShrinkBeta
             );
           }}
           onToggleEnableUnit3BOption={(next) => {
@@ -3598,7 +3638,8 @@ const getProcessedInput = (code: string) => {
               engineVersionBeta,
               next,
               applyDomainExtensionBeta,
-              enablePointLabelOverlapFixBeta
+              enablePointLabelOverlapFixBeta,
+              applySafeShrinkBeta
             );
           }}
           onChangeEngineVersion={(nextEngine) => {
@@ -3608,7 +3649,8 @@ const getProcessedInput = (code: string) => {
               nextEngine,
               enableUnit3BBeta,
               applyDomainExtensionBeta,
-              enablePointLabelOverlapFixBeta
+              enablePointLabelOverlapFixBeta,
+              applySafeShrinkBeta
             );
           }}
         />
