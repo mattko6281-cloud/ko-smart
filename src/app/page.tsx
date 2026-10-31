@@ -378,6 +378,7 @@ export default function Home() {
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
   const [applyAxisBeta, setApplyAxisBeta] = useState(false);
   const [applyDomainExtensionBeta, setApplyDomainExtensionBeta] = useState(false);
+  const [enablePointLabelOverlapFixBeta, setEnablePointLabelOverlapFixBeta] = useState(false);
   const [multiAbstractActionBeta, setMultiAbstractActionBeta] = useState<MultiAbstractActionMode>("hold");
   const [enableUnit3BBeta, setEnableUnit3BBeta] = useState(false);
   const [engineVersionBeta, setEngineVersionBeta] = useState<SmartLabelEngineVersion>("v0.2.1");
@@ -433,6 +434,7 @@ export default function Home() {
         setEnableUnit3BBeta(u3bAllowed ? Boolean(data.defaultEnableUnit3B) : false);
         setApplyAxisBeta(false);
         setApplyDomainExtensionBeta(false);
+        setEnablePointLabelOverlapFixBeta(false);
       })
       .catch(() => {
         if (!cancelled) {
@@ -498,7 +500,8 @@ export default function Home() {
     overrideApplyAxis?: boolean,
     overrideEngineVersion?: SmartLabelEngineVersion,
     overrideEnableUnit3B?: boolean,
-    overrideApplyDomainExtension?: boolean
+    overrideApplyDomainExtension?: boolean,
+    overrideEnablePointLabelOverlapFix?: boolean
   ) => {
     if (!showSmartLabelBeta || isSmartLabelLoading) return;
     if (!rawInput.trim()) {
@@ -519,6 +522,12 @@ export default function Home() {
         ? overrideApplyDomainExtension
         : applyDomainExtensionBeta;
     const useApplyDomainExtension = useEngineVersion === "v0.2.2-beta" ? rawApplyDomainExt : false;
+    const rawEnablePointLabelFix =
+      typeof overrideEnablePointLabelOverlapFix === "boolean"
+        ? overrideEnablePointLabelOverlapFix
+        : enablePointLabelOverlapFixBeta;
+    const useEnablePointLabelOverlapFix =
+      useEngineVersion === "v0.2.2-beta" ? rawEnablePointLabelFix : false;
     const snapshotCode = rawInput;
     setIsSmartLabelLoading(true);
     try {
@@ -531,6 +540,7 @@ export default function Home() {
           applyDomainExtension: useApplyDomainExtension,
           engineVersion: useEngineVersion,
           enableUnit3B: useEnableUnit3B,
+          enablePointLabelOverlapFix: useEnablePointLabelOverlapFix,
         }),
         cache: "no-store",
       });
@@ -3548,23 +3558,58 @@ const getProcessedInput = (code: string) => {
           multiAbstractAction={multiAbstractActionBeta}
           onChangeMultiAbstractAction={setMultiAbstractActionBeta}
           enableUnit3BOption={unit3BServerEnabled ? enableUnit3BBeta : false}
+          enablePointLabelOverlapFixOption={enablePointLabelOverlapFixBeta}
           engineVersion={smartLabelAccess.canSelectEngine ? engineVersionBeta : "v0.2.2-beta"}
           isRecomputing={isSmartLabelLoading}
           onToggleApplyAxisOption={(next) => {
             setApplyAxisBeta(next);
-            handleRunSmartLabelBeta(next, engineVersionBeta, enableUnit3BBeta, applyDomainExtensionBeta);
+            handleRunSmartLabelBeta(
+              next,
+              engineVersionBeta,
+              enableUnit3BBeta,
+              applyDomainExtensionBeta,
+              enablePointLabelOverlapFixBeta
+            );
           }}
           onToggleApplyDomainExtensionOption={(next) => {
             setApplyDomainExtensionBeta(next);
-            handleRunSmartLabelBeta(applyAxisBeta, engineVersionBeta, enableUnit3BBeta, next);
+            handleRunSmartLabelBeta(
+              applyAxisBeta,
+              engineVersionBeta,
+              enableUnit3BBeta,
+              next,
+              enablePointLabelOverlapFixBeta
+            );
+          }}
+          onToggleEnablePointLabelOverlapFixOption={(next) => {
+            setEnablePointLabelOverlapFixBeta(next);
+            handleRunSmartLabelBeta(
+              applyAxisBeta,
+              engineVersionBeta,
+              enableUnit3BBeta,
+              applyDomainExtensionBeta,
+              next
+            );
           }}
           onToggleEnableUnit3BOption={(next) => {
             setEnableUnit3BBeta(next);
-            handleRunSmartLabelBeta(applyAxisBeta, engineVersionBeta, next, applyDomainExtensionBeta);
+            handleRunSmartLabelBeta(
+              applyAxisBeta,
+              engineVersionBeta,
+              next,
+              applyDomainExtensionBeta,
+              enablePointLabelOverlapFixBeta
+            );
           }}
           onChangeEngineVersion={(nextEngine) => {
             handleChangeEngineVersionBeta(nextEngine);
-            handleRunSmartLabelBeta(applyAxisBeta, nextEngine, enableUnit3BBeta, applyDomainExtensionBeta);
+            handleRunSmartLabelBeta(
+              applyAxisBeta,
+              nextEngine,
+              enableUnit3BBeta,
+              applyDomainExtensionBeta,
+              enablePointLabelOverlapFixBeta
+            );
           }}
         />
       )}

@@ -599,6 +599,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
   const unit3DServerStatus = isUnit3DServerEnabled({ env: opts.env });
   const enableUnit3DRequested = isV022 && opts.enableUnit3D !== false;
   const enableUnit3D = enableUnit3DRequested && unit3DServerStatus.enabled;
+  const enablePointLabelOverlapFixRequested =
+    isV022 && Boolean(opts.enablePointLabelOverlapFix === true || opts.enableUnit3E === true);
+  const enableUnit3E = enablePointLabelOverlapFixRequested;
 
   const baseResponse = {
     engineVersion,
@@ -611,6 +614,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     unit3DEnabled: enableUnit3D,
     unit3DServerEnabled: unit3DServerStatus.enabled,
     unit3DDisabledReason: unit3DServerStatus.enabled ? null : unit3DServerStatus.reason,
+    enablePointLabelOverlapFixRequested,
+    unit3EEnabled: enableUnit3E,
     ok: false,
     status: "failed",
     reasonCode: null,
@@ -640,6 +645,20 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       message: applyDomainExtensionRequested
         ? "그래프 끝점 미세 연장 대기 중"
         : "그래프 끝점 미세 연장 옵션 OFF (원본 정의역 유지)",
+      items: [],
+    },
+    pointLabelOption: {
+      enabled: enablePointLabelOverlapFixRequested,
+      requested: enablePointLabelOverlapFixRequested,
+      applied: false,
+      status: enablePointLabelOverlapFixRequested ? "not-needed" : "disabled",
+      modeNote: "점 마커 연결 대문자 점 이름(A, B, C, P, Q 등) 전용 (마커 불변 · 보수적 자연 배치)",
+      movedCount: 0,
+      heldCount: 0,
+      editsCount: 0,
+      message: enablePointLabelOverlapFixRequested
+        ? "점 이름 겹침 자동 정렬 대기 중"
+        : "점 이름 겹침 자동 정렬 옵션 OFF (원본 점 이름 위치 유지)",
       items: [],
     },
     multiAbstractActionRequested,
@@ -675,10 +694,13 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     tickHeldCount: 0,
     originMovedCount: 0,
     originHeldCount: 0,
+    pointLabelMovedCount: 0,
+    pointLabelHeldCount: 0,
     heldCount: 0,
     labelDecisions: [],
     tickDecisions: [],
     originDecisions: [],
+    pointLabelDecisions: [],
     placements: [],
     shiftReport: [],
     preservation: null,
@@ -791,7 +813,10 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       fig.hasAxes &&
       fig.type !== "coordinateFunction" &&
       (scene.nodes || []).some(
-        (n) => n.role === "function" || (enableUnit3D && n.role === "origin")
+        (n) =>
+          n.role === "function" ||
+          (enableUnit3D && n.role === "origin") ||
+          (enableUnit3E && n.role === "other")
       ) &&
       (scene.strokes || []).some((s) => s.kind !== "axis")
     ) {
@@ -845,6 +870,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       let activeShift;
       let tickPlan = { edits: [], movedTicks: [], heldTicks: [], decisions: [] };
       let originPlan = { edits: [], movedOrigins: [], heldOrigins: [], decisions: [] };
+      let pointLabelPlan = {
+        requested: false,
+        applied: false,
+        edits: [],
+        movedPointLabels: [],
+        heldPointLabels: [],
+        decisions: [],
+        roleClassification: null,
+      };
       let decisionsByNodeId = new Map();
       let variantOrigDiag = origDiag;
       let multiAbstractAnalysis = null;
@@ -857,7 +891,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           unit2FlagsForAction,
           enableUnit3B,
           enableUnit3D,
-          applyDomainExtensionRequested
+          applyDomainExtensionRequested,
+          enableUnit3E
         );
         activePlan = v022Plan.activePlan;
         axisPlan = v022Plan.axisPlan;
@@ -867,6 +902,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         activeShift = v022Plan.activeShift;
         tickPlan = v022Plan.tickPlan || tickPlan;
         originPlan = v022Plan.originPlan || originPlan;
+        pointLabelPlan = v022Plan.pointLabelPlan || pointLabelPlan;
         decisionsByNodeId = v022Plan.decisionsByNodeId;
         multiAbstractAnalysis =
           v022Plan.multiAbstractAnalysis || scene.multiAbstractAnalysis || null;
@@ -909,11 +945,13 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const labelEditsOnEffective = activeShift.edits;
       const tickEditsOnEffective = tickPlan.edits || [];
       const originEditsOnEffective = originPlan.edits || [];
+      const pointLabelEditsOnEffective = pointLabelPlan.edits || [];
       const editsToApply = [
         ...domainEditsToApply,
         ...labelEditsOnEffective,
         ...tickEditsOnEffective,
         ...originEditsOnEffective,
+        ...pointLabelEditsOnEffective,
         ...axisEditsToApply,
       ];
 
@@ -921,6 +959,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const yAxisChanged = axisEditsToApply.some((e) => e.kind === "axis-y");
       const anyAxisChanged = axisEditsToApply.length > 0;
       const anyDomainChanged = domainEditsToApply.length > 0;
+      const anyPointLabelChanged = pointLabelEditsOnEffective.length > 0;
       const hasAxisRequiredHold = (domainPlan.decisions || []).some(
         (d) => d.action === "hold" && d.holdCode === "axis-extension-required"
       );
@@ -989,10 +1028,39 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           : "현재 x축·y축 길이가 이미 충분하여 축 길이 조정이 불필요합니다 (길이 연장 전용, 축소 없음).",
       };
 
+      const pointLabelOptionInfo = {
+        enabled: enablePointLabelOverlapFixRequested,
+        requested: enablePointLabelOverlapFixRequested,
+        applied: false,
+        status: !enablePointLabelOverlapFixRequested
+          ? "disabled"
+          : anyPointLabelChanged
+          ? "pending-verification"
+          : "not-needed",
+        modeNote: "점 마커 연결 대문자 점 이름(A, B, C, P, Q 등) 전용 (마커 불변 · 보수적 자연 배치)",
+        movedCount: (pointLabelPlan.movedPointLabels || []).length,
+        heldCount: (pointLabelPlan.heldPointLabels || []).length,
+        editsCount: pointLabelEditsOnEffective.length,
+        items: pointLabelPlan.decisions || [],
+        message: !enablePointLabelOverlapFixRequested
+          ? "점 이름 겹침 자동 정렬 옵션 OFF (원본 점 이름 위치 유지)"
+          : anyPointLabelChanged
+          ? `점 이름(유형 A) 겹침 자동 정렬 후보 산출됨 (${(pointLabelPlan.movedPointLabels || [])
+              .map(
+                (p) =>
+                  `${p.cleanLabel || p.label}: shift [${p.origShift.join(", ")}] → [${p.newShift.join(", ")}]pt (${p.nearestDir}, 곡선 여유 ${p.finalClearancePt}pt, 마커 간격 ${p.markerGapPt}pt)`
+              )
+              .join(" · ")})`
+          : (pointLabelPlan.heldPointLabels || []).length > 0
+          ? `감지된 대문자 점 이름(유형 A) ${pointLabelPlan.heldPointLabels.length}개가 이미 무충돌 자연 배치 상태이므로 원본 위치를 유지합니다.`
+          : "이동 대상인 점 마커 연결 대문자 점 이름(유형 A)이 없거나 모두 원본 위치를 유지합니다.",
+      };
+
       const variantBase = {
         ...baseResponse,
         axisOption: axisOptionInfo,
         domainExtensionOption: domainOptionInfo,
+        pointLabelOption: pointLabelOptionInfo,
         collisionDiagnostics: variantOrigDiag,
       };
 
@@ -1125,10 +1193,13 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
             tickHeldCount: (tickPlan.heldTicks || []).length,
             originMovedCount: 0,
             originHeldCount: (originPlan.heldOrigins || []).length,
+            pointLabelMovedCount: 0,
+            pointLabelHeldCount: (pointLabelPlan.heldPointLabels || []).length,
             heldCount: decisions0.length,
             labelDecisions: decisions0,
             tickDecisions: tickPlan.decisions || [],
             originDecisions: originPlan.decisions || [],
+            pointLabelDecisions: pointLabelPlan.decisions || [],
             placements: activePlan.placements || [],
             shiftReport: activeShift.report || [],
             preservation: preservation0,
@@ -1211,7 +1282,13 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         .map((p) => p.id);
       const movedTickNodeIds = (tickPlan.movedTicks || []).map((t) => t.id);
       const movedOriginNodeIds = (originPlan.movedOrigins || []).map((o) => o.id);
-      const movedNodeIds = [...movedFnNodeIds, ...movedTickNodeIds, ...movedOriginNodeIds];
+      const movedPointLabelNodeIds = (pointLabelPlan.movedPointLabels || []).map((p) => p.id);
+      const movedNodeIds = [
+        ...movedFnNodeIds,
+        ...movedTickNodeIds,
+        ...movedOriginNodeIds,
+        ...movedPointLabelNodeIds,
+      ];
       const movedFNodeIndices = movedFnNodeIds
         .map((id) => origFNodes.findIndex((q) => q.id === id))
         .filter((idx) => idx >= 0);
@@ -1225,6 +1302,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
             edits: editsToApply,
             movedFNodeIndices,
             movedOriginNodeIds,
+            movedPointLabelNodeIds,
             workRoot: tempWorkRoot,
             P,
             flags: unit2FlagsForAction,
@@ -1369,6 +1447,16 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           )
           .join(" · ")})`;
       }
+      if (anyPointLabelChanged) {
+        pointLabelOptionInfo.applied = true;
+        pointLabelOptionInfo.status = "applied";
+        pointLabelOptionInfo.message = `점 이름(유형 A) 겹침 자동 정렬 및 2차 충돌 검증 통과 (${(pointLabelPlan.movedPointLabels || [])
+          .map(
+            (p) =>
+              `${p.cleanLabel || p.label}: shift [${p.origShift.join(", ")}] → [${p.newShift.join(", ")}]pt (${p.nearestDir}, 곡선 여유 ${p.finalClearancePt}pt, 마커 간격 ${p.markerGapPt}pt)`
+          )
+          .join(" · ")})`;
+      }
 
       const finalFnAuditById = new Map(
         (finalDiag.finalAudit?.functionLabelAudits || []).map((fa) => [fa.id, fa])
@@ -1392,7 +1480,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const tickHeldCount = (tickPlan.heldTicks || []).length;
       const originMovedCount = (originPlan.movedOrigins || []).length;
       const originHeldCount = (originPlan.heldOrigins || []).length;
-      const movedCount = fnMovedCount + tickMovedCount + originMovedCount;
+      const pointLabelMovedCount = (pointLabelPlan.movedPointLabels || []).length;
+      const pointLabelHeldCount = (pointLabelPlan.heldPointLabels || []).length;
+      const movedCount = fnMovedCount + tickMovedCount + originMovedCount + pointLabelMovedCount;
       const heldCount = decisions.length - fnMovedCount;
 
       const actionParts = [];
@@ -1408,6 +1498,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       if (anyDomainChanged) actionParts.push(`그래프 끝점 미세 연장(${domainEditsToApply.length}개 곡선)`);
       if (tickMovedCount > 0) actionParts.push(`축 눈금 숫자 ${tickMovedCount}개 겹침 자동 조정(Unit 3-B)`);
       if (originMovedCount > 0) actionParts.push(`원점 O ${originMovedCount}개 4방향 자동 배치(Unit 3-D)`);
+      if (pointLabelMovedCount > 0) actionParts.push(`점 이름(유형 A) ${pointLabelMovedCount}개 겹침 자동 정렬(Unit 3-E)`);
       if (anyAxisChanged) actionParts.push(`축 길이 연장(${axisEditsToApply.length}개 축)`);
       let successMsg = `${actionParts.join(" 및 ")}이(가) 2차 렌더링 및 안전성 검증을 통과했습니다.`;
 
@@ -1437,10 +1528,13 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           tickHeldCount,
           originMovedCount,
           originHeldCount,
+          pointLabelMovedCount,
+          pointLabelHeldCount,
           heldCount,
           labelDecisions: decisions,
           tickDecisions: tickPlan.decisions || [],
           originDecisions: originPlan.decisions || [],
+          pointLabelDecisions: pointLabelPlan.decisions || [],
           placements: (activePlan.placements || []).map((p) => ({
             id: p.id,
             label: p.label,
@@ -1501,14 +1595,18 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       tickHeldCount: resp.tickHeldCount,
       originMovedCount: resp.originMovedCount,
       originHeldCount: resp.originHeldCount,
+      pointLabelMovedCount: resp.pointLabelMovedCount,
+      pointLabelHeldCount: resp.pointLabelHeldCount,
       heldCount: resp.heldCount,
       labelDecisions: resp.labelDecisions,
       tickDecisions: resp.tickDecisions,
       originDecisions: resp.originDecisions,
+      pointLabelDecisions: resp.pointLabelDecisions,
       placements: resp.placements,
       shiftReport: resp.shiftReport,
       axisOption: resp.axisOption,
       domainExtensionOption: resp.domainExtensionOption,
+      pointLabelOption: resp.pointLabelOption,
       collisionDiagnostics: resp.collisionDiagnostics,
       verification: resp.verification,
       preview: resp.preview,
@@ -1714,6 +1812,7 @@ export async function handleSmartLabelGet(deps) {
       defaultEnableUnit3B: unit3BFlag.enabled ? authCheck.defaultEnableUnit3B : false,
       defaultApplyAxis: false,
       defaultApplyDomainExtension: false,
+      defaultEnablePointLabelOverlapFix: false,
       unit3BServerEnabled: unit3BFlag.enabled,
       unit3BDisabledReason: unit3BFlag.enabled ? null : unit3BFlag.reason,
       unit3DServerEnabled: unit3DFlag.enabled,
@@ -1785,6 +1884,9 @@ export async function handleSmartLabelPost(requestBody, deps) {
   const engineVersion =
     authCheck.role === "pilot" ? "v0.2.2-beta" : normalizeEngineVersion(requestBody.engineVersion);
   const enableUnit3B = Boolean(requestBody.enableUnit3B === true);
+  const enablePointLabelOverlapFix = Boolean(
+    requestBody.enablePointLabelOverlapFix === true || requestBody.enableUnit3E === true
+  );
   const serverInputHash = computeInputHash(rawTikz);
 
   if (clientInputHash && clientInputHash !== serverInputHash) {
@@ -1827,6 +1929,7 @@ export async function handleSmartLabelPost(requestBody, deps) {
       multiAbstractAction,
       engineVersion,
       enableUnit3B,
+      enablePointLabelOverlapFix,
     });
 
     const httpStatus =

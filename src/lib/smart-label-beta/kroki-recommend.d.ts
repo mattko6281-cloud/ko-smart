@@ -250,6 +250,54 @@ export interface SmartLabelOriginDecisionSummary {
   holdReason?: string | null;
 }
 
+export interface SmartLabelPointLabelDecisionSummary {
+  id: string;
+  label: string;
+  cleanLabel?: string;
+  role: "point-label-typeA";
+  category?: string;
+  subCategory?: string;
+  markerId?: string | null;
+  markerCenterPt?: [number, number] | null;
+  coordTikz?: [number, number] | null;
+  origDirOption?: string | null;
+  nearestDir?: string | null;
+  action: "keep" | "move-point-label" | "hold-no-safe-point-candidate" | "hold-abnormal-marker-distance";
+  nonMoveCode?: string | null;
+  nonMoveCategory?: string | null;
+  autoModified: boolean;
+  selectedEngine?: string;
+  origShift: [number, number];
+  newShift: [number, number];
+  shift: [number, number];
+  deltaShiftPt?: [number, number];
+  movedPt?: number;
+  markerGapPt?: number;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+  score?: number;
+  origClearancePt?: number | null;
+  finalClearancePt?: number | null;
+  origAxisClearancePt?: number | null;
+  finalAxisClearancePt?: number | null;
+  origNodeGapPt?: number | null;
+  finalNodeGapPt?: number | null;
+  reason: string;
+  selectionReason?: string;
+  holdReason?: string | null;
+}
+
+export interface PointLabelOptionInfo {
+  requested: boolean;
+  applied: boolean;
+  status: "disabled" | "not-needed" | "pending-verification" | "applied" | "blocked-unsafe";
+  modeNote: string;
+  movedCount: number;
+  heldCount: number;
+  editsCount: number;
+  message: string;
+  items: SmartLabelPointLabelDecisionSummary[];
+}
+
 export interface MultiAbstractCorrespondenceRow {
   nodeId: string;
   label: string;
@@ -295,14 +343,18 @@ export interface MultiAbstractVariantSummary {
   tickHeldCount?: number;
   originMovedCount?: number;
   originHeldCount?: number;
+  pointLabelMovedCount?: number;
+  pointLabelHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
   tickDecisions?: SmartLabelTickDecisionSummary[];
   originDecisions?: SmartLabelOriginDecisionSummary[];
+  pointLabelDecisions?: SmartLabelPointLabelDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   axisOption: AxisOptionInfo;
   domainExtensionOption?: DomainExtensionOptionInfo;
+  pointLabelOption?: PointLabelOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
   verification: {
     compiled: boolean;
@@ -363,6 +415,8 @@ export interface SmartLabelBetaProposal {
   unit3DEnabled?: boolean;
   unit3DServerEnabled?: boolean;
   unit3DDisabledReason?: string | null;
+  enablePointLabelOverlapFixRequested?: boolean;
+  unit3EEnabled?: boolean;
   ok: boolean;
   status: "recommended" | "unchanged" | "unsupported" | "reverted" | "failed";
   reasonCode: string | null;
@@ -373,6 +427,7 @@ export interface SmartLabelBetaProposal {
   axisOption: AxisOptionInfo;
   applyDomainExtensionRequested?: boolean;
   domainExtensionOption?: DomainExtensionOptionInfo;
+  pointLabelOption?: PointLabelOptionInfo;
   multiAbstractActionRequested?: MultiAbstractActionMode;
   multiAbstractOption?: MultiAbstractOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
@@ -386,10 +441,13 @@ export interface SmartLabelBetaProposal {
   tickHeldCount?: number;
   originMovedCount?: number;
   originHeldCount?: number;
+  pointLabelMovedCount?: number;
+  pointLabelHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
   tickDecisions?: SmartLabelTickDecisionSummary[];
   originDecisions?: SmartLabelOriginDecisionSummary[];
+  pointLabelDecisions?: SmartLabelPointLabelDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   preservation: any;
@@ -425,6 +483,8 @@ export function recommendSmartLabelBeta(
     engineVersion?: SmartLabelEngineVersion;
     enableUnit3B?: boolean;
     enableUnit3D?: boolean;
+    enablePointLabelOverlapFix?: boolean;
+    enableUnit3E?: boolean;
   }
 ): Promise<SmartLabelBetaProposal>;
 

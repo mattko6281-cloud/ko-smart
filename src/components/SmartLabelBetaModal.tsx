@@ -32,6 +32,8 @@ interface SmartLabelBetaModalProps {
   onChangeMultiAbstractAction?: (next: MultiAbstractActionMode) => void;
   enableUnit3BOption?: boolean;
   onToggleEnableUnit3BOption?: (next: boolean) => void;
+  enablePointLabelOverlapFixOption?: boolean;
+  onToggleEnablePointLabelOverlapFixOption?: (next: boolean) => void;
   engineVersion?: SmartLabelEngineVersion;
   onChangeEngineVersion?: (next: SmartLabelEngineVersion) => void;
   isRecomputing?: boolean;
@@ -57,6 +59,8 @@ export function SmartLabelBetaModal({
   onChangeMultiAbstractAction,
   enableUnit3BOption = true,
   onToggleEnableUnit3BOption,
+  enablePointLabelOverlapFixOption = false,
+  onToggleEnablePointLabelOverlapFixOption,
   engineVersion = "v0.2.1",
   onChangeEngineVersion,
   isRecomputing = false,
@@ -66,7 +70,12 @@ export function SmartLabelBetaModal({
 
   React.useEffect(() => {
     setInternalMaAction("hold");
-  }, [proposal?.inputHash, proposal?.applyAxisRequested, proposal?.applyDomainExtensionRequested]);
+  }, [
+    proposal?.inputHash,
+    proposal?.applyAxisRequested,
+    proposal?.applyDomainExtensionRequested,
+    proposal?.enablePointLabelOverlapFixRequested,
+  ]);
 
   const selectedMaAction: MultiAbstractActionMode =
     multiAbstractAction ?? internalMaAction;
@@ -271,6 +280,22 @@ export function SmartLabelBetaModal({
                 </span>
               </label>
             )}
+            {activeEngineVersion === "v0.2.2-beta" && onToggleEnablePointLabelOverlapFixOption && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 rounded-md border border-teal-700/70 bg-teal-950/60 px-2.5 py-1 text-[11px] font-medium text-teal-200 hover:border-teal-400"
+                title="체크 시 점 마커(circle, fill=black)에 연결된 대문자 점 이름(A, B, C, P, Q 등)의 선·축 겹침을 평가원 스타일 열린 방향으로 자동 정렬합니다 (기본 OFF)"
+                data-testid="modal-checkbox-enable-point-label-overlap-fix"
+              >
+                <input
+                  type="checkbox"
+                  checked={enablePointLabelOverlapFixOption}
+                  disabled={isRecomputing}
+                  onChange={(e) => onToggleEnablePointLabelOverlapFixOption(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded accent-teal-500"
+                />
+                <span>점 이름 겹침 자동 정렬</span>
+              </label>
+            )}
             {activeEngineVersion === "v0.2.2-beta" && onToggleApplyDomainExtensionOption && (
               <label
                 className="flex cursor-pointer items-center gap-1.5 rounded-md border border-cyan-700/70 bg-cyan-950/60 px-2.5 py-1 text-[11px] font-medium text-cyan-200 hover:border-cyan-400"
@@ -332,6 +357,10 @@ export function SmartLabelBetaModal({
                 {typeof activeProposal.originMovedCount === "number" &&
                 activeProposal.originMovedCount > 0
                   ? ` · 원점 O ${activeProposal.originMovedCount}개`
+                  : ""}
+                {typeof activeProposal.pointLabelMovedCount === "number" &&
+                activeProposal.pointLabelMovedCount > 0
+                  ? ` · 점 이름 ${activeProposal.pointLabelMovedCount}개`
                   : ""}
                 ) · 원본 유지: {activeProposal.heldCount}개 · 끝점 연장:{" "}
                 {activeProposal.domainExtensionOption?.editsCount ?? 0}개 · 축 조정:{" "}
@@ -416,6 +445,93 @@ export function SmartLabelBetaModal({
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* 점 이름(유형 A) 겹침 자동 정렬 상태 카드 (v0.2.2-beta 전용) */}
+          {activeEngineVersion === "v0.2.2-beta" && activeProposal.pointLabelOption && (
+            <div
+              className={`rounded-lg border p-3.5 text-xs ${
+                activeProposal.pointLabelOption.status === "applied"
+                  ? "border-teal-300 bg-teal-50/60 text-teal-950"
+                  : activeProposal.pointLabelOption.status === "blocked-unsafe"
+                  ? "border-rose-300 bg-rose-50 text-rose-900"
+                  : "border-slate-200 bg-slate-50 text-slate-700"
+              }`}
+              data-testid="smart-label-point-label-option-card"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
+                <span>
+                  📍 점 이름 겹침 자동 정렬 옵션:{" "}
+                  {activeProposal.pointLabelOption.requested
+                    ? `ON (활성화 · 이동 추천 ${activeProposal.pointLabelOption.movedCount}개 / 원본 유지 ${activeProposal.pointLabelOption.heldCount}개)`
+                    : "OFF (기본 원본 점 이름 위치 유지)"}
+                </span>
+                <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-semibold border border-slate-200 text-slate-600">
+                  {activeProposal.pointLabelOption.modeNote}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed mb-1.5">
+                {activeProposal.pointLabelOption.message}
+              </p>
+              {activeProposal.pointLabelOption.requested &&
+                activeProposal.pointLabelOption.items &&
+                activeProposal.pointLabelOption.items.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {activeProposal.pointLabelOption.items.map((pItem) => (
+                      <div
+                        key={`pt-opt-${pItem.id}`}
+                        data-testid="smart-label-point-label-option-item"
+                        className={`rounded border px-2.5 py-1.5 text-[11px] ${
+                          pItem.autoModified
+                            ? "border-teal-200 bg-white text-slate-800"
+                            : "border-slate-200 bg-white/70 text-slate-600"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <code className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-white">
+                              {pItem.label}
+                            </code>
+                            <span className="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-semibold text-teal-900">
+                              유형 A 점 이름{pItem.coordTikz ? ` (${pItem.coordTikz[0]}, ${pItem.coordTikz[1]})` : ""}
+                            </span>
+                            {pItem.autoModified ? (
+                              <>
+                                <span className="rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  이동 추천: [{pItem.origShift[0]}, {pItem.origShift[1]}]pt ➔ [
+                                  {pItem.newShift[0]}, {pItem.newShift[1]}]pt
+                                </span>
+                                {pItem.nearestDir && (
+                                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900">
+                                    방향: {pItem.nearestDir}
+                                  </span>
+                                )}
+                                {typeof pItem.markerGapPt === "number" && (
+                                  <span className="font-mono text-[10px] text-slate-600">
+                                    마커 간격: {pItem.markerGapPt}pt
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <span className="rounded bg-slate-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  원본 유지 (Hold · shift=[{pItem.origShift[0]}, {pItem.origShift[1]}]pt)
+                                </span>
+                                {pItem.origDirOption && (
+                                  <span className="text-[10px] text-slate-500">
+                                    (방향: {pItem.origDirOption})
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-slate-600 leading-relaxed">{pItem.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
             </div>
           )}
 
@@ -1149,6 +1265,66 @@ export function SmartLabelBetaModal({
                       {oDec.autoModified
                         ? oDec.selectionReason
                         : oDec.holdReason || oDec.selectionReason}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Unit 3-E: 점 이름(유형 A) 겹침 자동 정렬 판단 리포트 */}
+          {activeProposal.pointLabelDecisions && activeProposal.pointLabelDecisions.length > 0 && (
+            <div
+              className="rounded-lg border border-teal-200 bg-white p-3.5"
+              data-testid="smart-label-point-label-decisions"
+            >
+              <h4 className="mb-2.5 text-xs font-bold text-slate-800">
+                📍 Unit 3-E: 점 이름(유형 A) 겹침 판단 및 자연 배치 사유 ({activeProposal.pointLabelDecisions.length}개)
+              </h4>
+              <div className="space-y-2">
+                {activeProposal.pointLabelDecisions.map((pDec) => (
+                  <div
+                    key={pDec.id}
+                    data-testid="smart-label-point-label-decision-item"
+                    className={`rounded-md border p-2.5 text-xs ${
+                      pDec.autoModified
+                        ? "border-teal-200 bg-teal-50/40"
+                        : pDec.action === "hold-no-safe-point-candidate"
+                        ? "border-amber-300 bg-amber-50/50"
+                        : "border-slate-200 bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <code className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] font-mono text-white">
+                          {pDec.label}
+                        </code>
+                        <span className="rounded bg-teal-100 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                          점 마커 연결 점 이름
+                        </span>
+                        {pDec.autoModified ? (
+                          <span className="rounded bg-teal-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            이동 추천: [{pDec.origShift?.[0] ?? 0}, {pDec.origShift?.[1] ?? 0}]pt ➔ [
+                            {pDec.shift?.[0] ?? 0}, {pDec.shift?.[1] ?? 0}]pt ({pDec.nearestDir})
+                          </span>
+                        ) : pDec.action === "hold-no-safe-point-candidate" ? (
+                          <span className="rounded bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            보류 · 원본 유지 ({pDec.nonMoveCategory || "안전 후보 없음"})
+                          </span>
+                        ) : (
+                          <span className="rounded bg-slate-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                            원본 유지 ({pDec.origDirOption || pDec.nonMoveCategory || "무충돌"})
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-slate-600">
+                        <span>엔진: {pDec.selectedEngine}</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-slate-600 leading-relaxed">
+                      {pDec.autoModified
+                        ? pDec.selectionReason || pDec.reason
+                        : pDec.holdReason || pDec.selectionReason || pDec.reason}
                     </p>
                   </div>
                 ))}
