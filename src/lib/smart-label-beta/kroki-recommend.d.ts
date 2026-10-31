@@ -331,6 +331,62 @@ export interface PointLabelOptionInfo {
   items: SmartLabelPointLabelDecisionSummary[];
 }
 
+export interface SmartLabelAxisLetterDecisionSummary {
+  id: string;
+  label: string;
+  cleanLabel?: string;
+  symbol?: string;
+  role: "axis-letter-d2";
+  d2Category?: string;
+  subTypeCode?: string;
+  kind?: "standalone" | "inline";
+  axisName?: "x" | "y" | null;
+  anchorPt?: [number, number] | null;
+  nearbyMarkerId?: string | null;
+  origDirOption?: string | null;
+  moveDirDesc?: string | null;
+  strategy?: string | null;
+  action: "keep" | "move-d2-axis-letter" | "hold-no-safe-axis-letter-candidate";
+  nonMoveCode?: string | null;
+  nonMoveCategory?: string | null;
+  autoModified: boolean;
+  moved?: boolean;
+  selectedEngine?: string;
+  origShift: [number, number];
+  newShift: [number, number];
+  shift: [number, number];
+  deltaShiftPt?: [number, number];
+  movedPt?: number;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+  score?: number;
+  origClearancePt?: number | null;
+  finalClearancePt?: number | null;
+  origMainClearancePt?: number | null;
+  finalMainClearancePt?: number | null;
+  origDashedClearancePt?: number | null;
+  finalDashedClearancePt?: number | null;
+  origAxisClearancePt?: number | null;
+  finalAxisClearancePt?: number | null;
+  origNodeGapPt?: number | null;
+  finalNodeGapPt?: number | null;
+  reason: string;
+  selectionReason?: string;
+  holdReason?: string | null;
+}
+
+export interface AxisLetterOptionInfo {
+  enabled?: boolean;
+  requested: boolean;
+  applied: boolean;
+  status: "disabled" | "not-needed" | "pending-verification" | "applied" | "blocked-unsafe";
+  modeNote: string;
+  movedCount: number;
+  heldCount: number;
+  editsCount: number;
+  message: string;
+  items: SmartLabelAxisLetterDecisionSummary[];
+}
+
 export interface MultiAbstractCorrespondenceRow {
   nodeId: string;
   label: string;
@@ -378,17 +434,21 @@ export interface MultiAbstractVariantSummary {
   originHeldCount?: number;
   pointLabelMovedCount?: number;
   pointLabelHeldCount?: number;
+  axisLetterMovedCount?: number;
+  axisLetterHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
   tickDecisions?: SmartLabelTickDecisionSummary[];
   originDecisions?: SmartLabelOriginDecisionSummary[];
   pointLabelDecisions?: SmartLabelPointLabelDecisionSummary[];
+  axisLetterDecisions?: SmartLabelAxisLetterDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   axisOption: AxisOptionInfo;
   safeShrinkOption?: SafeShrinkOptionInfo;
   domainExtensionOption?: DomainExtensionOptionInfo;
   pointLabelOption?: PointLabelOptionInfo;
+  axisLetterOption?: AxisLetterOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
   verification: {
     compiled: boolean;
@@ -451,6 +511,8 @@ export interface SmartLabelBetaProposal {
   unit3DDisabledReason?: string | null;
   enablePointLabelOverlapFixRequested?: boolean;
   unit3EEnabled?: boolean;
+  enableAxisLetterOverlapFixRequested?: boolean;
+  unit3FEnabled?: boolean;
   applySafeShrinkRequested?: boolean;
   ok: boolean;
   status: "recommended" | "unchanged" | "unsupported" | "reverted" | "failed";
@@ -464,6 +526,7 @@ export interface SmartLabelBetaProposal {
   applyDomainExtensionRequested?: boolean;
   domainExtensionOption?: DomainExtensionOptionInfo;
   pointLabelOption?: PointLabelOptionInfo;
+  axisLetterOption?: AxisLetterOptionInfo;
   multiAbstractActionRequested?: MultiAbstractActionMode;
   multiAbstractOption?: MultiAbstractOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
@@ -479,11 +542,14 @@ export interface SmartLabelBetaProposal {
   originHeldCount?: number;
   pointLabelMovedCount?: number;
   pointLabelHeldCount?: number;
+  axisLetterMovedCount?: number;
+  axisLetterHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
   tickDecisions?: SmartLabelTickDecisionSummary[];
   originDecisions?: SmartLabelOriginDecisionSummary[];
   pointLabelDecisions?: SmartLabelPointLabelDecisionSummary[];
+  axisLetterDecisions?: SmartLabelAxisLetterDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   preservation: any;
@@ -522,6 +588,9 @@ export function recommendSmartLabelBeta(
     enableUnit3D?: boolean;
     enablePointLabelOverlapFix?: boolean;
     enableUnit3E?: boolean;
+    enableAxisLetterOverlapFix?: boolean;
+    enableUnit3F?: boolean;
+    enableD2AxisLetterFix?: boolean;
   }
 ): Promise<SmartLabelBetaProposal>;
 

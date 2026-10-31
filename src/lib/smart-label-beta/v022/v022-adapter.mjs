@@ -50,6 +50,9 @@ import {
 import {
   planTypeAPointLabelsUnit3E,
 } from "./unit3e-point-labels.mjs";
+import {
+  planAxisLetterOverlapsD2,
+} from "./unit3f-axis-letter-labels.mjs";
 import { maskComments, extractTikzNodes } from "../../../../experiments/smart-label-engine/src/tikz-nodes.mjs";
 import { compileExpr } from "../../../../experiments/smart-label-prototype/src/expr.mjs";
 
@@ -221,6 +224,7 @@ export function planAxesV022(scene, plan, P = PARAMS, opts = {}) {
   const placedById = new Map((plan?.placements || []).map((p) => [p.id, p]));
   const tickMoveById = new Map((opts.tickMoves || []).map((t) => [t.id, t]));
   const pointLabelMoveById = new Map((opts.pointLabelMoves || []).map((pl) => [pl.id, pl]));
+  const axisLetterMoveById = new Map((opts.axisLetterMoves || []).map((al) => [al.id, al]));
   let nodeNeedRight = xr;
   let nodeNeedTop = yt;
   let nodeNeedLeft = xl;
@@ -231,6 +235,7 @@ export function planAxesV022(scene, plan, P = PARAMS, opts = {}) {
     const pl = placedById.get(n.id);
     const tk = tickMoveById.get(n.id);
     const plm = pointLabelMoveById.get(n.id);
+    const alm = axisLetterMoveById.get(n.id);
     const b =
       pl && pl.action === "move" && pl.bbox
         ? pl.bbox
@@ -238,6 +243,8 @@ export function planAxesV022(scene, plan, P = PARAMS, opts = {}) {
         ? tk.newBBox || tk.bbox
         : plm && plm.bbox
         ? plm.bbox
+        : alm && alm.bbox
+        ? alm.bbox
         : n.bbox;
     addC(b.x0, b.y0, b.x1, b.y1);
 
@@ -380,7 +387,8 @@ export function extractAllGeometricProtectedBoundsPtV022(
   plan = null,
   tickMoves = [],
   originMoves = [],
-  pointLabelMoves = []
+  pointLabelMoves = [],
+  axisLetterMoves = []
 ) {
   const units = scene?.units || { xU: 28.45274, yU: 28.45274 };
   const { xU, yU } = units;
@@ -553,6 +561,7 @@ export function extractAllGeometricProtectedBoundsPtV022(
   const tickMoveById = new Map((tickMoves || []).map((t) => [t.id, t]));
   const originMoveById = new Map((originMoves || []).map((o) => [o.id, o]));
   const pointLabelMoveById = new Map((pointLabelMoves || []).map((p) => [p.id, p]));
+  const axisLetterMoveById = new Map((axisLetterMoves || []).map((al) => [al.id, al]));
 
   for (const n of scene?.nodes || []) {
     if (!n.bbox || n.role === "marker") continue;
@@ -561,6 +570,7 @@ export function extractAllGeometricProtectedBoundsPtV022(
     const tk = tickMoveById.get(n.id);
     const om = originMoveById.get(n.id);
     const plm = pointLabelMoveById.get(n.id);
+    const alm = axisLetterMoveById.get(n.id);
 
     const b =
       pl && pl.action === "move" && pl.bbox
@@ -571,16 +581,18 @@ export function extractAllGeometricProtectedBoundsPtV022(
             ? om.newBBox || om.bbox
             : plm && (plm.newBBox || plm.bbox)
               ? plm.newBBox || plm.bbox
-              : n.bbox;
+              : alm && (alm.newBBox || alm.bbox)
+                ? alm.newBBox || alm.bbox
+                : n.bbox;
 
     addItem(`node-${n.role}`, n.label, b.x0, b.y0, b.x1, b.y1, {
       nodeId: n.id,
       role: n.role,
     });
 
-    // Unit 3-E 점 이름 이동 시 원본 위치 범위도 함께 외곽 보호 경계에 포함시켜
-    // 점 이름 이동 때문에 기존에 보류되던 축이 깎이는 현상을 원천 방지하고, 이동 후 바깥쪽 위치도 함께 보호한다.
-    if (plm && n.bbox && b !== n.bbox) {
+    // Unit 3-E 점 이름 및 Unit 3-F(D-2) 축 문자 이동 시 원본 위치 범위도 함께 외곽 보호 경계에 포함시켜
+    // 라벨 이동 때문에 기존에 보류되던 축이 깎이는 현상을 원천 방지하고, 이동 후 바깥쪽 위치도 함께 보호한다.
+    if ((plm || alm) && n.bbox && b !== n.bbox) {
       addItem("point-label-orig-bound", n.label, n.bbox.x0, n.bbox.y0, n.bbox.x1, n.bbox.y1, {
         nodeId: n.id,
         role: n.role,
@@ -693,6 +705,8 @@ export function planSafeAxisShrinkV022(scene, activePlan, opts = {}) {
   const originMoves = opts.originMoves || activePlan?.originPlan?.movedOrigins || [];
   const pointLabelMoves =
     opts.pointLabelMoves || activePlan?.pointLabelPlan?.movedPointLabels || [];
+  const axisLetterMoves =
+    opts.axisLetterMoves || activePlan?.axisLetterPlan?.movedAxisLetters || [];
 
   // Gate 1: 정확히 식별할 수 있는 표준 직교 x축/y축 및 신뢰 가능한 좌표 스케일인지 확인
   if (!scene?.ok || !scene?.axes?.x || !scene?.axes?.y || !scene?.units?.coordsReliable) {
@@ -743,6 +757,7 @@ export function planSafeAxisShrinkV022(scene, activePlan, opts = {}) {
   const effectiveTickMoves = mode === "shrink-only" ? [] : tickMoves;
   const effectiveOriginMoves = mode === "shrink-only" ? [] : originMoves;
   const effectivePointLabelMoves = mode === "shrink-only" ? [] : pointLabelMoves;
+  const effectiveAxisLetterMoves = mode === "shrink-only" ? [] : axisLetterMoves;
 
   const protectedItems = extractAllGeometricProtectedBoundsPtV022(
     scene,
@@ -750,7 +765,8 @@ export function planSafeAxisShrinkV022(scene, activePlan, opts = {}) {
     effectivePlan,
     effectiveTickMoves,
     effectiveOriginMoves,
-    effectivePointLabelMoves
+    effectivePointLabelMoves,
+    effectiveAxisLetterMoves
   );
 
   let minContentX0 = 0;
@@ -1345,7 +1361,8 @@ export function runPlanningV022(
   enableUnit3D = true,
   applyDomainExtension = false,
   enableUnit3E = false,
-  applySafeShrink = false
+  applySafeShrink = false,
+  enableUnit3F = false
 ) {
   const plan0 = planLabelsUnit2(scene, P, null, { ...flags, applyAxisRequested });
   let activePlan = plan0;
@@ -1505,6 +1522,43 @@ export function runPlanningV022(
     }
   }
 
+  // Unit 3-F / D-2 (축 문자 및 기호 눈금 a, b, c, \alpha, \beta 겹침 자동 정렬 — 기본 OFF, 체크 시에만 실행)
+  const axisLetterPlan = enableUnit3F
+    ? planAxisLetterOverlapsD2(
+        sceneForPostPlan,
+        activePlan,
+        activeShift,
+        axisEditsToApply,
+        tickPlan,
+        originPlan,
+        pointLabelPlan
+      )
+    : {
+        requested: false,
+        applied: false,
+        edits: [],
+        movedAxisLetters: [],
+        heldAxisLetters: [],
+        decisions: [],
+        decisionsByNodeId: new Map(),
+        classification: null,
+      };
+
+  for (const [aid, adec] of axisLetterPlan.decisionsByNodeId.entries()) {
+    decisionsByNodeId.set(aid, adec);
+  }
+
+  if (axisLetterPlan.movedAxisLetters && axisLetterPlan.movedAxisLetters.length > 0) {
+    axisPlan = planAxesV022(sceneForPostPlan, activePlan, P, {
+      tickMoves: tickPlan.movedTicks,
+      pointLabelMoves: pointLabelPlan.movedPointLabels,
+      axisLetterMoves: axisLetterPlan.movedAxisLetters,
+    });
+    if (applyAxisRequested) {
+      axisEditsToApply = axisEdits(sceneForPostPlan, axisPlan);
+    }
+  }
+
   // Safe Shrink 적용 전 기존 축 연장 플랜/편집 백업 (2차 Kroki 렌더링 충돌 시 Safe Shrink만 롤백하기 위함)
   const baseAxisPlanBeforeShrink = {
     ...axisPlan,
@@ -1538,6 +1592,7 @@ export function runPlanningV022(
         tickMoves: tickPlan.movedTicks,
         originMoves: originPlan.movedOrigins,
         pointLabelMoves: pointLabelPlan.movedPointLabels,
+        axisLetterMoves: axisLetterPlan.movedAxisLetters,
       }),
       requested: true,
     };
@@ -1574,6 +1629,7 @@ export function runPlanningV022(
   activePlan.tickPlan = tickPlan;
   activePlan.originPlan = originPlan;
   activePlan.pointLabelPlan = pointLabelPlan;
+  activePlan.axisLetterPlan = axisLetterPlan;
   activePlan.domainPlan = domainPlan;
   activePlan.safeShrinkPlan = safeShrinkPlan;
   activePlan.multiAbstractAnalysis =
@@ -1609,6 +1665,7 @@ export function runPlanningV022(
     tickPlan,
     originPlan,
     pointLabelPlan,
+    axisLetterPlan,
     labelDecisions,
     decisionsByNodeId,
     multiAbstractAnalysis: activePlan.multiAbstractAnalysis,
@@ -1678,7 +1735,10 @@ export function compareCollisionDiagnosticsV022(
       if (
         dec &&
         dec.label === item.nodeLabel &&
-        (dec.tickAxis || dec.role === "origin" || dec.role === "point-label-typeA")
+        (dec.tickAxis ||
+          dec.role === "origin" ||
+          dec.role === "point-label-typeA" ||
+          dec.role === "axis-letter-d2")
       ) {
         return dec;
       }
@@ -1710,6 +1770,14 @@ export function compareCollisionDiagnosticsV022(
         ...item,
         status: "pre-existing-unresolved",
         reasonCode: "no-safe-point-candidate",
+        reason: tickDec.reason,
+      };
+    }
+    if (tickDec && tickDec.nonMoveCode === "no-safe-axis-letter-candidate") {
+      return {
+        ...item,
+        status: "pre-existing-unresolved",
+        reasonCode: "no-safe-axis-letter-candidate",
         reason: tickDec.reason,
       };
     }
@@ -1923,7 +1991,8 @@ export function verifyRenderedCollisionsV022(
   P = PARAMS,
   flags = DEFAULT_UNIT2_FLAGS,
   movedOriginNodeIds = [],
-  movedPointLabelNodeIds = []
+  movedPointLabelNodeIds = [],
+  movedAxisLetterNodeIds = []
 ) {
   const fNodes = (scene?.nodes || []).filter((n) => n.role === "function" && n.bbox);
   const assigned = assignStrokesUnit2(scene, fNodes, flags);
@@ -2102,6 +2171,51 @@ export function verifyRenderedCollisionsV022(
     }
   }
 
+  // Unit 3-F (D-2) 로 이동된 축 문자 노드의 2차 렌더링 충돌 검사
+  if (Array.isArray(movedAxisLetterNodeIds) && movedAxisLetterNodeIds.length > 0) {
+    const movedAlSet = new Set(movedAxisLetterNodeIds);
+    const renderedAlNodes = (scene?.nodes || []).filter((n) => movedAlSet.has(n.id) && n.bbox);
+    for (const aNode of renderedAlNodes) {
+      const poly = [rectPoly(aNode.bbox)];
+      const nonAxisStrokes = (scene?.strokes || []).filter((s) => s.kind !== "axis");
+      const axisStrokes = (scene?.strokes || []).filter((s) => s.kind === "axis");
+      const minStroke = nonAxisStrokes.length
+        ? r2(
+            Math.min(
+              ...nonAxisStrokes.map(
+                (s) => minDistPolylines(poly, [{ pts: s.pts, closed: false }]) - (s.halfWidth || 0.5)
+              )
+            )
+          )
+        : 999;
+      const minAxis = axisStrokes.length
+        ? r2(
+            Math.min(
+              ...axisStrokes.map(
+                (s) => minDistPolylines(poly, [{ pts: s.pts, closed: false }]) - (s.halfWidth || 0.5)
+              )
+            )
+          )
+        : 999;
+      let minGap = Infinity;
+      for (const ob of allBoxes) {
+        if (ob.id === aNode.id) continue;
+        minGap = Math.min(minGap, bboxGapRect(aNode.bbox, ob.bbox));
+      }
+      minGap = Number.isFinite(minGap) ? r2(minGap) : 999;
+
+      if (minStroke < -0.15) {
+        issues.push(`이동된 축 문자 ${aNode.label} 이(가) 곡선/보조선을 침범함(minStroke=${minStroke}pt)`);
+      }
+      if (minAxis < -0.15) {
+        issues.push(`이동된 축 문자 ${aNode.label} 이(가) 좌표축을 침범함(minAxis=${minAxis}pt)`);
+      }
+      if (minGap <= 0.2) {
+        issues.push(`이동된 축 문자 ${aNode.label} 이(가) 다른 라벨과 겹침(minGap=${minGap}pt)`);
+      }
+    }
+  }
+
   return {
     ok: issues.length === 0,
     issues,
@@ -2122,6 +2236,7 @@ export function verifyOutputVariantV022({
   movedFNodeIndices,
   movedOriginNodeIds = [],
   movedPointLabelNodeIds = [],
+  movedAxisLetterNodeIds = [],
   workRoot,
   P = PARAMS,
   flags = DEFAULT_UNIT2_FLAGS,
@@ -2177,7 +2292,8 @@ export function verifyOutputVariantV022({
     P,
     flags,
     movedOriginNodeIds,
-    movedPointLabelNodeIds
+    movedPointLabelNodeIds,
+    movedAxisLetterNodeIds
   );
   if (!out.collisionCheck.ok) {
     out.issues.push(...out.collisionCheck.issues);

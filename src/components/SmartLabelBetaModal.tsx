@@ -36,6 +36,8 @@ interface SmartLabelBetaModalProps {
   onToggleEnableUnit3BOption?: (next: boolean) => void;
   enablePointLabelOverlapFixOption?: boolean;
   onToggleEnablePointLabelOverlapFixOption?: (next: boolean) => void;
+  enableAxisLetterOverlapFixOption?: boolean;
+  onToggleEnableAxisLetterOverlapFixOption?: (next: boolean) => void;
   engineVersion?: SmartLabelEngineVersion;
   onChangeEngineVersion?: (next: SmartLabelEngineVersion) => void;
   isRecomputing?: boolean;
@@ -65,6 +67,8 @@ export function SmartLabelBetaModal({
   onToggleEnableUnit3BOption,
   enablePointLabelOverlapFixOption = false,
   onToggleEnablePointLabelOverlapFixOption,
+  enableAxisLetterOverlapFixOption = false,
+  onToggleEnableAxisLetterOverlapFixOption,
   engineVersion = "v0.2.1",
   onChangeEngineVersion,
   isRecomputing = false,
@@ -80,6 +84,7 @@ export function SmartLabelBetaModal({
     proposal?.applySafeShrinkRequested,
     proposal?.applyDomainExtensionRequested,
     proposal?.enablePointLabelOverlapFixRequested,
+    proposal?.enableAxisLetterOverlapFixRequested,
   ]);
 
   const selectedMaAction: MultiAbstractActionMode =
@@ -299,6 +304,22 @@ export function SmartLabelBetaModal({
                   className="h-3.5 w-3.5 rounded accent-teal-500"
                 />
                 <span>점 이름 겹침 자동 정렬</span>
+              </label>
+            )}
+            {activeEngineVersion === "v0.2.2-beta" && onToggleEnableAxisLetterOverlapFixOption && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 rounded-md border border-purple-700/70 bg-purple-950/60 px-2.5 py-1 text-[11px] font-medium text-purple-200 hover:border-purple-400"
+                title="체크 시 좌표축 위의 문자·그리스 문자 눈금(a, b, c, \alpha, \beta 등)의 곡선·보조선 관통 겹침을 평가원 스타일로 자동 정렬합니다 (직선 이름 l,m,n 제외 · 기본 OFF)"
+                data-testid="modal-checkbox-enable-axis-letter-overlap-fix"
+              >
+                <input
+                  type="checkbox"
+                  checked={enableAxisLetterOverlapFixOption}
+                  disabled={isRecomputing}
+                  onChange={(e) => onToggleEnableAxisLetterOverlapFixOption(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded accent-purple-500"
+                />
+                <span>축 문자 눈금 자동 정렬</span>
               </label>
             )}
             {activeEngineVersion === "v0.2.2-beta" && onToggleApplyDomainExtensionOption && (
@@ -639,6 +660,79 @@ export function SmartLabelBetaModal({
                           </div>
                         </div>
                         <div className="text-[11px] text-slate-600 leading-relaxed">{pItem.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+            </div>
+          )}
+
+          {/* 축 문자(D-2: a, b, c, \alpha, \beta 등) 겹침 자동 정렬 상태 카드 (v0.2.2-beta 전용) */}
+          {activeEngineVersion === "v0.2.2-beta" && proposal.axisLetterOption && (
+            <div
+              className={`rounded-lg border p-3.5 text-xs ${
+                proposal.axisLetterOption.status === "applied"
+                  ? "border-purple-300 bg-purple-50/60 text-purple-950"
+                  : proposal.axisLetterOption.status === "blocked-unsafe"
+                  ? "border-rose-300 bg-rose-50 text-rose-900"
+                  : "border-slate-200 bg-slate-50 text-slate-700"
+              }`}
+              data-testid="smart-label-axis-letter-option-card"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
+                <span>
+                  🔤 축 문자 눈금(D-2) 자동 정렬 옵션:{" "}
+                  {proposal.axisLetterOption.requested ? "ON (활성화)" : "OFF (기본 원본 축 문자 위치 유지)"}
+                </span>
+                <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-semibold border border-slate-200 text-slate-600">
+                  {proposal.axisLetterOption.modeNote}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed mb-1.5">
+                {proposal.axisLetterOption.message}
+              </p>
+              {proposal.axisLetterOption.requested &&
+                proposal.axisLetterOption.items &&
+                proposal.axisLetterOption.items.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {proposal.axisLetterOption.items.map((aItem) => (
+                      <div
+                        key={`al-opt-${aItem.id}`}
+                        data-testid="smart-label-axis-letter-item"
+                        className={`rounded border px-2.5 py-1.5 text-[11px] ${
+                          aItem.autoModified
+                            ? "border-purple-200 bg-white text-slate-800"
+                            : "border-slate-200 bg-white/70 text-slate-600"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <code className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-white">
+                              {aItem.label}
+                            </code>
+                            <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-900">
+                              {aItem.subTypeCode || "D-2 축 문자"} ({aItem.axisName || "?"}축)
+                            </span>
+                            {aItem.autoModified ? (
+                              <>
+                                <span className="rounded bg-purple-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  이동 추천: [{aItem.origShift[0]}, {aItem.origShift[1]}]pt ➔ [
+                                  {aItem.newShift[0]}, {aItem.newShift[1]}]pt
+                                </span>
+                                {aItem.moveDirDesc && (
+                                  <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-900">
+                                    방향: {aItem.moveDirDesc}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="rounded bg-slate-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                원본 유지 (Hold · shift=[{aItem.origShift[0]}, {aItem.origShift[1]}]pt)
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-[11px] text-slate-600 leading-relaxed">{aItem.reason}</div>
                       </div>
                     ))}
                   </div>
