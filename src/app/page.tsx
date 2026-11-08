@@ -24,6 +24,7 @@ import guide2 from "@/assets/guide2.png";
 import guide3 from "@/assets/guide3.png";
 import { SmartLabelBetaModal, type ModeBBatchedOptions } from "@/components/SmartLabelBetaModal";
 import { SmartLabelUpdateNoticeModal } from "@/components/SmartLabelUpdateNoticeModal";
+import KoSmartHelpModal from "@/components/KoSmartHelpModal";
 import {
   DEVELOPER_BETA_EMAIL,
   SMART_LABEL_BACKUP_STORAGE_KEY,
@@ -3498,7 +3499,13 @@ const getProcessedInput = (code: string) => {
       {/* ══════════════════════════════════════════════════════
           사용 설명서 모달
       ══════════════════════════════════════════════════════ */}
-      {isHelpOpen && (
+      {/* ══════════════════════════════════════════════════════
+          사용 설명서 모달 (신규 2탭: [빠른 시작] + [전체 사용설명서])
+      ══════════════════════════════════════════════════════ */}
+      <KoSmartHelpModal open={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
+      {/* [백업 보존] 기존 단일 스크롤 도움말 모달 원본 보존 */}
+      {false && isHelpOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.80)", backdropFilter: "blur(8px)" }}
