@@ -402,7 +402,7 @@ export default function KoSmartHelpModal({ open, onClose }: KoSmartHelpModalProp
                         <strong className="text-white">전용 서버(Dedicated) vs 공용 서버(Public):</strong>
                         <ul className="list-disc pl-4 mt-1 space-y-1 text-zinc-300">
                           <li>
-                            <strong className="text-emerald-300">Dedicated (사내 전용 서버, 기본 권장):</strong> POST 방식을 사용하여 코드 길이 제한이 없으며 빠른 렌더링과 <code className="text-zinc-200">Unit 3-B</code> 2차 정밀 검증을 지원합니다.
+                            <strong className="text-emerald-300">Dedicated (사내 전용 서버, 기본 권장):</strong> POST 방식을 사용하여 공용 서버의 URL 길이 제한(약 4,000자) 없이 긴 TikZ 코드도 안정적으로 렌더링하며 <code className="text-zinc-200">Unit 3-B</code> 2차 정밀 검증을 지원합니다.
                           </li>
                           <li>
                             <strong className="text-amber-300">Public (공용 서버, 비상용 백업):</strong> 공개 GET URL 방식을 사용하므로 압축 전 TikZ 코드가 약 <strong className="text-white">4,000자</strong>를 초과하면 URL 길이 제한으로 렌더링이 실패할 수 있습니다.

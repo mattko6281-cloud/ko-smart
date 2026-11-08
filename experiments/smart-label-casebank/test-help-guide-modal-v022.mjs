@@ -115,6 +115,7 @@ test("7. 신규 설명서 내 구버전 버튼명 단독 안내 없음 및 조�
   assert.ok(helpModalSrc.includes("0.2 단위"), "수동 축 길이 조절 0.2 단위 명시");
   assert.ok(helpModalSrc.includes("±0.1 단위"), "그래프 길이(Domain) ±0.1 단위 명시");
   assert.ok(helpModalSrc.includes("4,000자"), "공용 서버(Public) 4,000자 제한 안내 명시");
+  assert.ok(!helpModalSrc.includes("무제한"), "Dedicated 서버 사용량 과장('무제한') 표현 없음");
 });
 
 test("8. [📥저장 & 📋HWP 자동복사] 명칭, Ctrl+V 붙여넣기, 원(Circle) 1:1 자동 보정, [.txt 포함] 세트 저장 반영 검증", () => {
