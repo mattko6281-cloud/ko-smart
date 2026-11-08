@@ -111,10 +111,54 @@ export function shouldShowSmartLabelBetaUI(params) {
  * @param {any} proposal
  * @param {"hold" | "recommend" | "swap"} [selectedAction]
  */
-export function resolveActiveProposalForMultiAbstractChoice(proposal, selectedAction) {
+export function resolveActiveProposalForLineNameChoice(proposal, selectedLineNameAction) {
+  if (!proposal || typeof proposal !== "object") return proposal;
+  const lnOpt = proposal.lineNameOption;
+  if (!lnOpt || !lnOpt.detected || !lnOpt.variants) return proposal;
+
+  const requested =
+    selectedLineNameAction === "recommend" ||
+    selectedLineNameAction === "swap" ||
+    selectedLineNameAction === "hold"
+      ? selectedLineNameAction
+      : lnOpt.selectedAction || "hold";
+
+  let effectiveAction = "hold";
+  if (lnOpt.safetyTier === "D3-2" && lnOpt.supportedPair) {
+    if (requested === "recommend" && lnOpt.canRecommend && lnOpt.variants.recommend) {
+      effectiveAction = "recommend";
+    } else if (requested === "swap" && lnOpt.canSwap && lnOpt.variants.swap) {
+      effectiveAction = "swap";
+    }
+  }
+
+  const chosenVariant = lnOpt.variants[effectiveAction] || lnOpt.variants.hold;
+  if (!chosenVariant) return proposal;
+
+  return {
+    ...proposal,
+    ...chosenVariant,
+    lineNameActionRequested: effectiveAction,
+    lineNameOption: {
+      ...lnOpt,
+      ...(chosenVariant.lineNameOption || {}),
+      variants: lnOpt.variants,
+      correspondenceRows: lnOpt.correspondenceRows || [],
+      selectedAction: effectiveAction,
+    },
+  };
+}
+
+export function resolveActiveProposalForMultiAbstractChoice(
+  proposal,
+  selectedAction,
+  selectedLineNameAction
+) {
   if (!proposal || typeof proposal !== "object") return proposal;
   const maOpt = proposal.multiAbstractOption;
-  if (!maOpt || !maOpt.detected || !maOpt.variants) return proposal;
+  if (!maOpt || !maOpt.detected || !maOpt.variants) {
+    return resolveActiveProposalForLineNameChoice(proposal, selectedLineNameAction);
+  }
 
   const requested =
     selectedAction === "recommend" || selectedAction === "swap" || selectedAction === "hold"
@@ -131,7 +175,21 @@ export function resolveActiveProposalForMultiAbstractChoice(proposal, selectedAc
   }
 
   const chosenVariant = maOpt.variants[effectiveAction] || maOpt.variants.hold;
-  if (!chosenVariant) return proposal;
+  if (!chosenVariant) {
+    return resolveActiveProposalForLineNameChoice(proposal, selectedLineNameAction);
+  }
+
+  const maResolved = {
+    ...proposal,
+    ...chosenVariant,
+    multiAbstractActionRequested: effectiveAction,
+    multiAbstractOption: {
+      ...maOpt,
+      selectedAction: effectiveAction,
+    },
+  };
+  return resolveActiveProposalForLineNameChoice(maResolved, selectedLineNameAction);
+  if (false)
 
   return {
     ...proposal,
@@ -159,7 +217,8 @@ export function evaluateProposalApplicability(proposal, currentRawInput, opts = 
   }
   const activeProposal = resolveActiveProposalForMultiAbstractChoice(
     proposal,
-    opts?.multiAbstractAction ?? proposal?.multiAbstractOption?.selectedAction
+    opts?.multiAbstractAction ?? proposal?.multiAbstractOption?.selectedAction,
+    opts?.lineNameAction ?? proposal?.lineNameOption?.selectedAction
   );
   if (activeProposal.originalCode !== currentRawInput) {
     return {
@@ -203,7 +262,8 @@ export function evaluateProposalApplicability(proposal, currentRawInput, opts = 
 export function applyApprovedProposal(proposal, currentRawInput, opts = {}) {
   const activeProposal = resolveActiveProposalForMultiAbstractChoice(
     proposal,
-    opts?.multiAbstractAction ?? proposal?.multiAbstractOption?.selectedAction
+    opts?.multiAbstractAction ?? proposal?.multiAbstractOption?.selectedAction,
+    opts?.lineNameAction ?? proposal?.lineNameOption?.selectedAction
   );
   const check = evaluateProposalApplicability(activeProposal, currentRawInput, opts);
   if (!check.allowed) {
@@ -221,6 +281,9 @@ export function applyApprovedProposal(proposal, currentRawInput, opts = {}) {
     inputHash: activeProposal.inputHash || null,
     multiAbstractAction: activeProposal.multiAbstractOption?.detected
       ? activeProposal.multiAbstractOption.selectedAction
+      : null,
+    lineNameAction: activeProposal.lineNameOption?.detected
+      ? activeProposal.lineNameOption.selectedAction
       : null,
     appliedAt: Date.now(),
   };

@@ -7,6 +7,7 @@ import {
 } from "@/lib/smart-label-beta/client-workflow";
 import type {
   MultiAbstractActionMode,
+  LineNameActionMode,
   SmartLabelAccessRole,
   SmartLabelBetaResponse,
   SmartLabelEngineVersion,
@@ -38,6 +39,10 @@ interface SmartLabelBetaModalProps {
   onToggleEnablePointLabelOverlapFixOption?: (next: boolean) => void;
   enableAxisLetterOverlapFixOption?: boolean;
   onToggleEnableAxisLetterOverlapFixOption?: (next: boolean) => void;
+  enableLineNameOverlapFixOption?: boolean;
+  onToggleEnableLineNameOverlapFixOption?: (next: boolean) => void;
+  lineNameAction?: LineNameActionMode;
+  onChangeLineNameAction?: (next: LineNameActionMode) => void;
   engineVersion?: SmartLabelEngineVersion;
   onChangeEngineVersion?: (next: SmartLabelEngineVersion) => void;
   isRecomputing?: boolean;
@@ -69,6 +74,10 @@ export function SmartLabelBetaModal({
   onToggleEnablePointLabelOverlapFixOption,
   enableAxisLetterOverlapFixOption = false,
   onToggleEnableAxisLetterOverlapFixOption,
+  enableLineNameOverlapFixOption = false,
+  onToggleEnableLineNameOverlapFixOption,
+  lineNameAction,
+  onChangeLineNameAction,
   engineVersion = "v0.2.1",
   onChangeEngineVersion,
   isRecomputing = false,
@@ -85,10 +94,38 @@ export function SmartLabelBetaModal({
     proposal?.applyDomainExtensionRequested,
     proposal?.enablePointLabelOverlapFixRequested,
     proposal?.enableAxisLetterOverlapFixRequested,
+    proposal?.enableLineNameOverlapFixRequested,
   ]);
 
   const selectedMaAction: MultiAbstractActionMode =
     multiAbstractAction ?? internalMaAction;
+
+
+  const [internalLnAction, setInternalLnAction] =
+    React.useState<LineNameActionMode>("hold");
+
+  React.useEffect(() => {
+    setInternalLnAction("hold");
+  }, [
+    proposal?.inputHash,
+    proposal?.applyAxisRequested,
+    proposal?.applySafeShrinkRequested,
+    proposal?.applyDomainExtensionRequested,
+    proposal?.enablePointLabelOverlapFixRequested,
+    proposal?.enableAxisLetterOverlapFixRequested,
+    proposal?.enableLineNameOverlapFixRequested,
+  ]);
+
+  const selectedLnAction: LineNameActionMode =
+    lineNameAction ?? internalLnAction;
+
+  const handleSelectLnAction = (next: LineNameActionMode) => {
+    setInternalLnAction(next);
+    if (onChangeLineNameAction) {
+      onChangeLineNameAction(next);
+    }
+  };
+
 
   const handleSelectMaAction = (next: MultiAbstractActionMode) => {
     setInternalMaAction(next);
@@ -141,15 +178,21 @@ export function SmartLabelBetaModal({
 
   const activeProposal = resolveActiveProposalForMultiAbstractChoice(
     proposal,
-    selectedMaAction
+    selectedMaAction,
+    selectedLnAction
   ) as SmartLabelBetaResponse;
   const maOpt = activeProposal.multiAbstractOption;
+  const lnOpt = activeProposal.lineNameOption;
+  const effectiveLnAction: LineNameActionMode = lnOpt?.requiresUserApproval
+    ? lnOpt.selectedAction
+    : "hold";
   const effectiveMaAction: MultiAbstractActionMode = maOpt?.detected
     ? maOpt.selectedAction
     : "hold";
 
   const applicability = evaluateProposalApplicability(activeProposal, currentRawInput, {
     multiAbstractAction: effectiveMaAction,
+    lineNameAction: effectiveLnAction,
   });
   const isStale = currentRawInput !== activeProposal.originalCode;
   const diag = activeProposal.collisionDiagnostics;
@@ -322,6 +365,22 @@ export function SmartLabelBetaModal({
                 <span>축 문자 눈금 자동 정렬</span>
               </label>
             )}
+            {activeEngineVersion === "v0.2.2-beta" && onToggleEnableLineNameOverlapFixOption && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 rounded-md border border-sky-700/70 bg-sky-950/60 px-2.5 py-1 text-[11px] font-medium text-sky-200 hover:border-sky-400"
+                title="체크 시 직선 이름(l, m, n, \ell)을 대응 직선의 가시 끝점(visible tip) 인접 열린 방향으로 자동 정렬하며, 2직선(l, m)은 기본 Hold 후 추천/교환 선택이 가능합니다 (기본 OFF)"
+                data-testid="modal-checkbox-enable-line-name-overlap-fix"
+              >
+                <input
+                  type="checkbox"
+                  checked={enableLineNameOverlapFixOption}
+                  disabled={isRecomputing}
+                  onChange={(e) => onToggleEnableLineNameOverlapFixOption(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded accent-sky-500"
+                />
+                <span>직선 이름(l, m, n) 자동 정렬</span>
+              </label>
+            )}
             {activeEngineVersion === "v0.2.2-beta" && onToggleApplyDomainExtensionOption && (
               <label
                 className="flex cursor-pointer items-center gap-1.5 rounded-md border border-cyan-700/70 bg-cyan-950/60 px-2.5 py-1 text-[11px] font-medium text-cyan-200 hover:border-cyan-400"
@@ -400,11 +459,7 @@ export function SmartLabelBetaModal({
                 activeProposal.originMovedCount > 0
                   ? ` · 원점 O ${activeProposal.originMovedCount}개`
                   : ""}
-                {typeof activeProposal.pointLabelMovedCount === "number" &&
-                activeProposal.pointLabelMovedCount > 0
-                  ? ` · 점 이름 ${activeProposal.pointLabelMovedCount}개`
-                  : ""}
-                ) · 원본 유지: {activeProposal.heldCount}개 · 끝점 연장:{" "}
+                {typeof activeProposal.pointLabelMovedCount === 'number' && activeProposal.pointLabelMovedCount > 0 ? ' · 점 이름 ' + activeProposal.pointLabelMovedCount + '개' : ''}{typeof activeProposal.axisLetterMovedCount === 'number' && activeProposal.axisLetterMovedCount > 0 ? ' · 축 문자 ' + activeProposal.axisLetterMovedCount + '개' : ''}{typeof activeProposal.lineNameMovedCount === 'number' && activeProposal.lineNameMovedCount > 0 ? ' · 직선 이름 ' + activeProposal.lineNameMovedCount + '개' : ''}) · 원본 유지: {activeProposal.heldCount}개 · 끝점 연장:
                 {activeProposal.domainExtensionOption?.editsCount ?? 0}개 · 축 조정:{" "}
                 {activeProposal.axisOption?.editsCount ?? 0}개
                 {activeProposal.safeShrinkOption?.applied
@@ -737,6 +792,246 @@ export function SmartLabelBetaModal({
                     ))}
                   </div>
                 )}
+            </div>
+          )}
+
+          {/* 직선 이름(D-3: l, m, n, \ell) 자동 정렬 및 D3-2 대응 확인 카드 (v0.2.2-beta 전용) */}
+          {activeEngineVersion === "v0.2.2-beta" && lnOpt && (
+            <div
+              className={`rounded-lg border p-3.5 text-xs ${
+                lnOpt.status === "applied"
+                  ? "border-sky-300 bg-sky-50/60 text-sky-950"
+                  : lnOpt.status === "user-confirm-hold"
+                  ? "border-amber-300 bg-amber-50/60 text-amber-950"
+                  : lnOpt.status === "held-d3-3" || lnOpt.status === "blocked-unsafe"
+                  ? "border-rose-300 bg-rose-50 text-rose-900"
+                  : "border-slate-200 bg-slate-50 text-slate-700"
+              }`}
+              data-testid="smart-label-line-name-option-card"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2 font-bold mb-1">
+                <span>
+                  📏 직선 이름(l, m, n, \ell) 자동 정렬 옵션(D-3):{" "}
+                  {lnOpt.requested
+                    ? `ON (활성화${lnOpt.d3SubType ? ` · ${lnOpt.d3SubType}` : ""})`
+                    : "OFF (기본 원본 직선 이름 위치 유지)"}
+                </span>
+                <span className="rounded bg-white/80 px-2 py-0.5 text-[10px] font-semibold border border-slate-200 text-slate-600">
+                  {lnOpt.modeNote}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed mb-1.5">
+                {lnOpt.message}
+              </p>
+
+              {/* D3-2 (2직선 l, m) 사용자 확인 UI: Hold / Recommend / Swap */}
+              {lnOpt.requested && lnOpt.d3SubType === "D3-2" && lnOpt.requiresUserApproval && (
+                <div
+                  className="mt-2.5 rounded-lg border border-sky-200 bg-white p-3 space-y-2.5"
+                  data-testid="smart-label-line-name-d3-2-confirm-box"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold text-[11px] text-slate-900">
+                      🔀 2직선 이름(l, m) ↔ 직선 대응 확인 (D3-2: 기본 원본 유지 Hold)
+                    </span>
+                    <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                      추상 함수(유형 2)와 독립 선택 · 가시 끝점(visible tip) 기준 배치
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <button
+                      type="button"
+                      disabled={isRecomputing}
+                      onClick={() => handleSelectLnAction("hold")}
+                      data-testid="btn-line-name-hold"
+                      className={`rounded-lg border px-3 py-2 text-left transition ${
+                        effectiveLnAction === "hold"
+                          ? "border-slate-800 bg-slate-900 text-white shadow-sm"
+                          : "border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 font-bold text-[11px]">
+                        <span>③ 원본 유지 (Hold)</span>
+                        <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-300">
+                          기본 선택
+                        </span>
+                      </div>
+                      <div
+                        className={`mt-0.5 text-[10px] ${
+                          effectiveLnAction === "hold" ? "text-slate-300" : "text-slate-500"
+                        }`}
+                      >
+                        직선 이름(l, m)을 이동하지 않고 원본 위치를 안전하게 보존합니다.
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!lnOpt.canRecommend || isRecomputing}
+                      onClick={() => handleSelectLnAction("recommend")}
+                      data-testid="btn-line-name-recommend"
+                      className={`rounded-lg border px-3 py-2 text-left transition ${
+                        !lnOpt.canRecommend
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                          : effectiveLnAction === "recommend"
+                          ? "border-sky-700 bg-sky-700 text-white shadow-sm"
+                          : "border-sky-300 bg-white text-slate-800 hover:bg-sky-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 font-bold text-[11px]">
+                        <span>① 추천 배치 적용 (Recommend)</span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                            !lnOpt.canRecommend
+                              ? "bg-slate-200 text-slate-500"
+                              : effectiveLnAction === "recommend"
+                              ? "bg-white/20 text-white"
+                              : "bg-sky-100 text-sky-800"
+                          }`}
+                        >
+                          {lnOpt.canRecommend ? "2차 검증 통과" : "비활성"}
+                        </span>
+                      </div>
+                      <div
+                        className={`mt-0.5 text-[10px] ${
+                          !lnOpt.canRecommend
+                            ? "text-slate-400"
+                            : effectiveLnAction === "recommend"
+                            ? "text-sky-100"
+                            : "text-slate-500"
+                        }`}
+                      >
+                        주석 힌트 및 전역 최소 거리 1:1 매칭 기반 가시 끝점 자연 배치를 표시합니다.
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={!lnOpt.canSwap || isRecomputing}
+                      onClick={() => handleSelectLnAction("swap")}
+                      data-testid="btn-line-name-swap"
+                      className={`rounded-lg border px-3 py-2 text-left transition ${
+                        !lnOpt.canSwap
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                          : effectiveLnAction === "swap"
+                          ? "border-indigo-700 bg-indigo-700 text-white shadow-sm"
+                          : "border-indigo-300 bg-white text-slate-800 hover:bg-indigo-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1 font-bold text-[11px]">
+                        <span>② 대응 직선 교환 (Swap)</span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${
+                            !lnOpt.canSwap
+                              ? "bg-slate-200 text-slate-500"
+                              : effectiveLnAction === "swap"
+                              ? "bg-white/20 text-white"
+                              : "bg-indigo-100 text-indigo-800"
+                          }`}
+                        >
+                          {lnOpt.canSwap ? "1클릭 반전 검증됨" : "비활성"}
+                        </span>
+                      </div>
+                      <div
+                        className={`mt-0.5 text-[10px] ${
+                          !lnOpt.canSwap
+                            ? "text-slate-400"
+                            : effectiveLnAction === "swap"
+                            ? "text-indigo-100"
+                            : "text-slate-500"
+                        }`}
+                      >
+                        l과 m의 대응 직선을 1:1 교환하여 재계산한 끝점 배치를 표시합니다.
+                      </div>
+                    </button>
+                  </div>
+
+                  {lnOpt.correspondenceRows && lnOpt.correspondenceRows.length > 0 && (
+                    <div
+                      className="rounded border border-slate-200 bg-slate-50/70 p-2 space-y-1.5"
+                      data-testid="line-name-correspondence-table"
+                    >
+                      {lnOpt.correspondenceRows.map((row) => {
+                        const activeCell =
+                          effectiveLnAction === "recommend"
+                            ? row.recommend
+                            : effectiveLnAction === "swap"
+                            ? row.swap
+                            : null;
+                        return (
+                          <div
+                            key={`ln-row-${row.nodeId}`}
+                            data-testid="line-name-correspondence-row"
+                            className="flex flex-wrap items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2.5 py-1.5 text-[11px]"
+                          >
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <code className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-mono text-white">
+                                {row.label}
+                              </code>
+                              {activeCell ? (
+                                <>
+                                  <span className="font-semibold text-sky-800">
+                                    ➔ 직선 #{activeCell.strokeIndex ?? "?"}{" "}
+                                    {activeCell.lineDesc ? `(${activeCell.lineDesc})` : ""}
+                                  </span>
+                                  <span className="rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                    shift: [{row.origShift[0]}, {row.origShift[1]}]pt ➔ [
+                                    {activeCell.shift[0]}, {activeCell.shift[1]}]pt
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="rounded bg-slate-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  원본 유지 (Hold · shift=[{row.origShift[0]}, {row.origShift[1]}]pt)
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 개별 직선 이름 항목 리스트 (D3-1 / D3-2 / D3-3) */}
+              {lnOpt.requested && lnOpt.items && lnOpt.items.length > 0 && (
+                <div className="mt-2 space-y-1.5">
+                  {lnOpt.items.map((lnItem) => (
+                    <div
+                      key={`ln-opt-${lnItem.id}`}
+                      data-testid="smart-label-line-name-item"
+                      className={`rounded border px-2.5 py-1.5 text-[11px] ${
+                        lnItem.autoModified
+                          ? "border-sky-200 bg-white text-slate-800"
+                          : "border-slate-200 bg-white/70 text-slate-600"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <code className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-white">
+                            {lnItem.label}
+                          </code>
+                          <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-900">
+                            {lnItem.subTypeCode || lnItem.d3Category || "D-3 직선 이름"}
+                            {lnItem.matchedLineDesc ? ` · ${lnItem.matchedLineDesc}` : ""}
+                          </span>
+                          {lnItem.autoModified ? (
+                            <span className="rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              이동 추천: [{lnItem.origShift[0]}, {lnItem.origShift[1]}]pt ➔ [
+                              {lnItem.newShift[0]}, {lnItem.newShift[1]}]pt
+                            </span>
+                          ) : (
+                            <span className="rounded bg-slate-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              원본 유지 (Hold · shift=[{lnItem.origShift[0]}, {lnItem.origShift[1]}]pt)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-[11px] text-slate-600 leading-relaxed">{lnItem.reason}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

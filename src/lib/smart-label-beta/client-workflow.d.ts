@@ -9,6 +9,7 @@ export interface SmartLabelBackupSnapshot {
   appliedRecommendedCode: string;
   inputHash: string | null;
   multiAbstractAction?: "hold" | "recommend" | "swap" | null;
+  lineNameAction?: "hold" | "recommend" | "swap" | null;
   appliedAt: number;
 }
 
@@ -37,15 +38,21 @@ export function resolveSmartLabelClientAccess(
 
 export function shouldShowSmartLabelBetaUI(params: SmartLabelClientAccessParams): boolean;
 
+export function resolveActiveProposalForLineNameChoice(
+  proposal: any,
+  selectedLineNameAction?: "hold" | "recommend" | "swap"
+): any;
+
 export function resolveActiveProposalForMultiAbstractChoice(
   proposal: any,
-  selectedAction?: "hold" | "recommend" | "swap"
+  selectedAction?: "hold" | "recommend" | "swap",
+  selectedLineNameAction?: "hold" | "recommend" | "swap"
 ): any;
 
 export function evaluateProposalApplicability(
   proposal: any,
   currentRawInput: string,
-  opts?: { multiAbstractAction?: "hold" | "recommend" | "swap" }
+  opts?: { multiAbstractAction?: "hold" | "recommend" | "swap"; lineNameAction?: "hold" | "recommend" | "swap" }
 ): {
   allowed: boolean;
   reasonCode: string;
@@ -55,7 +62,7 @@ export function evaluateProposalApplicability(
 export function applyApprovedProposal(
   proposal: any,
   currentRawInput: string,
-  opts?: { multiAbstractAction?: "hold" | "recommend" | "swap" }
+  opts?: { multiAbstractAction?: "hold" | "recommend" | "swap"; lineNameAction?: "hold" | "recommend" | "swap" }
 ): {
   applied: boolean;
   reasonCode: string;

@@ -65,6 +65,11 @@ export function normalizeMultiAbstractAction(action) {
   return "hold";
 }
 
+export function normalizeLineNameAction(action) {
+  if (action === "recommend" || action === "swap") return action;
+  return "hold";
+}
+
 // 위험 TeX 매크로 차단 정규식 (주석 제거 후 검사)
 const DANGEROUS_TEX_MACRO_RE =
   /\\(?:input|include|write18|immediate|openin|openout|read|newread|newwrite|catcode|csname|endcsname|makeatletter|loop|repeat|pdfoutput|everyeof|everypar)\b/;
@@ -610,6 +615,17 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         opts.enableD2AxisLetterFix === true
     );
   const enableUnit3F = enableAxisLetterOverlapFixRequested;
+  const enableLineNameOverlapFixRequested =
+    isV022 &&
+    Boolean(
+      opts.enableLineNameOverlapFix === true ||
+        opts.enableUnit3G === true ||
+        opts.enableD3LineNameFix === true
+    );
+  const enableUnit3G = enableLineNameOverlapFixRequested;
+  const lineNameActionRequested = isV022
+    ? normalizeLineNameAction(opts.lineNameAction)
+    : "hold";
   const applySafeShrinkRequested = isV022 && Boolean(opts.applySafeShrink === true);
 
   const baseResponse = {
@@ -627,6 +643,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     unit3EEnabled: enableUnit3E,
     enableAxisLetterOverlapFixRequested,
     unit3FEnabled: enableUnit3F,
+    enableLineNameOverlapFixRequested,
+    unit3GEnabled: enableUnit3G,
+    lineNameActionRequested,
     applySafeShrinkRequested,
     ok: false,
     status: "failed",
@@ -703,6 +722,38 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       items: [],
     },
     multiAbstractActionRequested,
+
+    lineNameOption: {
+      enabled: enableLineNameOverlapFixRequested,
+      requested: enableLineNameOverlapFixRequested,
+      applied: false,
+      status: enableLineNameOverlapFixRequested ? "not-needed" : "disabled",
+      detected: false,
+      safetyTier: "NONE",
+      supportedPair: false,
+      requiresUserApproval: false,
+      requestedAction: lineNameActionRequested,
+      selectedAction: "hold",
+      defaultAction: "hold",
+      canRecommend: false,
+      canSwap: false,
+      rawDistMarginPt: null,
+      contradictions: [],
+      holdReason: null,
+      summaryReason: enableLineNameOverlapFixRequested
+        ? "직선 이름(l, m, n) 자동 정렬 대기 중"
+        : "직선 이름(l, m, n) 자동 정렬 옵션 OFF (원본 직선 이름 위치 유지)",
+      modeNote: "직선 가시 끝점 기반 자연 배치 · D3-2(l, m) 사용자 확인 · D3-3 모호/충돌 시 강제 Hold",
+      movedCount: 0,
+      heldCount: 0,
+      editsCount: 0,
+      message: enableLineNameOverlapFixRequested
+        ? "직선 이름 자동 정렬 대기 중"
+        : "직선 이름(l, m, n) 자동 정렬 옵션 OFF (원본 직선 이름 위치 유지)",
+      items: [],
+      correspondenceRows: [],
+      variants: null,
+    },
     multiAbstractOption: {
       detected: false,
       supportedPair: false,
@@ -739,12 +790,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     pointLabelHeldCount: 0,
     axisLetterMovedCount: 0,
     axisLetterHeldCount: 0,
+    lineNameMovedCount: 0,
+    lineNameHeldCount: 0,
     heldCount: 0,
     labelDecisions: [],
     tickDecisions: [],
     originDecisions: [],
     pointLabelDecisions: [],
     axisLetterDecisions: [],
+    lineNameDecisions: [],
     placements: [],
     shiftReport: [],
     preservation: null,
@@ -861,7 +915,8 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           n.role === "function" ||
           (enableUnit3D && n.role === "origin") ||
           (enableUnit3E && n.role === "other") ||
-          (enableUnit3F && (n.role === "other" || n.role === "tick"))
+          (enableUnit3F && (n.role === "other" || n.role === "tick")) ||
+          (enableUnit3G && n.role === "other")
       ) &&
       (scene.strokes || []).some((s) => s.kind !== "axis")
     ) {
@@ -904,7 +959,10 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     const evaluateActionVariant = async (
       actionMode = "hold",
       useSafeShrink = applySafeShrinkRequested,
-      safeShrinkFallbackReason = null
+      safeShrinkFallbackReason = null,
+      lineNameActionMode = lineNameActionRequested,
+      useUnit3G = enableUnit3G,
+      lineNameFallbackReason = null
     ) => {
       const unit2FlagsForAction = {
         enableOriginPlacement: enableUnit3D,
@@ -952,6 +1010,16 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       };
       let decisionsByNodeId = new Map();
       let variantOrigDiag = origDiag;
+      let lineNamePlan = {
+        enabled: false,
+        lineNameAction: lineNameActionMode,
+        safetyTier: "NONE",
+        classification: null,
+        multiLineAnalysis: null,
+        decisions: [],
+        movedLineNames: [],
+        edits: [],
+      };
       let multiAbstractAnalysis = null;
 
       if (isV022) {
@@ -965,7 +1033,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           applyDomainExtensionRequested,
           enableUnit3E,
           useSafeShrink,
-          enableUnit3F
+          enableUnit3F,
+          useUnit3G,
+          lineNameActionMode
         );
         activePlan = v022Plan.activePlan;
         axisPlan = v022Plan.axisPlan;
@@ -978,6 +1048,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         originPlan = v022Plan.originPlan || originPlan;
         pointLabelPlan = v022Plan.pointLabelPlan || pointLabelPlan;
         axisLetterPlan = v022Plan.axisLetterPlan || axisLetterPlan;
+        lineNamePlan = v022Plan.lineNamePlan || lineNamePlan;
         decisionsByNodeId = v022Plan.decisionsByNodeId;
         multiAbstractAnalysis =
           v022Plan.multiAbstractAnalysis || scene.multiAbstractAnalysis || null;
@@ -1022,6 +1093,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const originEditsOnEffective = originPlan.edits || [];
       const pointLabelEditsOnEffective = pointLabelPlan.edits || [];
       const axisLetterEditsOnEffective = axisLetterPlan.edits || [];
+      const lineNameEditsOnEffective = lineNamePlan.edits || [];
       const editsToApply = [
         ...domainEditsToApply,
         ...labelEditsOnEffective,
@@ -1029,6 +1101,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         ...originEditsOnEffective,
         ...pointLabelEditsOnEffective,
         ...axisLetterEditsOnEffective,
+        ...lineNameEditsOnEffective,
         ...axisEditsToApply,
       ];
 
@@ -1039,6 +1112,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const anyDomainChanged = domainEditsToApply.length > 0;
       const anyPointLabelChanged = pointLabelEditsOnEffective.length > 0;
       const anyAxisLetterChanged = axisLetterEditsOnEffective.length > 0;
+      const anyLineNameChanged = lineNameEditsOnEffective.length > 0;
       const hasAxisRequiredHold = (domainPlan.decisions || []).some(
         (d) => d.action === "hold" && d.holdCode === "axis-extension-required"
       );
@@ -1205,6 +1279,78 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           : "이동 대상인 축 문자 눈금(D-2)이 없거나 모두 원본 위치를 유지합니다.",
       };
 
+      const lnMovedCountPlan = (lineNamePlan.movedLineNames || []).length;
+      const lnHeldCountPlan = (lineNamePlan.decisions || []).filter((d) => d.action === "keep").length;
+      const lnSafetyTier = lineNamePlan.safetyTier || "NONE";
+      const lnMulti = lineNamePlan.multiLineAnalysis || null;
+      const lineNameOptionInfo = {
+        enabled: enableLineNameOverlapFixRequested,
+        requested: enableLineNameOverlapFixRequested,
+        applied: false,
+        status: !enableLineNameOverlapFixRequested
+          ? "disabled"
+          : lineNameFallbackReason
+          ? "held-safety-fallback"
+          : anyLineNameChanged
+          ? "pending-verification"
+          : lnSafetyTier === "D3-2" && lineNameActionMode === "hold"
+          ? "hold-user-confirm-required"
+          : lnSafetyTier === "D3-3"
+          ? "held-ambiguous-d3-3"
+          : "not-needed",
+        detected: lnSafetyTier !== "NONE",
+        safetyTier: lnSafetyTier,
+        d3SubType: lnSafetyTier === "NONE" ? null : lnSafetyTier,
+        supportedPair: Boolean(lnMulti?.supportedPair && lnSafetyTier === "D3-2"),
+        requiresUserApproval: lnSafetyTier === "D3-2",
+        requestedAction: lineNameActionRequested,
+        selectedAction: lnSafetyTier === "D3-2" ? lineNameActionMode : lnSafetyTier === "D3-1" && anyLineNameChanged ? "recommend" : "hold",
+        defaultAction: "hold",
+        canRecommend: lnSafetyTier === "D3-1" ? anyLineNameChanged : lnSafetyTier === "D3-2",
+        canSwap: lnSafetyTier === "D3-2",
+        rawDistMarginPt: lnMulti?.rawDistMarginPt ?? null,
+        contradictions: lnMulti?.contradictions || [],
+        holdReason:
+          lineNameFallbackReason ||
+          (lnSafetyTier === "D3-3" ? lnMulti?.reason || "다중 직선 모호성/모순으로 인해 Hold 강제" : null),
+        summaryReason: !enableLineNameOverlapFixRequested
+          ? "직선 이름(l, m, n) 자동 정렬 옵션 OFF (원본 직선 이름 위치 유지)"
+          : lineNameFallbackReason
+          ? `2차 렌더링 안전성 검증 미통과로 직선 이름 이동만 자동 취소하고 기존 안전 결과를 유지했습니다 (${lineNameFallbackReason})`
+          : lnSafetyTier === "D3-2"
+          ? lnMulti?.reason || "다중 직선 이름(l, m) 전역 1:1 매칭 — 사용자 확인(Hold / Recommend / Swap) 지원"
+          : lnSafetyTier === "D3-3"
+          ? lnMulti?.reason || "직선 이름 대응 모호성 또는 주석·기하 모순으로 인해 강제 Hold"
+          : lnSafetyTier === "D3-1"
+          ? "단일 또는 인라인 직선 이름(D3-1) 자동 대응 확정"
+          : "감지된 직선 이름(l, m, n, \\ell)이 없습니다.",
+        modeNote: "직선 가시 끝점 기반 자연 배치 · D3-2(l, m) 사용자 확인 · D3-3 모호/충돌 시 강제 Hold",
+        movedCount: lnMovedCountPlan,
+        heldCount: lnHeldCountPlan,
+        editsCount: lineNameEditsOnEffective.length,
+        items: lineNamePlan.decisions || [],
+        correspondenceRows: [],
+        variants: null,
+        message: !enableLineNameOverlapFixRequested
+          ? "직선 이름(l, m, n) 자동 정렬 옵션 OFF (원본 직선 이름 위치 유지)"
+          : lineNameFallbackReason
+          ? `2차 렌더링 충돌/잘림 방지를 위해 직선 이름 이동만 자동 취소하고 기존 안전 결과를 유지했습니다 (${lineNameFallbackReason})`
+          : anyLineNameChanged
+          ? `직선 이름(${lnSafetyTier}) 가시 끝점 자연 배치 후보 산출됨 (${(lineNamePlan.movedLineNames || [])
+              .map(
+                (l) =>
+                  `${l.cleanLabel || l.label}: shift [${l.oldShift.join(", ")}] → [${l.newShift.join(", ")}]pt (직선 #${l.matchedStrokeIndex}, ${l.placementTag})`
+              )
+              .join(" · ")})`
+          : lnSafetyTier === "D3-2" && lineNameActionMode === "hold"
+          ? "다중 직선 이름(l, m)이 감지되어 기본 상태에서는 원본 위치(Hold)를 유지합니다. 카드에서 추천 배치(Recommend) 또는 대응 교환(Swap)을 선택할 수 있습니다."
+          : lnSafetyTier === "D3-3"
+          ? `직선 이름 안전 보류(D3-3 강제 Hold): ${lnMulti?.reason || "대응 모호성 또는 주석·기하 모순으로 원본 위치를 유지합니다."}`
+          : lnHeldCountPlan > 0
+          ? `감지된 직선 이름 ${lnHeldCountPlan}개가 이미 가시 끝점 인근 자연 배치 상태이므로 원본 위치를 유지합니다.`
+          : "이동 대상인 직선 이름(l, m, n, \\ell)이 없거나 모두 원본 위치를 유지합니다.",
+      };
+
       const variantBase = {
         ...baseResponse,
         axisOption: axisOptionInfo,
@@ -1212,6 +1358,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         domainExtensionOption: domainOptionInfo,
         pointLabelOption: pointLabelOptionInfo,
         axisLetterOption: axisLetterOptionInfo,
+        lineNameOption: lineNameOptionInfo,
         collisionDiagnostics: variantOrigDiag,
       };
 
@@ -1330,6 +1477,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         return {
           actionMode,
           multiAbstractAnalysis,
+        lineNamePlan,
           response: {
             ...variantBase,
             ok: true,
@@ -1348,12 +1496,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
             pointLabelHeldCount: (pointLabelPlan.heldPointLabels || []).length,
             axisLetterMovedCount: 0,
             axisLetterHeldCount: (axisLetterPlan.heldAxisLetters || []).length,
+            lineNameMovedCount: 0,
+            lineNameHeldCount: lnHeldCountPlan,
             heldCount: decisions0.length,
             labelDecisions: decisions0,
             tickDecisions: tickPlan.decisions || [],
             originDecisions: originPlan.decisions || [],
             pointLabelDecisions: pointLabelPlan.decisions || [],
             axisLetterDecisions: axisLetterPlan.decisions || [],
+            lineNameDecisions: lineNamePlan.decisions || [],
             placements: activePlan.placements || [],
             shiftReport: activeShift.report || [],
             preservation: preservation0,
@@ -1367,6 +1518,16 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         ? checkPreservationV022(effectiveBody, candEffectiveBody, editsToApply)
         : checkPreservation(effectiveBody, candEffectiveBody, editsToApply);
       if (!prePreservation.ok) {
+        if (anyLineNameChanged) {
+          return evaluateActionVariant(
+            actionMode,
+            useSafeShrink,
+            safeShrinkFallbackReason,
+            "hold",
+            false,
+            prePreservation.issues.join("; ")
+          );
+        }
         if (anySafeShrinkChanged) {
           return evaluateActionVariant(actionMode, false, prePreservation.issues.join("; "));
         }
@@ -1378,6 +1539,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         return {
           actionMode,
           multiAbstractAnalysis,
+        lineNamePlan,
           response: {
             ...variantBase,
             ok: false,
@@ -1403,6 +1565,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         return {
           actionMode,
           multiAbstractAnalysis,
+        lineNamePlan,
           response: {
             ...variantBase,
             ok: false,
@@ -1421,6 +1584,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         return {
           actionMode,
           multiAbstractAnalysis,
+        lineNamePlan,
           response: {
             ...variantBase,
             ok: false,
@@ -1441,12 +1605,14 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const movedOriginNodeIds = (originPlan.movedOrigins || []).map((o) => o.id);
       const movedPointLabelNodeIds = (pointLabelPlan.movedPointLabels || []).map((p) => p.id);
       const movedAxisLetterNodeIds = (axisLetterPlan.movedAxisLetters || []).map((a) => a.id);
+      const movedLineNameNodeIds = (lineNamePlan.movedLineNames || []).map((l) => l.id);
       const movedNodeIds = [
         ...movedFnNodeIds,
         ...movedTickNodeIds,
         ...movedOriginNodeIds,
         ...movedPointLabelNodeIds,
         ...movedAxisLetterNodeIds,
+        ...movedLineNameNodeIds,
       ];
       const movedFNodeIndices = movedFnNodeIds
         .map((id) => origFNodes.findIndex((q) => q.id === id))
@@ -1463,6 +1629,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
             movedOriginNodeIds,
             movedPointLabelNodeIds,
             movedAxisLetterNodeIds,
+            movedLineNameNodeIds,
             workRoot: tempWorkRoot,
             P,
             flags: unit2FlagsForAction,
@@ -1508,6 +1675,18 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         !vVariant.collisionCheck?.ok ||
         !finalDiag.safetyPassed
       ) {
+        // D-3 직선 이름 이동이 포함된 상태에서 2차 렌더링 충돌/잘림이 감지된 경우:
+        // D-3 변경분만 자동 취소하고 기존 승인된 기능(함수식/점 이름/축 문자/눈금/원점/축 연장·축소) 결과는 보존한다.
+        if (anyLineNameChanged) {
+          return evaluateActionVariant(
+            actionMode,
+            useSafeShrink,
+            safeShrinkFallbackReason,
+            "hold",
+            false,
+            allSafetyIssues.join("; ") || "2차 렌더링 안전성 검증 미통과"
+          );
+        }
         // Safe Shrink가 적용된 상태에서 2차 렌더링 충돌이 감지된 경우:
         // Safe Shrink 변경분만 자동 취소하고 기존 유효 결과(함수식/점 이름/눈금/원점/축 연장)는 보존한다.
         if (anySafeShrinkChanged) {
@@ -1535,6 +1714,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         return {
           actionMode,
           multiAbstractAnalysis,
+        lineNamePlan,
           response: {
             ...variantBase,
             ok: true,
@@ -1574,12 +1754,23 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           ? checkPreservationV022(rawBody, finalBody, rawEdits)
           : checkPreservation(rawBody, finalBody, rawEdits);
         if (!rawPreservation.ok) {
+          if (anyLineNameChanged) {
+            return evaluateActionVariant(
+              actionMode,
+              useSafeShrink,
+              safeShrinkFallbackReason,
+              "hold",
+              false,
+              rawPreservation.issues.join("; ")
+            );
+          }
           if (anySafeShrinkChanged) {
             return evaluateActionVariant(actionMode, false, rawPreservation.issues.join("; "));
           }
           return {
             actionMode,
             multiAbstractAnalysis,
+        lineNamePlan,
             response: {
               ...variantBase,
               ok: false,
@@ -1630,6 +1821,16 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           )
           .join(" · ")})`;
       }
+      if (anyLineNameChanged) {
+        lineNameOptionInfo.applied = true;
+        lineNameOptionInfo.status = "applied";
+        lineNameOptionInfo.message = `직선 이름(${lnSafetyTier}) 가시 끝점 자연 배치 및 2차 충돌 검증 통과 (${(lineNamePlan.movedLineNames || [])
+          .map(
+            (l) =>
+              `${l.cleanLabel || l.label}: shift [${l.oldShift.join(", ")}] → [${l.newShift.join(", ")}]pt (직선 #${l.matchedStrokeIndex}, ${l.placementTag})`
+          )
+          .join(" · ")})`;
+      }
       if (anyAxisLetterChanged) {
         axisLetterOptionInfo.applied = true;
         axisLetterOptionInfo.status = "applied";
@@ -1667,12 +1868,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       const pointLabelHeldCount = (pointLabelPlan.heldPointLabels || []).length;
       const axisLetterMovedCount = (axisLetterPlan.movedAxisLetters || []).length;
       const axisLetterHeldCount = (axisLetterPlan.heldAxisLetters || []).length;
+      const lineNameMovedCount = (lineNamePlan.movedLineNames || []).length;
+      const lineNameHeldCount = lnHeldCountPlan;
       const movedCount =
         fnMovedCount +
         tickMovedCount +
         originMovedCount +
         pointLabelMovedCount +
-        axisLetterMovedCount;
+        axisLetterMovedCount +
+        lineNameMovedCount;
       const heldCount = decisions.length - fnMovedCount;
 
       const actionParts = [];
@@ -1690,6 +1894,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       if (originMovedCount > 0) actionParts.push(`원점 O ${originMovedCount}개 4방향 자동 배치(Unit 3-D)`);
       if (pointLabelMovedCount > 0) actionParts.push(`점 이름(유형 A) ${pointLabelMovedCount}개 겹침 자동 정렬(Unit 3-E)`);
       if (axisLetterMovedCount > 0) actionParts.push(`축 문자 눈금 ${axisLetterMovedCount}개 겹침 자동 정렬(Unit 3-F/D-2)`);
+      if (lineNameMovedCount > 0) actionParts.push(`직선 이름 ${lineNameMovedCount}개 가시 끝점 자동 정렬(Unit 3-G/D-3)`);
       if (anyAxisChanged) {
         if (anySafeShrinkChanged && safeShrinkPlan?.anyExtended) {
           actionParts.push(`축 길이 연장·안전 축소(${axisEditsToApply.length}개 축, 축소 -${safeShrinkPlan.totalShrunkPt}pt)`);
@@ -1710,6 +1915,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       return {
         actionMode,
         multiAbstractAnalysis,
+        lineNamePlan,
         response: {
           ...variantBase,
           ok: true,
@@ -1731,12 +1937,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
           pointLabelHeldCount,
           axisLetterMovedCount,
           axisLetterHeldCount,
+          lineNameMovedCount,
+          lineNameHeldCount,
           heldCount,
           labelDecisions: decisions,
           tickDecisions: tickPlan.decisions || [],
           originDecisions: originPlan.decisions || [],
           pointLabelDecisions: pointLabelPlan.decisions || [],
           axisLetterDecisions: axisLetterPlan.decisions || [],
+          lineNameDecisions: lineNamePlan.decisions || [],
           placements: (activePlan.placements || []).map((p) => ({
             id: p.id,
             label: p.label,
@@ -1778,7 +1987,184 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     const holdEval = await evaluateActionVariant("hold");
     const maAnalysis = isV022 ? holdEval.multiAbstractAnalysis : null;
 
-    if (!isV022 || !maAnalysis) {
+    if (!isV022) {
+      return holdEval.response;
+    }
+
+    const enrichWithLineNameVariantsIfNeeded = async (baseEval, activeMaAction = "hold") => {
+      if (
+        !isV022 ||
+        !enableUnit3G ||
+        !baseEval?.lineNamePlan ||
+        baseEval.lineNamePlan.safetyTier !== "D3-2" ||
+        !baseEval.lineNamePlan.multiLineAnalysis?.supportedPair
+      ) {
+        return baseEval.response;
+      }
+
+      const lnMulti = baseEval.lineNamePlan.multiLineAnalysis;
+      const lnHoldEval =
+        lineNameActionRequested === "hold"
+          ? baseEval
+          : await evaluateActionVariant(activeMaAction, applySafeShrinkRequested, null, "hold");
+      const lnRecEval =
+        lineNameActionRequested === "recommend"
+          ? baseEval
+          : await evaluateActionVariant(activeMaAction, applySafeShrinkRequested, null, "recommend");
+      const lnSwapEval =
+        lineNameActionRequested === "swap"
+          ? baseEval
+          : await evaluateActionVariant(activeMaAction, applySafeShrinkRequested, null, "swap");
+
+      const canRecommendLn = Boolean(
+        lnRecEval.response.verified &&
+          lnRecEval.response.canApply &&
+          lnRecEval.response.status === "recommended" &&
+          (lnRecEval.response.lineNameMovedCount || 0) > 0
+      );
+      const canSwapLn = Boolean(
+        lnSwapEval.response.verified &&
+          lnSwapEval.response.canApply &&
+          lnSwapEval.response.status === "recommended" &&
+          (lnSwapEval.response.lineNameMovedCount || 0) > 0
+      );
+
+      const holdLnDecById = new Map(
+        (lnHoldEval.response.lineNameDecisions || []).map((d) => [d.id, d])
+      );
+      const recLnDecById = new Map(
+        (lnRecEval.response.lineNameDecisions || []).map((d) => [d.id, d])
+      );
+      const swapLnDecById = new Map(
+        (lnSwapEval.response.lineNameDecisions || []).map((d) => [d.id, d])
+      );
+
+      const lnCorrespondenceRows = [];
+      const recLnPairs = lnMulti.recommendedAssignment?.pairs || [];
+      const swapLnPairs = lnMulti.swappedAssignment?.pairs || [];
+      for (const recInfo of recLnPairs) {
+        const nodeId = recInfo.nodeId;
+        const swapInfo = swapLnPairs.find((p) => p.nodeId === nodeId) || null;
+        const holdDec = holdLnDecById.get(nodeId) || null;
+        const recDec = recLnDecById.get(nodeId) || null;
+        const swapDec = swapLnDecById.get(nodeId) || null;
+        lnCorrespondenceRows.push({
+          nodeId,
+          label: recDec?.label || holdDec?.label || recInfo.label || nodeId,
+          cleanLabel: recDec?.cleanLabel || holdDec?.cleanLabel || recInfo.cleanLabel || "",
+          origShift: holdDec?.oldShift || [0, 0],
+          recommend: {
+            strokeIndex: recInfo?.strokeIndex ?? null,
+            plotExpr: recInfo?.plotExpr || null,
+            commentHint: recInfo?.commentHint || null,
+            distLinePt: recInfo?.distLinePt ?? null,
+            shift: recDec?.newShift || holdDec?.oldShift || [0, 0],
+            movedPt: recDec?.renderedMovePt ?? 0,
+            autoModified: recDec?.action === "move-line-name",
+          },
+          swap: {
+            strokeIndex: swapInfo?.strokeIndex ?? null,
+            plotExpr: swapInfo?.plotExpr || null,
+            commentHint: swapInfo?.commentHint || null,
+            distLinePt: swapInfo?.distLinePt ?? null,
+            shift: swapDec?.newShift || holdDec?.oldShift || [0, 0],
+            movedPt: swapDec?.renderedMovePt ?? 0,
+            autoModified: swapDec?.action === "move-line-name",
+          },
+          hold: {
+            strokeIndex: null,
+            shift: holdDec?.oldShift || [0, 0],
+            movedPt: 0,
+            autoModified: false,
+          },
+        });
+      }
+
+      let selectedLnAction = "hold";
+      let selectedLnEval = lnHoldEval;
+      if (lineNameActionRequested === "recommend" && canRecommendLn) {
+        selectedLnAction = "recommend";
+        selectedLnEval = lnRecEval;
+      } else if (lineNameActionRequested === "swap" && canSwapLn) {
+        selectedLnAction = "swap";
+        selectedLnEval = lnSwapEval;
+      }
+
+      const summarizeLnVariant = (resp, lnMode) => ({
+        actionMode: lnMode,
+        ok: resp.ok,
+        status: resp.status,
+        reasonCode: resp.reasonCode,
+        message: resp.message,
+        canApply: resp.canApply,
+        verified: resp.verified,
+        recommendedCode: resp.recommendedCode,
+        movedCount: resp.movedCount,
+        fnMovedCount: resp.fnMovedCount,
+        tickMovedCount: resp.tickMovedCount,
+        tickHeldCount: resp.tickHeldCount,
+        originMovedCount: resp.originMovedCount,
+        originHeldCount: resp.originHeldCount,
+        pointLabelMovedCount: resp.pointLabelMovedCount,
+        pointLabelHeldCount: resp.pointLabelHeldCount,
+        axisLetterMovedCount: resp.axisLetterMovedCount,
+        axisLetterHeldCount: resp.axisLetterHeldCount,
+        lineNameMovedCount: resp.lineNameMovedCount,
+        lineNameHeldCount: resp.lineNameHeldCount,
+        heldCount: resp.heldCount,
+        labelDecisions: resp.labelDecisions,
+        tickDecisions: resp.tickDecisions,
+        originDecisions: resp.originDecisions,
+        pointLabelDecisions: resp.pointLabelDecisions,
+        axisLetterDecisions: resp.axisLetterDecisions,
+        lineNameDecisions: resp.lineNameDecisions,
+        placements: resp.placements,
+        shiftReport: resp.shiftReport,
+        axisOption: resp.axisOption,
+        safeShrinkOption: resp.safeShrinkOption,
+        domainExtensionOption: resp.domainExtensionOption,
+        pointLabelOption: resp.pointLabelOption,
+        axisLetterOption: resp.axisLetterOption,
+        lineNameOption: resp.lineNameOption,
+        collisionDiagnostics: resp.collisionDiagnostics,
+        verification: resp.verification,
+        preview: resp.preview,
+      });
+
+      const lineNameOptionD32 = {
+        ...selectedLnEval.response.lineNameOption,
+        detected: true,
+        safetyTier: "D3-2",
+        d3SubType: "D3-2",
+        supportedPair: true,
+        requiresUserApproval: true,
+        requestedAction: lineNameActionRequested,
+        selectedAction: selectedLnAction,
+        defaultAction: "hold",
+        canRecommend: canRecommendLn,
+        canSwap: canSwapLn,
+        rawDistMarginPt: lnMulti.rawDistMarginPt ?? null,
+        contradictions: lnMulti.contradictions || [],
+        correspondenceRows: lnCorrespondenceRows,
+        variants: {
+          hold: summarizeLnVariant(lnHoldEval.response, "hold"),
+          recommend: summarizeLnVariant(lnRecEval.response, "recommend"),
+          swap: summarizeLnVariant(lnSwapEval.response, "swap"),
+        },
+      };
+
+      return {
+        ...selectedLnEval.response,
+        lineNameActionRequested,
+        lineNameOption: lineNameOptionD32,
+      };
+    };
+
+    if (!maAnalysis) {
+      return await enrichWithLineNameVariantsIfNeeded(holdEval, "hold");
+    }
+
+    if (false && (!isV022 || !maAnalysis)) {
       return holdEval.response;
     }
 
@@ -1801,12 +2187,15 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       pointLabelHeldCount: resp.pointLabelHeldCount,
       axisLetterMovedCount: resp.axisLetterMovedCount,
       axisLetterHeldCount: resp.axisLetterHeldCount,
+      lineNameMovedCount: resp.lineNameMovedCount,
+      lineNameHeldCount: resp.lineNameHeldCount,
       heldCount: resp.heldCount,
       labelDecisions: resp.labelDecisions,
       tickDecisions: resp.tickDecisions,
       originDecisions: resp.originDecisions,
       pointLabelDecisions: resp.pointLabelDecisions,
       axisLetterDecisions: resp.axisLetterDecisions,
+      lineNameDecisions: resp.lineNameDecisions,
       placements: resp.placements,
       shiftReport: resp.shiftReport,
       axisOption: resp.axisOption,
@@ -1814,6 +2203,7 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
       domainExtensionOption: resp.domainExtensionOption,
       pointLabelOption: resp.pointLabelOption,
       axisLetterOption: resp.axisLetterOption,
+      lineNameOption: resp.lineNameOption,
       collisionDiagnostics: resp.collisionDiagnostics,
       verification: resp.verification,
       preview: resp.preview,
@@ -1822,6 +2212,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     if (maAnalysis.classificationCode === "type2-user-confirm-required" && maAnalysis.supportedPair) {
       const recEval = await evaluateActionVariant("recommend");
       const swapEval = await evaluateActionVariant("swap");
+      const holdEnrichedResp = await enrichWithLineNameVariantsIfNeeded(holdEval, "hold");
+      const recEnrichedResp = await enrichWithLineNameVariantsIfNeeded(recEval, "recommend");
+      const swapEnrichedResp = await enrichWithLineNameVariantsIfNeeded(swapEval, "swap");
 
       const canRecommend = Boolean(
         recEval.response.verified &&
@@ -1914,15 +2307,18 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
         summaryReason: maAnalysis.summaryReason || "",
         correspondenceRows,
         variants: {
-          hold: summarizeVariantPayload(holdEval.response, "hold"),
-          recommend: summarizeVariantPayload(recEval.response, "recommend"),
-          swap: summarizeVariantPayload(swapEval.response, "swap"),
+          hold: summarizeVariantPayload(holdEnrichedResp, "hold"),
+          recommend: summarizeVariantPayload(recEnrichedResp, "recommend"),
+          swap: summarizeVariantPayload(swapEnrichedResp, "swap"),
+
+
         },
       };
 
       return {
-        ...selectedEval.response,
+        ...(effectiveSelectedAction === "recommend" ? recEnrichedResp : effectiveSelectedAction === "swap" ? swapEnrichedResp : holdEnrichedResp),
         multiAbstractActionRequested,
+
         multiAbstractOption,
       };
     }
@@ -1955,8 +2351,9 @@ export async function recommendSmartLabelBeta(rawInput, opts = {}) {
     };
 
     return {
-      ...holdEval.response,
+      ...(await enrichWithLineNameVariantsIfNeeded(holdEval, "hold")),
       multiAbstractActionRequested,
+
       multiAbstractOption: multiAbstractOptionType3,
     };
   } catch (err) {
@@ -2022,6 +2419,8 @@ export async function handleSmartLabelGet(deps) {
       defaultApplyDomainExtension: false,
       defaultEnablePointLabelOverlapFix: false,
       defaultEnableAxisLetterOverlapFix: false,
+      defaultEnableLineNameOverlapFix: false,
+      defaultLineNameAction: "hold",
       unit3BServerEnabled: unit3BFlag.enabled,
       unit3BDisabledReason: unit3BFlag.enabled ? null : unit3BFlag.reason,
       unit3DServerEnabled: unit3DFlag.enabled,
@@ -2102,6 +2501,12 @@ export async function handleSmartLabelPost(requestBody, deps) {
       requestBody.enableUnit3F === true ||
       requestBody.enableD2AxisLetterFix === true
   );
+  const enableLineNameOverlapFix = Boolean(
+    requestBody.enableLineNameOverlapFix === true ||
+      requestBody.enableUnit3G === true ||
+      requestBody.enableD3LineNameFix === true
+  );
+  const lineNameAction = normalizeLineNameAction(requestBody.lineNameAction);
   const serverInputHash = computeInputHash(rawTikz);
 
   if (clientInputHash && clientInputHash !== serverInputHash) {
@@ -2147,6 +2552,8 @@ export async function handleSmartLabelPost(requestBody, deps) {
       enableUnit3B,
       enablePointLabelOverlapFix,
       enableAxisLetterOverlapFix,
+      enableLineNameOverlapFix,
+      lineNameAction,
     });
 
     const httpStatus =

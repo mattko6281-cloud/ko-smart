@@ -8,9 +8,11 @@ export const DEFAULT_KROKI_TIMEOUT_MS: number;
 export type SmartLabelEngineVersion = "v0.2.1" | "v0.2.2-beta";
 export type SmartLabelAccessRole = "developer" | "pilot" | "none";
 export type MultiAbstractActionMode = "hold" | "recommend" | "swap";
+export type LineNameActionMode = "hold" | "recommend" | "swap";
 
 export function normalizeEngineVersion(engineVersion?: any): SmartLabelEngineVersion;
 export function normalizeMultiAbstractAction(action?: any): MultiAbstractActionMode;
+export function normalizeLineNameAction(action?: any): LineNameActionMode;
 
 export function computeInputHash(rawInput: string): string;
 
@@ -387,6 +389,102 @@ export interface AxisLetterOptionInfo {
   items: SmartLabelAxisLetterDecisionSummary[];
 }
 
+export interface SmartLabelLineNameDecisionSummary {
+  id: string;
+  label: string;
+  cleanLabel?: string;
+  symbol?: string;
+  role: "line-name-d3";
+  d3Category?: "D3-1" | "D3-2" | "D3-3";
+  subTypeCode?: string;
+  kind?: "standalone" | "inline";
+  matchedStrokeIndex?: number | null;
+  matchedLineDesc?: string | null;
+  commentSymbolHint?: string | null;
+  strategy?: string | null;
+  action: "keep" | "move-d3-line-name" | "hold-user-confirm-d3-2" | "hold-no-safe-line-name-candidate" | "hold-d3-3" | string;
+  nonMoveCode?: string | null;
+  nonMoveCategory?: string | null;
+  autoModified: boolean;
+  moved?: boolean;
+  selectedEngine?: string;
+  origShift: [number, number];
+  newShift: [number, number];
+  shift: [number, number];
+  deltaShiftPt?: [number, number];
+  movedPt?: number;
+  bbox?: { x0: number; y0: number; x1: number; y1: number };
+  score?: number | null;
+  origClearancePt?: number | null;
+  finalClearancePt?: number | null;
+  origOwnLineDistPt?: number | null;
+  finalOwnLineDistPt?: number | null;
+  origOtherCurveClearancePt?: number | null;
+  finalOtherCurveClearancePt?: number | null;
+  origAxisClearancePt?: number | null;
+  finalAxisClearancePt?: number | null;
+  origNodeGapPt?: number | null;
+  finalNodeGapPt?: number | null;
+  reason: string;
+  selectionReason?: string;
+  holdReason?: string | null;
+}
+
+export interface LineNameCorrespondenceRow {
+  nodeId: string;
+  label: string;
+  symbol: string;
+  origShift: [number, number];
+  recommend: {
+    strokeIndex: number | null;
+    lineDesc: string | null;
+    shift: [number, number];
+    movedPt: number;
+    autoModified: boolean;
+  };
+  swap: {
+    strokeIndex: number | null;
+    lineDesc: string | null;
+    shift: [number, number];
+    movedPt: number;
+    autoModified: boolean;
+  };
+  hold: {
+    strokeIndex: null;
+    lineDesc: null;
+    shift: [number, number];
+    movedPt: number;
+    autoModified: false;
+  };
+}
+
+export interface LineNameOptionInfo {
+  enabled?: boolean;
+  requested: boolean;
+  applied: boolean;
+  status: "disabled" | "not-needed" | "user-confirm-hold" | "applied" | "held-d3-3" | "blocked-unsafe" | string;
+  d3SubType: "D3-1" | "D3-2" | "D3-3" | null;
+  d3ClassificationReason?: string;
+  requiresUserApproval: boolean;
+  requestedAction: LineNameActionMode;
+  selectedAction: LineNameActionMode;
+  defaultAction: "hold";
+  canRecommend: boolean;
+  canSwap: boolean;
+  modeNote: string;
+  movedCount: number;
+  heldCount: number;
+  editsCount: number;
+  message: string;
+  items: SmartLabelLineNameDecisionSummary[];
+  correspondenceRows?: LineNameCorrespondenceRow[];
+  variants?: {
+    hold: MultiAbstractVariantSummary;
+    recommend: MultiAbstractVariantSummary | null;
+    swap: MultiAbstractVariantSummary | null;
+  } | null;
+}
+
 export interface MultiAbstractCorrespondenceRow {
   nodeId: string;
   label: string;
@@ -436,12 +534,15 @@ export interface MultiAbstractVariantSummary {
   pointLabelHeldCount?: number;
   axisLetterMovedCount?: number;
   axisLetterHeldCount?: number;
+  lineNameMovedCount?: number;
+  lineNameHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
   tickDecisions?: SmartLabelTickDecisionSummary[];
   originDecisions?: SmartLabelOriginDecisionSummary[];
   pointLabelDecisions?: SmartLabelPointLabelDecisionSummary[];
   axisLetterDecisions?: SmartLabelAxisLetterDecisionSummary[];
+  lineNameDecisions?: SmartLabelLineNameDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   axisOption: AxisOptionInfo;
@@ -449,6 +550,7 @@ export interface MultiAbstractVariantSummary {
   domainExtensionOption?: DomainExtensionOptionInfo;
   pointLabelOption?: PointLabelOptionInfo;
   axisLetterOption?: AxisLetterOptionInfo;
+  lineNameOption?: LineNameOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
   verification: {
     compiled: boolean;
@@ -513,6 +615,9 @@ export interface SmartLabelBetaProposal {
   unit3EEnabled?: boolean;
   enableAxisLetterOverlapFixRequested?: boolean;
   unit3FEnabled?: boolean;
+  enableLineNameOverlapFixRequested?: boolean;
+  unit3GEnabled?: boolean;
+  lineNameActionRequested?: LineNameActionMode;
   applySafeShrinkRequested?: boolean;
   ok: boolean;
   status: "recommended" | "unchanged" | "unsupported" | "reverted" | "failed";
@@ -527,6 +632,7 @@ export interface SmartLabelBetaProposal {
   domainExtensionOption?: DomainExtensionOptionInfo;
   pointLabelOption?: PointLabelOptionInfo;
   axisLetterOption?: AxisLetterOptionInfo;
+  lineNameOption?: LineNameOptionInfo;
   multiAbstractActionRequested?: MultiAbstractActionMode;
   multiAbstractOption?: MultiAbstractOptionInfo;
   collisionDiagnostics: CollisionDiagnosticsSummary | null;
@@ -544,12 +650,15 @@ export interface SmartLabelBetaProposal {
   pointLabelHeldCount?: number;
   axisLetterMovedCount?: number;
   axisLetterHeldCount?: number;
+  lineNameMovedCount?: number;
+  lineNameHeldCount?: number;
   heldCount: number;
   labelDecisions: SmartLabelDecisionSummary[];
   tickDecisions?: SmartLabelTickDecisionSummary[];
   originDecisions?: SmartLabelOriginDecisionSummary[];
   pointLabelDecisions?: SmartLabelPointLabelDecisionSummary[];
   axisLetterDecisions?: SmartLabelAxisLetterDecisionSummary[];
+  lineNameDecisions?: SmartLabelLineNameDecisionSummary[];
   placements: any[];
   shiftReport: any[];
   preservation: any;
@@ -591,6 +700,10 @@ export function recommendSmartLabelBeta(
     enableAxisLetterOverlapFix?: boolean;
     enableUnit3F?: boolean;
     enableD2AxisLetterFix?: boolean;
+    enableLineNameOverlapFix?: boolean;
+    enableUnit3G?: boolean;
+    enableD3LineNameFix?: boolean;
+    lineNameAction?: LineNameActionMode;
   }
 ): Promise<SmartLabelBetaProposal>;
 

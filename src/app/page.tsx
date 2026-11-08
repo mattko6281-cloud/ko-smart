@@ -36,6 +36,7 @@ import {
 } from "@/lib/smart-label-beta/client-workflow";
 import type {
   MultiAbstractActionMode,
+  LineNameActionMode,
   SmartLabelAccessRole,
   SmartLabelBetaResponse,
   SmartLabelEngineVersion,
@@ -381,6 +382,8 @@ export default function Home() {
   const [applyDomainExtensionBeta, setApplyDomainExtensionBeta] = useState(false);
   const [enablePointLabelOverlapFixBeta, setEnablePointLabelOverlapFixBeta] = useState(false);
   const [enableAxisLetterOverlapFixBeta, setEnableAxisLetterOverlapFixBeta] = useState(false);
+  const [enableLineNameOverlapFixBeta, setEnableLineNameOverlapFixBeta] = useState(false);
+  const [lineNameActionBeta, setLineNameActionBeta] = useState<LineNameActionMode>("hold");
   const [multiAbstractActionBeta, setMultiAbstractActionBeta] = useState<MultiAbstractActionMode>("hold");
   const [enableUnit3BBeta, setEnableUnit3BBeta] = useState(false);
   const [engineVersionBeta, setEngineVersionBeta] = useState<SmartLabelEngineVersion>("v0.2.1");
@@ -439,6 +442,7 @@ export default function Home() {
         setApplyDomainExtensionBeta(false);
         setEnablePointLabelOverlapFixBeta(false);
         setEnableAxisLetterOverlapFixBeta(false);
+        setEnableLineNameOverlapFixBeta(false);
       })
       .catch(() => {
         if (!cancelled) {
@@ -507,7 +511,8 @@ export default function Home() {
     overrideApplyDomainExtension?: boolean,
     overrideEnablePointLabelOverlapFix?: boolean,
     overrideApplySafeShrink?: boolean,
-    overrideEnableAxisLetterOverlapFix?: boolean
+    overrideEnableAxisLetterOverlapFix?: boolean,
+    overrideEnableLineNameOverlapFix?: boolean
   ) => {
     if (!showSmartLabelBeta || isSmartLabelLoading) return;
     if (!rawInput.trim()) {
@@ -543,6 +548,11 @@ export default function Home() {
         : enableAxisLetterOverlapFixBeta;
     const useEnableAxisLetterOverlapFix =
       useEngineVersion === "v0.2.2-beta" ? rawEnableAxisLetterFix : false;
+    const rawEnableLineNameFix =
+      typeof overrideEnableLineNameOverlapFix === "boolean"
+        ? overrideEnableLineNameOverlapFix
+        : enableLineNameOverlapFixBeta;
+    const useEnableLineNameOverlapFix = useEngineVersion === "v0.2.2-beta" ? rawEnableLineNameFix : false;
     const snapshotCode = rawInput;
     setIsSmartLabelLoading(true);
     try {
@@ -558,6 +568,7 @@ export default function Home() {
           enableUnit3B: useEnableUnit3B,
           enablePointLabelOverlapFix: useEnablePointLabelOverlapFix,
           enableAxisLetterOverlapFix: useEnableAxisLetterOverlapFix,
+          enableLineNameOverlapFix: useEnableLineNameOverlapFix,
         }),
         cache: "no-store",
       });
@@ -571,6 +582,8 @@ export default function Home() {
         return;
       }
       setMultiAbstractActionBeta("hold");
+      setMultiAbstractActionBeta("hold");
+      setLineNameActionBeta("hold");
       setSmartLabelProposal(data as SmartLabelBetaResponse);
     } catch {
       toast.error("스마트 라벨 서버 통신 중 오류가 발생했습니다. 기존 코드는 안전하게 유지됩니다.");
@@ -582,6 +595,7 @@ export default function Home() {
   const handleApproveSmartLabel = () => {
     const result = applyApprovedProposal(smartLabelProposal, rawInput, {
       multiAbstractAction: multiAbstractActionBeta,
+      lineNameAction: lineNameActionBeta,
     });
     if (!result.applied || !result.backup) {
       toast.error(result.error || "추천 결과를 적용할 수 없습니다.");
@@ -596,6 +610,9 @@ export default function Home() {
     handleRawInputChange(result.newRawInput);
     setSmartLabelProposal(null);
     setMultiAbstractActionBeta("hold");
+    setSmartLabelProposal(null);
+    setMultiAbstractActionBeta("hold");
+    setLineNameActionBeta("hold");
     toast.success("✅ 스마트 라벨 추천 위치가 적용되었습니다. (조이스틱으로 미세 조정 가능)");
   };
 
@@ -3580,6 +3597,8 @@ const getProcessedInput = (code: string) => {
           onClose={() => {
             setSmartLabelProposal(null);
             setMultiAbstractActionBeta("hold");
+            setLineNameActionBeta("hold");
+            setMultiAbstractActionBeta("hold");
           }}
           restoreConfirmOpen={isRestoreConfirmOpen}
           onConfirmRestoreOverwrite={() => handleRestoreSmartLabel(true)}
@@ -3596,6 +3615,9 @@ const getProcessedInput = (code: string) => {
           enableUnit3BOption={unit3BServerEnabled ? enableUnit3BBeta : false}
           enablePointLabelOverlapFixOption={enablePointLabelOverlapFixBeta}
           enableAxisLetterOverlapFixOption={enableAxisLetterOverlapFixBeta}
+          enableLineNameOverlapFixOption={enableLineNameOverlapFixBeta}
+          lineNameAction={lineNameActionBeta}
+          onChangeLineNameAction={setLineNameActionBeta}
           engineVersion={smartLabelAccess.canSelectEngine ? engineVersionBeta : "v0.2.2-beta"}
           isRecomputing={isSmartLabelLoading}
           onToggleApplyAxisOption={(next) => {
@@ -3607,7 +3629,8 @@ const getProcessedInput = (code: string) => {
               applyDomainExtensionBeta,
               enablePointLabelOverlapFixBeta,
               applySafeShrinkBeta,
-              enableAxisLetterOverlapFixBeta
+              enableAxisLetterOverlapFixBeta,
+              enableLineNameOverlapFixBeta
             );
           }}
           onToggleApplySafeShrinkOption={(next) => {
@@ -3619,7 +3642,8 @@ const getProcessedInput = (code: string) => {
               applyDomainExtensionBeta,
               enablePointLabelOverlapFixBeta,
               next,
-              enableAxisLetterOverlapFixBeta
+              enableAxisLetterOverlapFixBeta,
+              enableLineNameOverlapFixBeta
             );
           }}
           onToggleApplyDomainExtensionOption={(next) => {
@@ -3631,7 +3655,8 @@ const getProcessedInput = (code: string) => {
               next,
               enablePointLabelOverlapFixBeta,
               applySafeShrinkBeta,
-              enableAxisLetterOverlapFixBeta
+              enableAxisLetterOverlapFixBeta,
+              enableLineNameOverlapFixBeta
             );
           }}
           onToggleEnablePointLabelOverlapFixOption={(next) => {
@@ -3643,7 +3668,8 @@ const getProcessedInput = (code: string) => {
               applyDomainExtensionBeta,
               next,
               applySafeShrinkBeta,
-              enableAxisLetterOverlapFixBeta
+              enableAxisLetterOverlapFixBeta,
+              enableLineNameOverlapFixBeta
             );
           }}
           onToggleEnableAxisLetterOverlapFixOption={(next) => {
@@ -3655,6 +3681,20 @@ const getProcessedInput = (code: string) => {
               applyDomainExtensionBeta,
               enablePointLabelOverlapFixBeta,
               applySafeShrinkBeta,
+              next,
+              enableLineNameOverlapFixBeta
+            );
+          }}
+          onToggleEnableLineNameOverlapFixOption={(next) => {
+            setEnableLineNameOverlapFixBeta(next);
+            handleRunSmartLabelBeta(
+              applyAxisBeta,
+              engineVersionBeta,
+              enableUnit3BBeta,
+              applyDomainExtensionBeta,
+              enablePointLabelOverlapFixBeta,
+              applySafeShrinkBeta,
+              enableAxisLetterOverlapFixBeta,
               next
             );
           }}
@@ -3667,7 +3707,8 @@ const getProcessedInput = (code: string) => {
               applyDomainExtensionBeta,
               enablePointLabelOverlapFixBeta,
               applySafeShrinkBeta,
-              enableAxisLetterOverlapFixBeta
+              enableAxisLetterOverlapFixBeta,
+              enableLineNameOverlapFixBeta
             );
           }}
           onChangeEngineVersion={(nextEngine) => {
@@ -3679,7 +3720,8 @@ const getProcessedInput = (code: string) => {
               applyDomainExtensionBeta,
               enablePointLabelOverlapFixBeta,
               applySafeShrinkBeta,
-              enableAxisLetterOverlapFixBeta
+              enableAxisLetterOverlapFixBeta,
+              enableLineNameOverlapFixBeta
             );
           }}
         />
