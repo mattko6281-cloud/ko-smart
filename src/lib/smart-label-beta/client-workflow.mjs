@@ -9,6 +9,8 @@ export const DEFAULT_CLIENT_ENGINE_VERSION = "v0.2.1";
 export const SUPPORTED_CLIENT_ENGINE_VERSIONS = ["v0.2.1", "v0.2.2-beta"];
 export const DEFAULT_SMART_LABEL_UI_MODE = "A";
 export const SUPPORTED_SMART_LABEL_UI_MODES = ["A", "B", "C"];
+export const DEFAULT_MODE_A_APPLY_AXIS = true;
+export const SMART_LABEL_BUTTON_PULSE_DURATION_MS = 3000;
 
 /**
  * 클라이언트에서 개발자(developer), 지정된 파일럿 팀원(pilot), 일반 팀원(none)의 스마트 라벨 권한 및 초기 설정을 판정한다.
@@ -498,7 +500,7 @@ export function saveRememberedSmartLabelUiMode(storage, uiMode, sessionEmail) {
  *   6대 라벨 정리 유닛(함수식, Unit 3-B 눈금, Unit 3-D 원점, Unit 3-E 점 이름, Unit 3-F 축 문자, Unit 3-G 직선 이름)을 켜서 전달한다.
  * - 다중 추상 함수식(Type 2) 및 다중 직선 이름(D3-2)은 감지하되 기본 Hold("hold")로 요청한다.
  * - Safe Shrink 와 그래프 domain 미세 연장은 기본 OFF(false)로 유지한다.
- * - "축 길이도 함께 맞춤"(applyAxis)은 토글 상태를 반영한다 (기본 OFF).
+ * - "축 길이도 함께 맞춤"(applyAxis)은 일반 모드 A에서 기본 ON(true)이며, 사용자가 토글한 불리언 값을 그대로 반영한다.
  *
  * @param {{
  *   applyAxis?: boolean,
@@ -506,7 +508,10 @@ export function saveRememberedSmartLabelUiMode(storage, uiMode, sessionEmail) {
  * }} [params]
  */
 export function buildModeASafePresetOptions(params = {}) {
-  const applyAxis = Boolean(params?.applyAxis);
+  const applyAxis =
+    typeof params?.applyAxis === "boolean"
+      ? params.applyAxis
+      : DEFAULT_MODE_A_APPLY_AXIS;
   const enableUnit3B = params?.unit3BServerEnabled !== false;
   return {
     engineVersion: /** @type {"v0.2.2-beta"} */ ("v0.2.2-beta"),
@@ -819,4 +824,57 @@ export function dismissSmartLabelUpdateNoticePermanently(
     // 스토리지 예외 무시
   }
   return { dismissedPermanently: true, saved };
+}
+
+/**
+ * 업데이트 안내 팝업이 닫힐 때 메인 `[✨ 스마트 그림 정리]` 버튼의
+ * 3초 부드러운 강조(pulse) 애니메이션을 실행할지 판정한다.
+ * - 허용된 사용자(showSmartLabelUI !== false)가 1~2회차 방문 안내 팝업을 본 직후
+ *   `[확인하고 시작하기]`, `✕ 닫기`, `ESC`, 배경 클릭(action === "confirm-close")으로 닫을 때만 1회(3초) 활성화한다.
+ * - `[다시 보지 않기]`(action === "dismiss-permanently") 클릭 시에는 실행하지 않는다.
+ * - 팝업이 표시되지 않은 방문(3회차 이후, 동일 세션 새로고침, 미허용 사용자)에서는 실행하지 않는다.
+ *
+ * @param {{
+ *   action: "confirm-close" | "dismiss-permanently" | string,
+ *   noticeWasShownInThisVisit: boolean,
+ *   shownCount?: number,
+ *   showSmartLabelUI?: boolean,
+ *   prefersReducedMotion?: boolean
+ * }} params
+ */
+export function resolveSmartLabelButtonPulseOnNoticeAction(params) {
+  const inactive = (reason) => ({
+    shouldPulse: false,
+    durationMs: 0,
+    useStaticHighlightOnly: false,
+    reason,
+  });
+  if (!params || typeof params !== "object") {
+    return inactive("invalid-params");
+  }
+  if (params.showSmartLabelUI === false) {
+    return inactive("ui-hidden");
+  }
+  if (!params.noticeWasShownInThisVisit) {
+    return inactive("notice-not-shown");
+  }
+  if (params.action === "dismiss-permanently") {
+    return inactive("dismissed-permanently");
+  }
+  if (params.action !== "confirm-close") {
+    return inactive("unsupported-action");
+  }
+  const count =
+    typeof params.shownCount === "number" && Number.isFinite(params.shownCount)
+      ? params.shownCount
+      : 1;
+  if (count < 1 || count > MAX_SMART_LABEL_UPDATE_NOTICE_VIEWS) {
+    return inactive("out-of-view-range");
+  }
+  return {
+    shouldPulse: true,
+    durationMs: SMART_LABEL_BUTTON_PULSE_DURATION_MS,
+    useStaticHighlightOnly: Boolean(params.prefersReducedMotion),
+    reason: "pulse-after-notice-close",
+  };
 }

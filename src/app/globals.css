@@ -128,3 +128,28 @@
     @apply font-sans;
   }
 }
+
+/* KO-SMART 업데이트 안내 팝업 확인 직후 [✨ 스마트 그림 정리] 버튼 3초 부드러운 보라색 펄스 강조 */
+@keyframes kosmart-soft-violet-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(167, 139, 250, 0.25);
+    border-color: rgba(167, 139, 250, 0.75);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(167, 139, 250, 0.42), 0 0 18px 2px rgba(139, 92, 246, 0.55);
+    border-color: rgba(216, 180, 254, 0.95);
+  }
+}
+
+.kosmart-smart-btn-pulse {
+  animation: kosmart-soft-violet-pulse 1s ease-in-out 3;
+  border-color: rgba(196, 181, 253, 0.9) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kosmart-smart-btn-pulse {
+    animation: none !important;
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.45), 0 0 12px 1px rgba(139, 92, 246, 0.4) !important;
+    border-color: rgba(216, 180, 254, 0.95) !important;
+  }
+}

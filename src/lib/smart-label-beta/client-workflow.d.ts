@@ -6,6 +6,8 @@ export const DEFAULT_CLIENT_ENGINE_VERSION: "v0.2.1";
 export const SUPPORTED_CLIENT_ENGINE_VERSIONS: Array<"v0.2.1" | "v0.2.2-beta">;
 export const DEFAULT_SMART_LABEL_UI_MODE: "A";
 export const SUPPORTED_SMART_LABEL_UI_MODES: Array<"A" | "B" | "C">;
+export const DEFAULT_MODE_A_APPLY_AXIS: true;
+export const SMART_LABEL_BUTTON_PULSE_DURATION_MS: number;
 
 export type SmartLabelUiMode = "A" | "B" | "C";
 
@@ -197,4 +199,17 @@ export function dismissSmartLabelUpdateNoticePermanently(
 ): {
   dismissedPermanently: boolean;
   saved: boolean;
+};
+
+export function resolveSmartLabelButtonPulseOnNoticeAction(params: {
+  action: "confirm-close" | "dismiss-permanently" | string;
+  noticeWasShownInThisVisit: boolean;
+  shownCount?: number;
+  showSmartLabelUI?: boolean;
+  prefersReducedMotion?: boolean;
+}): {
+  shouldPulse: boolean;
+  durationMs: number;
+  useStaticHighlightOnly: boolean;
+  reason: string;
 };

@@ -33,12 +33,15 @@ import {
   saveRememberedEngineVersion,
   loadRememberedSmartLabelUiMode,
   saveRememberedSmartLabelUiMode,
+  DEFAULT_MODE_A_APPLY_AXIS,
+  SMART_LABEL_BUTTON_PULSE_DURATION_MS,
   buildModeASafePresetOptions,
   isStaleSmartLabelResponse,
   applyApprovedProposal,
   restoreOriginalFromBackup,
   evaluateAndRecordSmartLabelUpdateNotice,
   dismissSmartLabelUpdateNoticePermanently,
+  resolveSmartLabelButtonPulseOnNoticeAction,
   type SmartLabelBackupSnapshot,
   type SmartLabelUiMode,
 } from "@/lib/smart-label-beta/client-workflow";
@@ -244,6 +247,37 @@ export default function Home() {
   // KICE 검수 가이드 모달
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
 
+  // 상단 헤더 반응형 드롭다운 (KICE 도구 / 계정 메뉴)
+  const [isKiceToolsMenuOpen, setIsKiceToolsMenuOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+  const kiceToolsMenuRef = useRef<HTMLDivElement>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isKiceToolsMenuOpen && !isAccountMenuOpen) return;
+    const handleHeaderMenuOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (isKiceToolsMenuOpen && kiceToolsMenuRef.current && !kiceToolsMenuRef.current.contains(target)) {
+        setIsKiceToolsMenuOpen(false);
+      }
+      if (isAccountMenuOpen && accountMenuRef.current && !accountMenuRef.current.contains(target)) {
+        setIsAccountMenuOpen(false);
+      }
+    };
+    const handleHeaderMenuEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsKiceToolsMenuOpen(false);
+        setIsAccountMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleHeaderMenuOutside);
+    window.addEventListener("keydown", handleHeaderMenuEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleHeaderMenuOutside);
+      window.removeEventListener("keydown", handleHeaderMenuEsc);
+    };
+  }, [isKiceToolsMenuOpen, isAccountMenuOpen]);
+
   // ── 렌더링 프리뷰 화면 마우스 드래그 스크롤 (Drag to Pan) ──
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [isPreviewDragging, setIsPreviewDragging] = useState(false);
@@ -385,6 +419,7 @@ export default function Home() {
   const [unit3BServerEnabled, setUnit3BServerEnabled] = useState(true);
   const [unit3BDisabledReason, setUnit3BDisabledReason] = useState<string | null>(null);
   const [isSmartLabelLoading, setIsSmartLabelLoading] = useState(false);
+  const [modeAApplyAxis, setModeAApplyAxis] = useState<boolean>(DEFAULT_MODE_A_APPLY_AXIS);
   const [applyAxisBeta, setApplyAxisBeta] = useState(false);
   const [applySafeShrinkBeta, setApplySafeShrinkBeta] = useState(false);
   const [applyDomainExtensionBeta, setApplyDomainExtensionBeta] = useState(false);
@@ -505,13 +540,25 @@ export default function Home() {
     serverRole: serverAccessRole,
   });
 
-  // ── 스마트 라벨 업데이트 안내 팝업 (허용된 사용자 최대 2회 별도 방문 표시) ──
+  // ── 스마트 라벨 업데이트 안내 팝업 (허용된 사용자 최대 2회 별도 방문 표시) & 버튼 3초 펄스 강조 ──
   const [isUpdateNoticeOpen, setIsUpdateNoticeOpen] = useState(false);
+  const [isSmartBtnPulseActive, setIsSmartBtnPulseActive] = useState(false);
+  const noticeShownCountInVisitRef = useRef<number>(0);
+  const smartBtnPulseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (smartBtnPulseTimerRef.current) {
+        clearTimeout(smartBtnPulseTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!showSmartLabelBeta) {
       setIsUpdateNoticeOpen(false);
+      setIsSmartBtnPulseActive(false);
       return;
     }
     const hasOtherModalOpen = Boolean(
@@ -532,6 +579,7 @@ export default function Home() {
       hasOtherModalOpen,
     });
     if (evalResult.shouldShow) {
+      noticeShownCountInVisitRef.current = evalResult.shownCount;
       setIsUpdateNoticeOpen(true);
     }
   }, [
@@ -550,6 +598,28 @@ export default function Home() {
 
   const handleCloseUpdateNotice = useCallback(() => {
     setIsUpdateNoticeOpen(false);
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const pulseDecision = resolveSmartLabelButtonPulseOnNoticeAction({
+      action: "confirm-close",
+      noticeWasShownInThisVisit: noticeShownCountInVisitRef.current > 0,
+      shownCount: noticeShownCountInVisitRef.current,
+      showSmartLabelUI: true,
+      prefersReducedMotion,
+    });
+    noticeShownCountInVisitRef.current = 0;
+    if (pulseDecision.shouldPulse) {
+      if (smartBtnPulseTimerRef.current) {
+        clearTimeout(smartBtnPulseTimerRef.current);
+      }
+      setIsSmartBtnPulseActive(true);
+      smartBtnPulseTimerRef.current = setTimeout(() => {
+        setIsSmartBtnPulseActive(false);
+        smartBtnPulseTimerRef.current = null;
+      }, pulseDecision.durationMs || SMART_LABEL_BUTTON_PULSE_DURATION_MS);
+    }
   }, []);
 
   const handleDismissUpdateNoticeForever = useCallback(() => {
@@ -560,6 +630,12 @@ export default function Home() {
         session?.user?.email
       );
     }
+    noticeShownCountInVisitRef.current = 0;
+    if (smartBtnPulseTimerRef.current) {
+      clearTimeout(smartBtnPulseTimerRef.current);
+      smartBtnPulseTimerRef.current = null;
+    }
+    setIsSmartBtnPulseActive(false);
     setIsUpdateNoticeOpen(false);
   }, [session?.user?.email]);
 
@@ -698,11 +774,12 @@ export default function Home() {
 
   const handleRunModeASafePreset = (overrideApplyAxis?: boolean) => {
     const nextApplyAxis =
-      typeof overrideApplyAxis === "boolean" ? overrideApplyAxis : applyAxisBeta;
+      typeof overrideApplyAxis === "boolean" ? overrideApplyAxis : modeAApplyAxis;
     const preset = buildModeASafePresetOptions({
       applyAxis: nextApplyAxis,
       unit3BServerEnabled,
     });
+    setModeAApplyAxis(preset.applyAxis);
     setEngineVersionBeta(preset.engineVersion);
     setApplyAxisBeta(preset.applyAxis);
     setApplySafeShrinkBeta(preset.applySafeShrink);
@@ -731,6 +808,7 @@ export default function Home() {
       : "v0.2.2-beta";
     setEngineVersionBeta(activeEngine);
     setApplyAxisBeta(opts.applyAxis);
+    setModeAApplyAxis(opts.applyAxis);
     setApplySafeShrinkBeta(opts.applySafeShrink);
     setApplyDomainExtensionBeta(opts.applyDomainExtension);
     setEnableUnit3BBeta(opts.enableUnit3B);
@@ -750,8 +828,15 @@ export default function Home() {
   };
 
   const handleClickMainSmartLabelButton = () => {
+    if (isSmartBtnPulseActive) {
+      if (smartBtnPulseTimerRef.current) {
+        clearTimeout(smartBtnPulseTimerRef.current);
+        smartBtnPulseTimerRef.current = null;
+      }
+      setIsSmartBtnPulseActive(false);
+    }
     if (uiModeBeta === "A") {
-      handleRunModeASafePreset(applyAxisBeta);
+      handleRunModeASafePreset(modeAApplyAxis);
     } else {
       handleRunSmartLabelBeta();
     }
@@ -1918,20 +2003,20 @@ const getProcessedInput = (code: string) => {
       {/* ══════════════════════════════════════════════════════
           HEADER
       ══════════════════════════════════════════════════════ */}
-      <header className="h-14 shrink-0 border-b border-white/[0.06] bg-[#0d1117]/95 backdrop-blur-xl z-30 flex items-center px-5 gap-4">
+      <header className="h-14 shrink-0 border-b border-white/[0.06] bg-[#0d1117]/95 backdrop-blur-xl z-40 flex items-center px-3 sm:px-5 gap-2 sm:gap-3">
 
         {/* 로고 + 브랜드명 */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 shrink-0 whitespace-nowrap">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="KO-SMART" className="h-8 w-auto object-contain drop-shadow" />
+          <img src="/logo.png" alt="KO-SMART" className="h-8 w-auto object-contain drop-shadow shrink-0" />
           <div className="flex flex-col leading-none">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-[17px] font-black tracking-tight text-white">KO<span className="text-blue-400">-</span>SMART</span>
-              <span className="text-[10px] font-bold text-blue-400/70 bg-blue-950/40 border border-blue-800/30 rounded px-1.5 py-0.5">v5.2</span>
-              <span className="text-[9px] font-semibold text-amber-400/80 bg-amber-950/30 border border-amber-800/30 rounded px-1.5 py-0.5 tracking-tight">Jinil Edition</span>
+            <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+              <span className="text-[16px] sm:text-[17px] font-black tracking-tight text-white whitespace-nowrap">KO<span className="text-blue-400">-</span>SMART</span>
+              <span className="text-[10px] font-bold text-blue-400/70 bg-blue-950/40 border border-blue-800/30 rounded px-1.5 py-0.5 whitespace-nowrap">v5.2</span>
+              <span className="text-[9px] font-semibold text-amber-400/80 bg-amber-950/30 border border-amber-800/30 rounded px-1.5 py-0.5 tracking-tight whitespace-nowrap">Jinil Edition</span>
             </div>
             <span
-              className="text-[9px] text-slate-500 mt-0.5 tracking-wide cursor-default select-none hover:text-slate-400 transition-colors duration-200"
+              className="hidden 2xl:block text-[9px] text-slate-500 mt-0.5 tracking-wide cursor-default select-none hover:text-slate-400 transition-colors duration-200 whitespace-nowrap"
               title="평가원 최적화 수학 자동화 렌더링 툴"
             >
               KICE-Optimized Standard Math Automation &amp; Rendering Tool
@@ -1939,7 +2024,7 @@ const getProcessedInput = (code: string) => {
           </div>
         </div>
 
-        <div className="h-7 w-px bg-zinc-800 mx-1" />
+        <div className="h-6 w-px bg-zinc-800 mx-0.5 shrink-0" />
 
         {/* Kroki 렌더링 엔진 선택 드롭다운 */}
         <Select
@@ -1949,7 +2034,7 @@ const getProcessedInput = (code: string) => {
             setRenderEngine(val);
           }}
         >
-          <SelectTrigger className={`flex items-center gap-1.5 h-[26px] px-2.5 rounded-full ${renderEngine === "private" ? "bg-emerald-950/30 border-emerald-800/25 text-emerald-300/80 hover:bg-emerald-900/40" : "bg-blue-950/30 border-blue-800/25 text-blue-300/80 hover:bg-blue-900/40"} border text-[10px] font-bold tracking-wider shadow-none focus:ring-0 focus:ring-offset-0 transition-colors w-auto min-w-max outline-none`}>
+          <SelectTrigger className={`flex items-center gap-1.5 h-[28px] px-2.5 rounded-full shrink-0 whitespace-nowrap ${renderEngine === "private" ? "bg-emerald-950/30 border-emerald-800/25 text-emerald-300/80 hover:bg-emerald-900/40" : "bg-blue-950/30 border-blue-800/25 text-blue-300/80 hover:bg-blue-900/40"} border text-[10px] font-bold tracking-wider shadow-none focus:ring-0 focus:ring-offset-0 transition-colors w-auto min-w-max outline-none`}>
             <div className={`w-1.5 h-1.5 rounded-full ${renderEngine === "private" ? "bg-emerald-400" : "bg-blue-400"} animate-pulse shrink-0`} />
             <CloudCog className={`w-3 h-3 ${renderEngine === "private" ? "text-emerald-400" : "text-blue-400"} shrink-0`} />
             <SelectValue placeholder={renderEngine === "private" ? "Dedicated (사내 전용)" : "Public (공용)"}>
@@ -1966,52 +2051,79 @@ const getProcessedInput = (code: string) => {
           </SelectContent>
         </Select>
 
-        {/* ── 프롬프트 가이드 버튼 그룹 ── */}
-        <div className="flex items-center gap-2">
-          {/* INF_KICE TikZ 프롬프트 버튼 (구 메타수학 가이드) + 3회 한정 툴팁 */}
-          <div className="relative">
+        {/* ── KICE 도구 드롭다운 + 도움말 버튼 그룹 (노트북/125% 배율에서도 줄바꿈 0건 보장) ── */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* KICE 도구 통합 드롭다운 (INF_KICE TikZ 프롬프트 + 💡 KICE 검수 체크리스트) */}
+          <div ref={kiceToolsMenuRef} className="relative shrink-0">
             <button
-              id="btn-meta-prompt-guide"
-              onClick={() => setIsMetaModalOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150
-                bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500
-                text-white shadow-md shadow-blue-900/40 border border-blue-500/30 hover:border-blue-400/50
-                hover:scale-[1.03] active:scale-100 group"
-              title="INF_KICE TikZ 프롬프트 가이드 열기"
+              id="btn-kice-tools-menu"
+              data-testid="btn-kice-tools-menu"
+              type="button"
+              onClick={() => {
+                setIsKiceToolsMenuOpen((prev) => !prev);
+                setIsAccountMenuOpen(false);
+              }}
+              aria-expanded={isKiceToolsMenuOpen}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-tight whitespace-nowrap transition-all duration-150 bg-gradient-to-r from-blue-600/90 to-indigo-600/90 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-900/30 border border-blue-400/30 hover:border-blue-300/60"
+              title="INF_KICE TikZ 프롬프트 및 KICE 검수 체크리스트 열기"
             >
-              <BookOpen className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
-              INF_KICE TikZ 프롬프트
+              <BookOpen className="w-3.5 h-3.5 shrink-0" />
+              <span className="whitespace-nowrap">KICE 도구</span>
+              <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform duration-150 ${isKiceToolsMenuOpen ? "rotate-180" : ""}`} />
             </button>
 
+            <div
+              id="kice-tools-dropdown-panel"
+              data-testid="kice-tools-dropdown-panel"
+              className={`${isKiceToolsMenuOpen ? "block" : "hidden"} absolute left-0 top-full mt-1.5 w-60 rounded-xl border border-zinc-700/80 bg-[#121722]/98 p-1.5 shadow-2xl shadow-black/70 backdrop-blur-xl z-50 space-y-1`}
+            >
+              <button
+                id="btn-meta-prompt-guide"
+                type="button"
+                onClick={() => {
+                  setIsKiceToolsMenuOpen(false);
+                  setIsMetaModalOpen(true);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-[11.5px] font-bold text-white hover:bg-blue-600/25 border border-transparent hover:border-blue-500/40 transition-colors whitespace-nowrap"
+                title="INF_KICE TikZ 프롬프트 가이드 열기"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <div className="flex flex-col leading-tight">
+                  <span className="whitespace-nowrap">INF_KICE TikZ 프롬프트</span>
+                  <span className="text-[9.5px] font-normal text-zinc-400 whitespace-nowrap">표준 TikZ 생성 프롬프트 원클릭 복사</span>
+                </div>
+              </button>
 
+              <button
+                id="btn-guide-checklist"
+                type="button"
+                onClick={() => {
+                  setIsKiceToolsMenuOpen(false);
+                  setIsGuideModalOpen(true);
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-[11.5px] font-bold text-amber-300 hover:bg-amber-500/15 border border-transparent hover:border-amber-500/40 transition-colors whitespace-nowrap"
+                title="INF_KICE 렌더링 실무 검수 체크리스트"
+              >
+                <span className="text-sm shrink-0 leading-none">💡</span>
+                <div className="flex flex-col leading-tight">
+                  <span className="whitespace-nowrap">KICE 검수 체크리스트</span>
+                  <span className="text-[9.5px] font-normal text-zinc-400 whitespace-nowrap">평가원 스타일 실무 검수 기준 확인</span>
+                </div>
+              </button>
+            </div>
           </div>
 
-          {/* KICE 검수 체크리스트 버튼 */}
-          <button
-            id="btn-guide-checklist"
-            onClick={() => setIsGuideModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-[11px] font-bold tracking-tight transition-all duration-150
-              bg-transparent border border-amber-500/60 text-amber-300
-              hover:bg-amber-500/10 hover:border-amber-400/80 hover:text-amber-200
-              hover:scale-[1.03] active:scale-100"
-            title="INF_KICE 렌더링 실무 검수 체크리스트"
-          >
-            💡 KICE 검수 체크리스트
-          </button>
-
-          {/* 사용 설명서 버튼 — 평상시 silver, hover 시 golden glow */}
+          {/* 도움말 (사용 설명서) 버튼 — 평상시 silver, hover 시 golden glow */}
           <button
             id="btn-help"
+            type="button"
             onClick={handleOpenHelp}
             className={[
-              "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-tight",
+              "relative flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold tracking-tight whitespace-nowrap shrink-0",
               "bg-zinc-800/80 border border-zinc-600/50 text-zinc-200",
               "transition-all duration-300 hover:scale-[1.03] active:scale-100 group",
               "hover:border-amber-400/70 hover:text-amber-200",
             ].join(" ")}
-            style={{
-              // hover 글로우는 onMouseEnter/Leave로 동적 처리
-            }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.boxShadow =
                 "0 0 10px 2px rgba(251,191,36,0.25), inset 0 0 6px 1px rgba(251,191,36,0.08)";
@@ -2019,74 +2131,132 @@ const getProcessedInput = (code: string) => {
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLButtonElement).style.boxShadow = "";
             }}
-            title="KO-SMART 사용 설명서 열기"
+            title="KO-SMART 사용 설명서 (도움말) 열기"
           >
-            <HelpCircle className="w-3.5 h-3.5 group-hover:scale-110 group-hover:text-amber-300 transition-all duration-300" />
-            사용 설명서
+            <HelpCircle className="w-3.5 h-3.5 shrink-0 group-hover:scale-110 group-hover:text-amber-300 transition-all duration-300" />
+            <span className="whitespace-nowrap">도움말</span>
           </button>
         </div>
 
-        {/* 헤더 우측: 실제 로그인 세션 계정 + 로그아웃 버튼 & 제작자 크레딧 분리 */}
-        <div className="ml-auto flex items-center gap-2.5">
-          {/* 실제 인증된 세션 정보 및 로그아웃 버튼 */}
+        {/* 헤더 우측: 컴팩트 계정 메뉴 드롭다운 + 대화면 제작자 크레딧 */}
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          {/* 계정 메뉴 (로그인 상태 · 이메일 · 제작자 정보 · 로그아웃 통합) */}
           <div
+            ref={accountMenuRef}
             id="header-authenticated-session"
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900/80 border border-zinc-700/70 shadow-sm"
+            className="relative shrink-0"
           >
-            <span
-              className={`w-2 h-2 rounded-full shrink-0 ${
-                session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
-                  ? "bg-violet-400 shadow-[0_0_6px_rgba(167,139,250,0.8)]"
-                  : "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
-              }`}
-            />
-            <div className="leading-tight">
-              <div className="flex items-center gap-1.5">
-                <span
-                  className={`text-[9px] font-bold tracking-tight uppercase ${
-                    session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
-                      ? "text-violet-300"
-                      : "text-emerald-300"
-                  }`}
-                >
-                  {session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
-                    ? "로그인됨 · 개발자(Beta)"
-                    : smartLabelAccess.role === "pilot"
-                    ? "로그인됨 · 파일럿(Beta)"
-                    : "로그인됨 · 팀원"}
-                </span>
-              </div>
-              <div id="header-session-email" className="text-[11px] font-mono font-semibold text-zinc-200">
-                {session?.user?.email}
-              </div>
-            </div>
             <button
-              id="btn-auth-signout"
-              onClick={() => nextAuthSignOut({ callbackUrl: "/" })}
-              className="ml-1.5 flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold
-                bg-zinc-800 hover:bg-red-950/70 border border-zinc-700 hover:border-red-700/60
-                text-zinc-300 hover:text-red-200 transition-all"
-              title="현재 Google 계정에서 로그아웃하고 로그인 화면으로 돌아갑니다"
+              id="btn-account-menu"
+              data-testid="btn-account-menu"
+              type="button"
+              onClick={() => {
+                setIsAccountMenuOpen((prev) => !prev);
+                setIsKiceToolsMenuOpen(false);
+              }}
+              aria-expanded={isAccountMenuOpen}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-zinc-900/85 hover:bg-zinc-800/90 border border-zinc-700/70 hover:border-zinc-600 shadow-sm transition-colors whitespace-nowrap"
+              title="로그인 계정 정보 및 로그아웃 메뉴 열기"
             >
-              <LogOut className="w-3 h-3" />
-              <span>로그아웃</span>
+              <span
+                className={`w-2 h-2 rounded-full shrink-0 ${
+                  session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                    ? "bg-violet-400 shadow-[0_0_6px_rgba(167,139,250,0.8)]"
+                    : "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                }`}
+              />
+              <span
+                className={`text-[10px] font-bold tracking-tight whitespace-nowrap ${
+                  session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                    ? "text-violet-300"
+                    : "text-emerald-300"
+                }`}
+              >
+                {session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                  ? "개발자(Beta)"
+                  : smartLabelAccess.role === "pilot"
+                  ? "파일럿(Beta)"
+                  : "팀원"}
+              </span>
+              <span className="hidden md:inline-block max-w-[140px] lg:max-w-[180px] truncate text-[11px] font-mono font-semibold text-zinc-200 whitespace-nowrap">
+                {session?.user?.email?.split("@")[0] || "계정"}
+              </span>
+              <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 shrink-0 transition-transform duration-150 ${isAccountMenuOpen ? "rotate-180" : ""}`} />
             </button>
+
+            <div
+              id="account-dropdown-panel"
+              data-testid="account-dropdown-panel"
+              className={`${isAccountMenuOpen ? "block" : "hidden"} absolute right-0 top-full mt-1.5 w-68 rounded-xl border border-zinc-700/80 bg-[#121722]/98 p-3 shadow-2xl shadow-black/70 backdrop-blur-xl z-50 space-y-2.5`}
+            >
+              <div className="space-y-1 border-b border-zinc-800 pb-2.5">
+                <div className="flex items-center gap-1.5">
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                        ? "bg-violet-400"
+                        : "bg-emerald-400"
+                    }`}
+                  />
+                  <span
+                    className={`text-[10px] font-bold tracking-tight uppercase whitespace-nowrap ${
+                      session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                        ? "text-violet-300"
+                        : "text-emerald-300"
+                    }`}
+                  >
+                    {session?.user?.email?.trim().toLowerCase() === DEVELOPER_BETA_EMAIL
+                      ? "로그인됨 · 개발자(Beta)"
+                      : smartLabelAccess.role === "pilot"
+                      ? "로그인됨 · 파일럿(Beta)"
+                      : "로그인됨 · 팀원"}
+                  </span>
+                </div>
+                <div id="header-session-email" className="text-[11.5px] font-mono font-semibold text-zinc-100 break-all">
+                  {session?.user?.email}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2.5 px-1 py-1 rounded-lg bg-zinc-900/60 border border-zinc-800/70">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/ko.png"
+                  alt="고진일 팀장"
+                  className="w-6 h-6 rounded-full object-cover border border-blue-400/40 shrink-0"
+                />
+                <div className="leading-tight">
+                  <div className="text-[8.5px] text-zinc-500 font-semibold tracking-wider uppercase whitespace-nowrap">System Creator</div>
+                  <div className="text-[10.5px] font-bold text-zinc-300 whitespace-nowrap">고진일 팀장</div>
+                </div>
+              </div>
+
+              <button
+                id="btn-auth-signout"
+                type="button"
+                onClick={() => nextAuthSignOut({ callbackUrl: "/" })}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap bg-zinc-800 hover:bg-red-950/70 border border-zinc-700 hover:border-red-700/60 text-zinc-200 hover:text-red-200 transition-all"
+                title="현재 Google 계정에서 로그아웃하고 로그인 화면으로 돌아갑니다"
+              >
+                <LogOut className="w-3.5 h-3.5 shrink-0" />
+                <span className="whitespace-nowrap">로그아웃</span>
+              </button>
+            </div>
           </div>
 
-          {/* 정적 시스템 제작자 크레딧 (실제 로그인 세션과 혼동 방지) */}
+          {/* 대화면(2xl 이상) 정적 시스템 제작자 크레딧 배지 */}
           <div
-            className="hidden xl:flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-zinc-900/40 border border-zinc-800/60 opacity-80"
-            title="KO-SMART 시스템 제작자 크레딧 (현재 로그인 계정 정보는 좌측 배지를 확인하세요)"
+            className="hidden 2xl:flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-zinc-900/40 border border-zinc-800/60 opacity-80 shrink-0 whitespace-nowrap"
+            title="KO-SMART 시스템 제작자 크레딧 (현재 로그인 계정 정보는 좌측 계정 메뉴를 확인하세요)"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/ko.png"
               alt="고진일 팀장"
-              className="w-6 h-6 rounded-full object-cover border border-blue-400/40"
+              className="w-6 h-6 rounded-full object-cover border border-blue-400/40 shrink-0"
             />
             <div className="leading-none">
-              <div className="text-[8px] text-zinc-500 font-semibold tracking-wider uppercase">System Creator</div>
-              <div className="text-[10.5px] font-bold text-zinc-400">고진일 팀장</div>
+              <div className="text-[8px] text-zinc-500 font-semibold tracking-wider uppercase whitespace-nowrap">System Creator</div>
+              <div className="text-[10.5px] font-bold text-zinc-400 whitespace-nowrap">고진일 팀장</div>
             </div>
           </div>
         </div>
@@ -2152,11 +2322,10 @@ const getProcessedInput = (code: string) => {
                   <button
                     id="btn-smart-label-beta"
                     data-testid="btn-smart-label-beta"
+                    data-pulse-active={isSmartBtnPulseActive ? "true" : "false"}
                     onClick={handleClickMainSmartLabelButton}
                     disabled={isSmartLabelLoading}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight whitespace-nowrap transition-all duration-150
-                      bg-violet-950/70 hover:bg-violet-900/80 border border-violet-700/60 hover:border-violet-500/80
-                      text-violet-200 hover:text-white shadow-sm shadow-violet-900/30 disabled:opacity-50 disabled:cursor-wait"
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight whitespace-nowrap transition-all duration-150 bg-violet-950/70 hover:bg-violet-900/80 border border-violet-700/60 hover:border-violet-500/80 text-violet-200 hover:text-white shadow-sm shadow-violet-900/30 disabled:opacity-50 disabled:cursor-wait ${isSmartBtnPulseActive ? "kosmart-smart-btn-pulse" : ""}`}
                     title="라벨 겹침을 자동으로 정돈하고 원본과 추천 결과를 비교합니다"
                   >
                     <Sparkles className={`w-3 h-3 text-violet-300 ${isSmartLabelLoading ? "animate-spin" : ""}`} />
@@ -2226,7 +2395,7 @@ const getProcessedInput = (code: string) => {
               </div>
 
               {/* ── 다운로드 영역 그룹 ── */}
-              <div className="relative z-50 flex items-center gap-2 p-1.5 bg-gradient-to-r from-amber-950/40 to-zinc-900/60 border border-amber-700/40 rounded-xl shadow-lg shadow-amber-900/20 backdrop-blur-sm">
+              <div className="relative z-20 flex items-center gap-2 p-1.5 bg-gradient-to-r from-amber-950/40 to-zinc-900/60 border border-amber-700/40 rounded-xl shadow-lg shadow-amber-900/20 backdrop-blur-sm">
                 {/* ── TikZ 코드 함께 저장 체크박스 (Pill) ── */}
                 <label
                   className={`relative group flex items-center gap-1.5 cursor-pointer px-3 py-1.5 rounded-md border transition-colors ${
@@ -3682,7 +3851,7 @@ const getProcessedInput = (code: string) => {
           canSelectEngine={smartLabelAccess.canSelectEngine}
           unit3BServerEnabled={unit3BServerEnabled}
           unit3BDisabledReason={unit3BDisabledReason}
-          applyAxisOption={applyAxisBeta}
+          applyAxisOption={uiModeBeta === "A" ? modeAApplyAxis : applyAxisBeta}
           applySafeShrinkOption={applySafeShrinkBeta}
           applyDomainExtensionOption={applyDomainExtensionBeta}
           multiAbstractAction={multiAbstractActionBeta}
@@ -3701,6 +3870,7 @@ const getProcessedInput = (code: string) => {
           onApplyModeBOptions={handleApplyModeBOptions}
           onToggleApplyAxisOption={(next) => {
             setApplyAxisBeta(next);
+            setModeAApplyAxis(next);
             handleRunSmartLabelBeta(
               next,
               engineVersionBeta,
