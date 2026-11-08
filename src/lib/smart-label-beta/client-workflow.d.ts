@@ -147,3 +147,54 @@ export function isStaleSmartLabelResponse(params: {
   requestRawInput: string;
   currentRawInput: string;
 }): boolean;
+
+export const SMART_LABEL_UPDATE_NOTICE_VERSION: string;
+export const SMART_LABEL_UPDATE_NOTICE_STORAGE_PREFIX: string;
+export const SMART_LABEL_UPDATE_NOTICE_SESSION_PREFIX: string;
+export const MAX_SMART_LABEL_UPDATE_NOTICE_VIEWS: number;
+
+export function computeUpdateNoticeUserKey(sessionEmail?: string | null): string;
+
+export function getUpdateNoticeLocalStorageKey(
+  sessionEmail?: string | null,
+  version?: string
+): string;
+
+export function getUpdateNoticeSessionStorageKey(
+  sessionEmail?: string | null,
+  version?: string
+): string;
+
+export function evaluateAndRecordSmartLabelUpdateNotice(params: {
+  localStorage?: {
+    getItem?: (k: string) => string | null;
+    setItem?: (k: string, v: string) => void;
+  } | null;
+  sessionStorage?: {
+    getItem?: (k: string) => string | null;
+    setItem?: (k: string, v: string) => void;
+  } | null;
+  sessionStatus: string;
+  sessionEmail?: string | null;
+  serverBetaEnabled: boolean;
+  serverRole?: string | null;
+  pilotEmails?: string[] | null;
+  hasOtherModalOpen?: boolean;
+  version?: string;
+  maxViews?: number;
+}): {
+  shouldShow: boolean;
+  reason: string;
+  shownCount: number;
+  dismissedPermanently: boolean;
+};
+
+export function dismissSmartLabelUpdateNoticePermanently(
+  localStorage?: { setItem?: (k: string, v: string) => void } | null,
+  sessionStorage?: { setItem?: (k: string, v: string) => void } | null,
+  sessionEmail?: string | null,
+  version?: string
+): {
+  dismissedPermanently: boolean;
+  saved: boolean;
+};

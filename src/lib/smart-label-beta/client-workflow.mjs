@@ -577,3 +577,246 @@ export function isStaleSmartLabelResponse(params) {
   if (params.requestRawInput !== params.currentRawInput) return true;
   return false;
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 업데이트 안내 팝업 (최대 2회 별도 방문 표시 + 동일 세션 중복 방지 + 다시 보지 않기)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const SMART_LABEL_UPDATE_NOTICE_VERSION = "v0.2.2-r2-d3-20261108";
+export const SMART_LABEL_UPDATE_NOTICE_STORAGE_PREFIX = "kosmart_update_notice_state";
+export const SMART_LABEL_UPDATE_NOTICE_SESSION_PREFIX = "kosmart_update_notice_session";
+export const MAX_SMART_LABEL_UPDATE_NOTICE_VIEWS = 2;
+
+/**
+ * 민감한 이메일 원문이나 토큰을 브라우저 스토리지 키에 직접 노출하지 않기 위해
+ * 정규화된 이메일로부터 비가역 해시 식별자(u_<8자리 hex>)를 생성한다.
+ *
+ * @param {string | null | undefined} sessionEmail
+ * @returns {string}
+ */
+export function computeUpdateNoticeUserKey(sessionEmail) {
+  const norm =
+    typeof sessionEmail === "string" && sessionEmail.trim()
+      ? sessionEmail.trim().toLowerCase()
+      : "";
+  if (!norm) return "u_anon";
+  let h = 2166136261;
+  for (let i = 0; i < norm.length; i++) {
+    h ^= norm.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `u_${(h >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+/**
+ * 사용자별 · 업데이트 버전별 localStorage 키를 생성한다.
+ *
+ * @param {string | null | undefined} sessionEmail
+ * @param {string} [version]
+ * @returns {string}
+ */
+export function getUpdateNoticeLocalStorageKey(
+  sessionEmail,
+  version = SMART_LABEL_UPDATE_NOTICE_VERSION
+) {
+  const ver =
+    typeof version === "string" && version.trim()
+      ? version.trim()
+      : SMART_LABEL_UPDATE_NOTICE_VERSION;
+  return `${SMART_LABEL_UPDATE_NOTICE_STORAGE_PREFIX}:${ver}:${computeUpdateNoticeUserKey(sessionEmail)}`;
+}
+
+/**
+ * 사용자별 · 업데이트 버전별 sessionStorage 키를 생성한다.
+ *
+ * @param {string | null | undefined} sessionEmail
+ * @param {string} [version]
+ * @returns {string}
+ */
+export function getUpdateNoticeSessionStorageKey(
+  sessionEmail,
+  version = SMART_LABEL_UPDATE_NOTICE_VERSION
+) {
+  const ver =
+    typeof version === "string" && version.trim()
+      ? version.trim()
+      : SMART_LABEL_UPDATE_NOTICE_VERSION;
+  return `${SMART_LABEL_UPDATE_NOTICE_SESSION_PREFIX}:${ver}:${computeUpdateNoticeUserKey(sessionEmail)}`;
+}
+
+/**
+ * 허용된 사용자가 메인 편집기에 진입했을 때 업데이트 안내 팝업 표시 여부를 판정하고,
+ * 표시 대상인 경우 방문 횟수(+1)와 현재 세션 표시 기록을 안전하게 저장한다.
+ * - 비로그인 또는 스마트 라벨 미허용 사용자는 절대 표시하지 않는다.
+ * - 다른 모달이 열려 있을 때는 표시하지 않는다.
+ * - 동일 브라우저 세션 내 새로고침/재진입 시 중복 표시하지 않는다.
+ * - 최대 2회 별도 방문까지만 표시하며, 3번째 방문부터는 자동 숨김 처리한다.
+ * - [다시 보지 않기]가 설정된 경우 즉시 숨김 처리한다.
+ * - 스토리지 접근 예외 발생 시에도 편집기 동작을 방해하지 않는다.
+ *
+ * @param {{
+ *   localStorage?: { getItem?: (k: string) => string | null, setItem?: (k: string, v: string) => void } | null,
+ *   sessionStorage?: { getItem?: (k: string) => string | null, setItem?: (k: string, v: string) => void } | null,
+ *   sessionStatus: string,
+ *   sessionEmail?: string | null,
+ *   serverBetaEnabled: boolean,
+ *   serverRole?: string | null,
+ *   pilotEmails?: string[] | null,
+ *   hasOtherModalOpen?: boolean,
+ *   version?: string,
+ *   maxViews?: number
+ * }} params
+ */
+export function evaluateAndRecordSmartLabelUpdateNotice(params) {
+  const blocked = (reason, shownCount = 0, dismissedPermanently = false) => ({
+    shouldShow: false,
+    reason,
+    shownCount,
+    dismissedPermanently,
+  });
+
+  if (!params || typeof params !== "object") {
+    return blocked("invalid-params");
+  }
+
+  const access = resolveSmartLabelClientAccess({
+    sessionStatus: params.sessionStatus,
+    sessionEmail: params.sessionEmail,
+    serverBetaEnabled: params.serverBetaEnabled,
+    serverRole: params.serverRole,
+    pilotEmails: params.pilotEmails,
+  });
+
+  if (!access.showUI) {
+    return blocked("unauthorized");
+  }
+
+  if (params.hasOtherModalOpen) {
+    return blocked("other-modal-open");
+  }
+
+  const version =
+    typeof params.version === "string" && params.version.trim()
+      ? params.version.trim()
+      : SMART_LABEL_UPDATE_NOTICE_VERSION;
+  const maxViews =
+    typeof params.maxViews === "number" && params.maxViews > 0
+      ? params.maxViews
+      : MAX_SMART_LABEL_UPDATE_NOTICE_VIEWS;
+
+  const lsKey = getUpdateNoticeLocalStorageKey(params.sessionEmail, version);
+  const ssKey = getUpdateNoticeSessionStorageKey(params.sessionEmail, version);
+
+  let shownCount = 0;
+  let dismissedPermanently = false;
+  try {
+    if (params.localStorage && typeof params.localStorage.getItem === "function") {
+      const raw = params.localStorage.getItem(lsKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          shownCount =
+            typeof parsed.shownCount === "number" && Number.isFinite(parsed.shownCount)
+              ? Math.max(0, Math.floor(parsed.shownCount))
+              : 0;
+          dismissedPermanently = Boolean(parsed.dismissedPermanently);
+        }
+      }
+    }
+  } catch {
+    // 스토리지 읽기 실패 시 기본값 유지 (편집기 보호)
+  }
+
+  if (dismissedPermanently) {
+    return blocked("dismissed-permanently", shownCount, true);
+  }
+
+  if (shownCount >= maxViews) {
+    return blocked("max-views-reached", shownCount, false);
+  }
+
+  let alreadyShownInSession = false;
+  try {
+    if (params.sessionStorage && typeof params.sessionStorage.getItem === "function") {
+      alreadyShownInSession = params.sessionStorage.getItem(ssKey) === "1";
+    }
+  } catch {
+    // 스토리지 읽기 실패 무시
+  }
+
+  if (alreadyShownInSession) {
+    return blocked("already-shown-this-session", shownCount, false);
+  }
+
+  const nextShownCount = shownCount + 1;
+  try {
+    if (params.localStorage && typeof params.localStorage.setItem === "function") {
+      params.localStorage.setItem(
+        lsKey,
+        JSON.stringify({
+          shownCount: nextShownCount,
+          dismissedPermanently: false,
+        })
+      );
+    }
+  } catch {
+    // 스토리지 쓰기 실패 무시
+  }
+
+  try {
+    if (params.sessionStorage && typeof params.sessionStorage.setItem === "function") {
+      params.sessionStorage.setItem(ssKey, "1");
+    }
+  } catch {
+    // 스토리지 쓰기 실패 무시
+  }
+
+  return {
+    shouldShow: true,
+    reason: "shown",
+    shownCount: nextShownCount,
+    dismissedPermanently: false,
+  };
+}
+
+/**
+ * 사용자가 [다시 보지 않기]를 선택했을 때 해당 사용자·버전에 대해 영구 숨김 상태를 기록한다.
+ *
+ * @param {{ setItem?: (k: string, v: string) => void } | null | undefined} localStorage
+ * @param {{ setItem?: (k: string, v: string) => void } | null | undefined} sessionStorage
+ * @param {string | null | undefined} sessionEmail
+ * @param {string} [version]
+ */
+export function dismissSmartLabelUpdateNoticePermanently(
+  localStorage,
+  sessionStorage,
+  sessionEmail,
+  version = SMART_LABEL_UPDATE_NOTICE_VERSION
+) {
+  const lsKey = getUpdateNoticeLocalStorageKey(sessionEmail, version);
+  const ssKey = getUpdateNoticeSessionStorageKey(sessionEmail, version);
+  let saved = false;
+  try {
+    if (localStorage && typeof localStorage.setItem === "function") {
+      localStorage.setItem(
+        lsKey,
+        JSON.stringify({
+          shownCount: MAX_SMART_LABEL_UPDATE_NOTICE_VIEWS,
+          dismissedPermanently: true,
+        })
+      );
+      saved = true;
+    }
+  } catch {
+    // 스토리지 예외 무시
+  }
+  try {
+    if (sessionStorage && typeof sessionStorage.setItem === "function") {
+      sessionStorage.setItem(ssKey, "1");
+    }
+  } catch {
+    // 스토리지 예외 무시
+  }
+  return { dismissedPermanently: true, saved };
+}

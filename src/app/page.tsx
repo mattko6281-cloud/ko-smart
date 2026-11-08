@@ -23,6 +23,7 @@ import guide1 from "@/assets/guide1.png";
 import guide2 from "@/assets/guide2.png";
 import guide3 from "@/assets/guide3.png";
 import { SmartLabelBetaModal, type ModeBBatchedOptions } from "@/components/SmartLabelBetaModal";
+import { SmartLabelUpdateNoticeModal } from "@/components/SmartLabelUpdateNoticeModal";
 import {
   DEVELOPER_BETA_EMAIL,
   SMART_LABEL_BACKUP_STORAGE_KEY,
@@ -36,6 +37,8 @@ import {
   isStaleSmartLabelResponse,
   applyApprovedProposal,
   restoreOriginalFromBackup,
+  evaluateAndRecordSmartLabelUpdateNotice,
+  dismissSmartLabelUpdateNoticePermanently,
   type SmartLabelBackupSnapshot,
   type SmartLabelUiMode,
 } from "@/lib/smart-label-beta/client-workflow";
@@ -501,6 +504,64 @@ export default function Home() {
     serverBetaEnabled,
     serverRole: serverAccessRole,
   });
+
+  // ── 스마트 라벨 업데이트 안내 팝업 (허용된 사용자 최대 2회 별도 방문 표시) ──
+  const [isUpdateNoticeOpen, setIsUpdateNoticeOpen] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!showSmartLabelBeta) {
+      setIsUpdateNoticeOpen(false);
+      return;
+    }
+    const hasOtherModalOpen = Boolean(
+      smartLabelProposal ||
+        isRestoreConfirmOpen ||
+        isHelpOpen ||
+        isKiceModalOpen ||
+        isMetaModalOpen ||
+        isGuideModalOpen
+    );
+    const evalResult = evaluateAndRecordSmartLabelUpdateNotice({
+      localStorage: window.localStorage,
+      sessionStorage: window.sessionStorage,
+      sessionStatus: status,
+      sessionEmail: session?.user?.email,
+      serverBetaEnabled,
+      serverRole: serverAccessRole,
+      hasOtherModalOpen,
+    });
+    if (evalResult.shouldShow) {
+      setIsUpdateNoticeOpen(true);
+    }
+  }, [
+    showSmartLabelBeta,
+    status,
+    session?.user?.email,
+    serverBetaEnabled,
+    serverAccessRole,
+    smartLabelProposal,
+    isRestoreConfirmOpen,
+    isHelpOpen,
+    isKiceModalOpen,
+    isMetaModalOpen,
+    isGuideModalOpen,
+  ]);
+
+  const handleCloseUpdateNotice = useCallback(() => {
+    setIsUpdateNoticeOpen(false);
+  }, []);
+
+  const handleDismissUpdateNoticeForever = useCallback(() => {
+    if (typeof window !== "undefined") {
+      dismissSmartLabelUpdateNoticePermanently(
+        window.localStorage,
+        window.sessionStorage,
+        session?.user?.email
+      );
+    }
+    setIsUpdateNoticeOpen(false);
+  }, [session?.user?.email]);
 
   // 개발자 전용 베타 활성화 시 localStorage에서 마지막 선택 엔진 복원 (파일럿 팀원은 v0.2.2-beta 고정)
   useEffect(() => {
@@ -3742,6 +3803,17 @@ const getProcessedInput = (code: string) => {
               enableLineNameOverlapFixBeta
             );
           }}
+        />
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          MODAL — 스마트 라벨 업데이트 안내 팝업 (허용 사용자 전용)
+      ══════════════════════════════════════════════════════ */}
+      {showSmartLabelBeta && (
+        <SmartLabelUpdateNoticeModal
+          open={isUpdateNoticeOpen}
+          onConfirmClose={handleCloseUpdateNotice}
+          onDismissPermanently={handleDismissUpdateNoticeForever}
         />
       )}
 
