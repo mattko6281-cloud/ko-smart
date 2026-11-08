@@ -4,8 +4,11 @@
 export const DEVELOPER_BETA_EMAIL = "mattko6281@gmail.com";
 export const SMART_LABEL_BACKUP_STORAGE_KEY = "kosmart_smart_label_backup_v021";
 export const SMART_LABEL_ENGINE_STORAGE_KEY = "kosmart_smart_label_engine_version";
+export const SMART_LABEL_UI_MODE_STORAGE_PREFIX = "kosmart_smart_label_ui_mode_v022";
 export const DEFAULT_CLIENT_ENGINE_VERSION = "v0.2.1";
 export const SUPPORTED_CLIENT_ENGINE_VERSIONS = ["v0.2.1", "v0.2.2-beta"];
+export const DEFAULT_SMART_LABEL_UI_MODE = "A";
+export const SUPPORTED_SMART_LABEL_UI_MODES = ["A", "B", "C"];
 
 /**
  * 클라이언트에서 개발자(developer), 지정된 파일럿 팀원(pilot), 일반 팀원(none)의 스마트 라벨 권한 및 초기 설정을 판정한다.
@@ -189,17 +192,6 @@ export function resolveActiveProposalForMultiAbstractChoice(
     },
   };
   return resolveActiveProposalForLineNameChoice(maResolved, selectedLineNameAction);
-  if (false)
-
-  return {
-    ...proposal,
-    ...chosenVariant,
-    multiAbstractActionRequested: effectiveAction,
-    multiAbstractOption: {
-      ...maOpt,
-      selectedAction: effectiveAction,
-    },
-  };
 }
 
 /**
@@ -209,7 +201,7 @@ export function resolveActiveProposalForMultiAbstractChoice(
  *
  * @param {any} proposal
  * @param {string} currentRawInput
- * @param {{multiAbstractAction?: "hold" | "recommend" | "swap"}} [opts]
+ * @param {{multiAbstractAction?: "hold" | "recommend" | "swap", lineNameAction?: "hold" | "recommend" | "swap"}} [opts]
  */
 export function evaluateProposalApplicability(proposal, currentRawInput, opts = {}) {
   if (!proposal || typeof proposal !== "object") {
@@ -257,7 +249,7 @@ export function evaluateProposalApplicability(proposal, currentRawInput, opts = 
  *
  * @param {any} proposal
  * @param {string} currentRawInput
- * @param {{multiAbstractAction?: "hold" | "recommend" | "swap"}} [opts]
+ * @param {{multiAbstractAction?: "hold" | "recommend" | "swap", lineNameAction?: "hold" | "recommend" | "swap"}} [opts]
  */
 export function applyApprovedProposal(proposal, currentRawInput, opts = {}) {
   const activeProposal = resolveActiveProposalForMultiAbstractChoice(
@@ -423,4 +415,165 @@ export function saveRememberedEngineVersion(storage, engineVersion, authParams) 
   } catch {
     return { saved: false, engineVersion: normalized };
   }
+}
+
+/**
+ * 스마트 라벨 모달 UI 모드("A" | "B" | "C") 값을 정규화한다.
+ * 유효하지 않거나 비어 있으면 항상 일반 모드 "A" 로 복귀한다.
+ *
+ * @param {any} val
+ * @returns {"A" | "B" | "C"}
+ */
+export function normalizeSmartLabelUiMode(val) {
+  if (typeof val === "string") {
+    const upper = val.trim().toUpperCase();
+    if (upper === "A" || upper === "B" || upper === "C") {
+      return upper;
+    }
+  }
+  return DEFAULT_SMART_LABEL_UI_MODE;
+}
+
+/**
+ * 사용자 이메일별 UI 모드 localStorage 키를 생성한다.
+ *
+ * @param {string | null | undefined} sessionEmail
+ * @returns {string}
+ */
+export function getSmartLabelUiModeStorageKey(sessionEmail) {
+  const norm =
+    typeof sessionEmail === "string" && sessionEmail.trim()
+      ? sessionEmail.trim().toLowerCase()
+      : "anonymous";
+  return `${SMART_LABEL_UI_MODE_STORAGE_PREFIX}:${norm}`;
+}
+
+/**
+ * 브라우저 localStorage 에서 사용자가 마지막으로 사용한 UI 모드("A" | "B" | "C")를 읽어온다.
+ * - 최초 진입(저장값 없음) 시 모든 사용자에게 일반 모드 "A" 를 반환한다.
+ * - UI 모드 전환은 서버 권한 판정(resolveSmartLabelClientAccess)과 완전히 분리되어 동작한다.
+ *
+ * @param {{ getItem?: (key: string) => string | null } | null | undefined} storage
+ * @param {string | null | undefined} sessionEmail
+ * @returns {"A" | "B" | "C"}
+ */
+export function loadRememberedSmartLabelUiMode(storage, sessionEmail) {
+  if (!storage || typeof storage.getItem !== "function") {
+    return DEFAULT_SMART_LABEL_UI_MODE;
+  }
+  try {
+    const key = getSmartLabelUiModeStorageKey(sessionEmail);
+    const raw = storage.getItem(key);
+    return normalizeSmartLabelUiMode(raw);
+  } catch {
+    return DEFAULT_SMART_LABEL_UI_MODE;
+  }
+}
+
+/**
+ * 사용자가 선택한 UI 모드("A" | "B" | "C")를 브라우저 localStorage 에 저장한다.
+ *
+ * @param {{ setItem?: (key: string, value: string) => void } | null | undefined} storage
+ * @param {any} uiMode
+ * @param {string | null | undefined} sessionEmail
+ * @returns {{ saved: boolean, uiMode: "A" | "B" | "C" }}
+ */
+export function saveRememberedSmartLabelUiMode(storage, uiMode, sessionEmail) {
+  const normalized = normalizeSmartLabelUiMode(uiMode);
+  if (!storage || typeof storage.setItem !== "function") {
+    return { saved: false, uiMode: normalized };
+  }
+  try {
+    const key = getSmartLabelUiModeStorageKey(sessionEmail);
+    storage.setItem(key, normalized);
+    return { saved: true, uiMode: normalized };
+  } catch {
+    return { saved: false, uiMode: normalized };
+  }
+}
+
+/**
+ * 일반 모드 A의 `[스마트 정리하기]` 원클릭 안전 프리셋 요청 옵션을 생성한다.
+ * - 엔진 내부 기본값이나 API 기본값은 변경하지 않고, 일반 모드 A 원클릭 요청에서만
+ *   6대 라벨 정리 유닛(함수식, Unit 3-B 눈금, Unit 3-D 원점, Unit 3-E 점 이름, Unit 3-F 축 문자, Unit 3-G 직선 이름)을 켜서 전달한다.
+ * - 다중 추상 함수식(Type 2) 및 다중 직선 이름(D3-2)은 감지하되 기본 Hold("hold")로 요청한다.
+ * - Safe Shrink 와 그래프 domain 미세 연장은 기본 OFF(false)로 유지한다.
+ * - "축 길이도 함께 맞춤"(applyAxis)은 토글 상태를 반영한다 (기본 OFF).
+ *
+ * @param {{
+ *   applyAxis?: boolean,
+ *   unit3BServerEnabled?: boolean
+ * }} [params]
+ */
+export function buildModeASafePresetOptions(params = {}) {
+  const applyAxis = Boolean(params?.applyAxis);
+  const enableUnit3B = params?.unit3BServerEnabled !== false;
+  return {
+    engineVersion: /** @type {"v0.2.2-beta"} */ ("v0.2.2-beta"),
+    applyAxis,
+    applySafeShrink: false,
+    applyDomainExtension: false,
+    enableUnit3B,
+    enablePointLabelOverlapFix: true,
+    enableAxisLetterOverlapFix: true,
+    enableLineNameOverlapFix: true,
+    multiAbstractAction: /** @type {"hold"} */ ("hold"),
+    lineNameAction: /** @type {"hold"} */ ("hold"),
+  };
+}
+
+/**
+ * 제안 객체(proposal) 내의 모든 후보 미리보기 이미지 URI(원본, 추천, Type 2 Hold/Recommend/Swap, D-3 Hold/Recommend/Swap)를
+ * 중복 없이 수집하여 클라이언트 측 이미지 프리로드에 사용한다.
+ *
+ * @param {any} proposal
+ * @returns {string[]}
+ */
+export function collectProposalCandidateImageUris(proposal) {
+  if (!proposal || typeof proposal !== "object") return [];
+  const uris = new Set();
+  const addFrom = (obj) => {
+    if (!obj || typeof obj !== "object") return;
+    if (typeof obj.preview?.originalSvgDataUri === "string" && obj.preview.originalSvgDataUri) {
+      uris.add(obj.preview.originalSvgDataUri);
+    }
+    if (typeof obj.preview?.recommendedSvgDataUri === "string" && obj.preview.recommendedSvgDataUri) {
+      uris.add(obj.preview.recommendedSvgDataUri);
+    }
+    const lnVars = obj.lineNameOption?.variants;
+    if (lnVars && typeof lnVars === "object") {
+      for (const k of ["hold", "recommend", "swap"]) {
+        if (lnVars[k]?.preview?.recommendedSvgDataUri) {
+          uris.add(lnVars[k].preview.recommendedSvgDataUri);
+        }
+      }
+    }
+  };
+
+  addFrom(proposal);
+  const maVars = proposal.multiAbstractOption?.variants;
+  if (maVars && typeof maVars === "object") {
+    for (const k of ["hold", "recommend", "swap"]) {
+      addFrom(maVars[k]);
+    }
+  }
+  return Array.from(uris);
+}
+
+/**
+ * 비동기 추천 응답이 최신 요청인지 검증한다 (요청 ID 불일치 또는 입력 코드 변경 시 이전 응답 무시).
+ *
+ * @param {{
+ *   requestSeq: number,
+ *   latestRequestSeq: number,
+ *   requestRawInput: string,
+ *   currentRawInput: string
+ * }} params
+ * @returns {boolean}
+ */
+export function isStaleSmartLabelResponse(params) {
+  if (!params || typeof params !== "object") return true;
+  if (params.requestSeq !== params.latestRequestSeq) return true;
+  if (params.requestRawInput !== params.currentRawInput) return true;
+  return false;
 }

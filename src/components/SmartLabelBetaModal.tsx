@@ -1,17 +1,29 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   evaluateProposalApplicability,
   resolveActiveProposalForMultiAbstractChoice,
+  normalizeSmartLabelUiMode,
+  collectProposalCandidateImageUris,
+  type SmartLabelUiMode,
 } from "@/lib/smart-label-beta/client-workflow";
 import type {
-  MultiAbstractActionMode,
-  LineNameActionMode,
-  SmartLabelAccessRole,
   SmartLabelBetaResponse,
   SmartLabelEngineVersion,
+  MultiAbstractActionMode,
+  LineNameActionMode,
 } from "@/lib/smart-label-beta/kroki-recommend";
+
+export interface ModeBBatchedOptions {
+  applyAxis: boolean;
+  applySafeShrink: boolean;
+  applyDomainExtension: boolean;
+  enableUnit3B: boolean;
+  enablePointLabelOverlapFix: boolean;
+  enableAxisLetterOverlapFix: boolean;
+  enableLineNameOverlapFix: boolean;
+}
 
 interface SmartLabelBetaModalProps {
   proposal: SmartLabelBetaResponse | null;
@@ -21,31 +33,35 @@ interface SmartLabelBetaModalProps {
   restoreConfirmOpen: boolean;
   onCancelRestoreConfirm: () => void;
   onConfirmRestoreOverwrite: () => void;
-  accessRole?: SmartLabelAccessRole;
+  accessRole?: "developer" | "pilot" | "none";
   canSelectEngine?: boolean;
   unit3BServerEnabled?: boolean;
   unit3BDisabledReason?: string | null;
   applyAxisOption?: boolean;
-  onToggleApplyAxisOption?: (next: boolean) => void;
+  onToggleApplyAxisOption?: (nextApplyAxis: boolean) => void;
   applySafeShrinkOption?: boolean;
-  onToggleApplySafeShrinkOption?: (next: boolean) => void;
+  onToggleApplySafeShrinkOption?: (nextApplySafeShrink: boolean) => void;
   applyDomainExtensionOption?: boolean;
-  onToggleApplyDomainExtensionOption?: (next: boolean) => void;
+  onToggleApplyDomainExtensionOption?: (nextApplyDomainExtension: boolean) => void;
   multiAbstractAction?: MultiAbstractActionMode;
-  onChangeMultiAbstractAction?: (next: MultiAbstractActionMode) => void;
+  onChangeMultiAbstractAction?: (nextAction: MultiAbstractActionMode) => void;
   enableUnit3BOption?: boolean;
-  onToggleEnableUnit3BOption?: (next: boolean) => void;
+  onToggleEnableUnit3BOption?: (nextEnableUnit3B: boolean) => void;
   enablePointLabelOverlapFixOption?: boolean;
-  onToggleEnablePointLabelOverlapFixOption?: (next: boolean) => void;
+  onToggleEnablePointLabelOverlapFixOption?: (nextEnablePointLabelOverlapFix: boolean) => void;
   enableAxisLetterOverlapFixOption?: boolean;
-  onToggleEnableAxisLetterOverlapFixOption?: (next: boolean) => void;
+  onToggleEnableAxisLetterOverlapFixOption?: (nextEnableAxisLetterOverlapFix: boolean) => void;
   enableLineNameOverlapFixOption?: boolean;
-  onToggleEnableLineNameOverlapFixOption?: (next: boolean) => void;
+  onToggleEnableLineNameOverlapFixOption?: (nextEnableLineNameOverlapFix: boolean) => void;
   lineNameAction?: LineNameActionMode;
-  onChangeLineNameAction?: (next: LineNameActionMode) => void;
+  onChangeLineNameAction?: (nextAction: LineNameActionMode) => void;
   engineVersion?: SmartLabelEngineVersion;
-  onChangeEngineVersion?: (next: SmartLabelEngineVersion) => void;
+  onChangeEngineVersion?: (nextEngineVersion: SmartLabelEngineVersion) => void;
   isRecomputing?: boolean;
+  uiMode?: SmartLabelUiMode;
+  onChangeUiMode?: (nextMode: SmartLabelUiMode) => void;
+  onRunModeASafePreset?: (nextApplyAxis?: boolean) => void;
+  onApplyModeBOptions?: (opts: ModeBBatchedOptions) => void;
 }
 
 export function SmartLabelBetaModal({
@@ -59,7 +75,7 @@ export function SmartLabelBetaModal({
   accessRole = "developer",
   canSelectEngine = true,
   unit3BServerEnabled = true,
-  unit3BDisabledReason = null,
+  unit3BDisabledReason,
   applyAxisOption = false,
   onToggleApplyAxisOption,
   applySafeShrinkOption = false,
@@ -68,7 +84,7 @@ export function SmartLabelBetaModal({
   onToggleApplyDomainExtensionOption,
   multiAbstractAction,
   onChangeMultiAbstractAction,
-  enableUnit3BOption = true,
+  enableUnit3BOption = false,
   onToggleEnableUnit3BOption,
   enablePointLabelOverlapFixOption = false,
   onToggleEnablePointLabelOverlapFixOption,
@@ -81,7 +97,24 @@ export function SmartLabelBetaModal({
   engineVersion = "v0.2.1",
   onChangeEngineVersion,
   isRecomputing = false,
+  uiMode = "A",
+  onChangeUiMode,
+  onRunModeASafePreset,
+  onApplyModeBOptions,
 }: SmartLabelBetaModalProps) {
+  const [internalUiMode, setInternalUiMode] = useState<SmartLabelUiMode>("A");
+  const activeUiMode: SmartLabelUiMode = normalizeSmartLabelUiMode(
+    onChangeUiMode ? uiMode : internalUiMode
+  );
+
+  const handleSelectUiMode = (nextMode: SmartLabelUiMode) => {
+    const normalized = normalizeSmartLabelUiMode(nextMode);
+    setInternalUiMode(normalized);
+    if (onChangeUiMode) {
+      onChangeUiMode(normalized);
+    }
+  };
+
   const [internalMaAction, setInternalMaAction] =
     React.useState<MultiAbstractActionMode>("hold");
 
@@ -99,7 +132,6 @@ export function SmartLabelBetaModal({
 
   const selectedMaAction: MultiAbstractActionMode =
     multiAbstractAction ?? internalMaAction;
-
 
   const [internalLnAction, setInternalLnAction] =
     React.useState<LineNameActionMode>("hold");
@@ -126,13 +158,92 @@ export function SmartLabelBetaModal({
     }
   };
 
-
   const handleSelectMaAction = (next: MultiAbstractActionMode) => {
     setInternalMaAction(next);
     if (onChangeMultiAbstractAction) {
       onChangeMultiAbstractAction(next);
     }
   };
+
+  // Mode B local draft checkboxes for 1-click batched apply
+  const [draftModeB, setDraftModeB] = useState<ModeBBatchedOptions>({
+    applyAxis: Boolean(applyAxisOption),
+    applySafeShrink: Boolean(applySafeShrinkOption),
+    applyDomainExtension: Boolean(applyDomainExtensionOption),
+    enableUnit3B: Boolean(enableUnit3BOption),
+    enablePointLabelOverlapFix: Boolean(enablePointLabelOverlapFixOption),
+    enableAxisLetterOverlapFix: Boolean(enableAxisLetterOverlapFixOption),
+    enableLineNameOverlapFix: Boolean(enableLineNameOverlapFixOption),
+  });
+
+  useEffect(() => {
+    setDraftModeB({
+      applyAxis: Boolean(applyAxisOption),
+      applySafeShrink: Boolean(applySafeShrinkOption),
+      applyDomainExtension: Boolean(applyDomainExtensionOption),
+      enableUnit3B: Boolean(enableUnit3BOption),
+      enablePointLabelOverlapFix: Boolean(enablePointLabelOverlapFixOption),
+      enableAxisLetterOverlapFix: Boolean(enableAxisLetterOverlapFixOption),
+      enableLineNameOverlapFix: Boolean(enableLineNameOverlapFixOption),
+    });
+  }, [
+    applyAxisOption,
+    applySafeShrinkOption,
+    applyDomainExtensionOption,
+    enableUnit3BOption,
+    enablePointLabelOverlapFixOption,
+    enableAxisLetterOverlapFixOption,
+    enableLineNameOverlapFixOption,
+  ]);
+
+  // Responsive comparison layout & zoom state for Mode A / B
+  const [compareLayoutPref, setCompareLayoutPref] = useState<"auto" | "two-col" | "single-tab">("auto");
+  const [isNarrowViewport, setIsNarrowViewport] = useState<boolean>(false);
+  const [compareActiveTab, setCompareActiveTab] = useState<"recommended" | "original">("recommended");
+  const [compareZoomPct, setCompareZoomPct] = useState<100 | 115 | 130>(100);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updateViewport = () => {
+      setIsNarrowViewport(window.innerWidth < 1200 || window.innerHeight < 700);
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
+
+  // ESC key handler: close modal safely without modifying rawInput
+  useEffect(() => {
+    if (!proposal && !restoreConfirmOpen) return;
+    if (typeof window === "undefined") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (restoreConfirmOpen) {
+          onCancelRestoreConfirm();
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [proposal, restoreConfirmOpen, onClose, onCancelRestoreConfirm]);
+
+  // Preload all candidate SVG data URIs on client so switching Hold/Recommend/Swap requires 0 server calls
+  const [preloadedImageCount, setPreloadedImageCount] = useState<number>(0);
+  useEffect(() => {
+    if (!proposal || typeof window === "undefined") {
+      setPreloadedImageCount(0);
+      return;
+    }
+    const uris = collectProposalCandidateImageUris(proposal);
+    setPreloadedImageCount(uris.length);
+    for (const uri of uris) {
+      const img = new window.Image();
+      img.src = uri;
+    }
+  }, [proposal]);
+
   if (restoreConfirmOpen) {
     return (
       <div
@@ -238,70 +349,175 @@ export function SmartLabelBetaModal({
       ? "안전성 검증 미통과 (원본 유지)"
       : "추천 실패 (원본 유지)";
 
+  const effectiveCompareLayout: "two-col" | "single-tab" =
+    compareLayoutPref === "auto"
+      ? isNarrowViewport
+        ? "single-tab"
+        : "two-col"
+      : compareLayoutPref;
+
+  const showMaConfirmCard = Boolean(
+    activeEngineVersion === "v0.2.2-beta" && maOpt?.detected
+  );
+  const showLnConfirmCard = Boolean(
+    activeEngineVersion === "v0.2.2-beta" &&
+      lnOpt?.requested &&
+      (lnOpt.d3SubType === "D3-2" || lnOpt.d3SubType === "D3-3" || lnOpt.requiresUserApproval)
+  );
+  const showSimpleCorrespondenceSection = showMaConfirmCard || showLnConfirmCard;
+
+  const movedFunctionCount = activeProposal.fnMovedCount ?? activeProposal.movedCount ?? 0;
+  const movedTickCount = activeProposal.tickMovedCount ?? 0;
+  const movedOriginCount = activeProposal.originMovedCount ?? 0;
+  const movedPointCount = activeProposal.pointLabelMovedCount ?? 0;
+  const movedAxisLetterCount = activeProposal.axisLetterMovedCount ?? 0;
+  const movedLineNameCount = activeProposal.lineNameMovedCount ?? 0;
+  const axisChanged = Boolean(activeProposal.axisOption?.applied);
+  const totalMovedCount =
+    movedFunctionCount +
+    movedTickCount +
+    movedOriginCount +
+    movedPointCount +
+    movedAxisLetterCount +
+    movedLineNameCount +
+    (axisChanged ? 1 : 0);
+  const unresolvedCount = diag?.counts?.preExistingUnresolved ?? 0;
+
+  const imgMaxHeightClass =
+    compareZoomPct === 130
+      ? "max-h-[380px]"
+      : compareZoomPct === 115
+      ? "max-h-[325px]"
+      : "max-h-[270px]";
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4"
       data-testid="smart-label-beta-modal"
+      data-ui-mode={activeUiMode}
+      data-preloaded-candidates={preloadedImageCount}
     >
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
         {/* 헤더 */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-900 px-5 py-3.5 text-white">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="text-sm font-bold">✨ 스마트 라벨 자동 정렬 (Beta)</span>
-            <span
-              className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${
-                activeEngineVersion === "v0.2.2-beta"
-                  ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-200"
-                  : "bg-indigo-500/30 border-indigo-400/40 text-indigo-200"
-              }`}
-            >
-              {activeEngineVersion === "v0.2.2-beta"
-                ? proposal.unit3BEnabled
-                  ? "v0.2.2 Beta (interim-v1 + Unit 3-B/3-C/3-D)"
-                  : "v0.2.2 Beta (interim-v1 + Unit 3-C/3-D)"
-                : proposal.algorithmVersion || "proto-0.2.1"}{" "}
-              · {proposal.applyAxisRequested ? "label+axes" : "labelOnly"} · verify=true
-            </span>
-            <span
-              className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300"
-              data-testid="modal-badge-access-role"
-            >
-              {accessRole === "pilot" ? "파일럿 팀원 베타" : "개발자 전용"}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            {canSelectEngine && onChangeEngineVersion ? (
-              <label
-                className="flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200"
-                data-testid="modal-select-engine-version"
-              >
-                <span className="text-slate-400">엔진:</span>
-                <select
-                  value={engineVersion}
-                  disabled={isRecomputing}
-                  onChange={(e) =>
-                    onChangeEngineVersion(
-                      e.target.value === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1"
-                    )
-                  }
-                  className="bg-transparent font-semibold text-white outline-none cursor-pointer"
-                >
-                  <option value="v0.2.1" className="bg-slate-900 text-slate-200">
-                    기존 v0.2.1 (기본)
-                  </option>
-                  <option value="v0.2.2-beta" className="bg-slate-900 text-emerald-300">
-                    개선 v0.2.2 Beta (interim-v1)
-                  </option>
-                </select>
-              </label>
-            ) : (
-              <span
-                className="rounded-md border border-emerald-700/60 bg-slate-800/90 px-2.5 py-1 text-[11px] font-semibold text-emerald-300"
-                data-testid="modal-fixed-engine-badge"
-              >
-                엔진: v0.2.2 Beta (고정)
+        <div className="shrink-0 flex flex-col gap-2 border-b border-slate-200 bg-slate-900 px-4 py-2.5 text-white">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-bold whitespace-nowrap">
+                ✨ 스마트 그림 정리
               </span>
-            )}
+              <span
+                className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${
+                  activeEngineVersion === "v0.2.2-beta"
+                    ? "bg-emerald-500/30 border-emerald-400/50 text-emerald-200"
+                    : "bg-indigo-500/30 border-indigo-400/40 text-indigo-200"
+                }`}
+              >
+                {activeEngineVersion === "v0.2.2-beta"
+                  ? proposal.unit3BEnabled
+                    ? "v0.2.2 Beta (interim-v1 + Unit 3-B/3-C/3-D)"
+                    : "v0.2.2 Beta (interim-v1 + Unit 3-C/3-D)"
+                  : proposal.algorithmVersion || "proto-0.2.1"}{" "}
+                · {proposal.applyAxisRequested ? "label+axes" : "labelOnly"} · verify=true
+              </span>
+              <span
+                className="rounded bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300"
+                data-testid="modal-badge-access-role"
+              >
+                {accessRole === "pilot" ? "파일럿 팀원 베타" : "개발자 전용"}
+              </span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* A / B / C 모드 전환기 */}
+              <div
+                className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800 p-0.5 text-[11px]"
+                data-testid="smart-label-ui-mode-switcher"
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSelectUiMode("A")}
+                  data-testid="btn-ui-mode-a"
+                  className={`rounded-md px-2.5 py-1 font-bold whitespace-nowrap transition ${
+                    activeUiMode === "A"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  일반 모드
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectUiMode("B")}
+                  data-testid="btn-ui-mode-b"
+                  className={`rounded-md px-2.5 py-1 font-bold whitespace-nowrap transition ${
+                    activeUiMode === "B"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  고급 옵션
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectUiMode("C")}
+                  data-testid="btn-ui-mode-c"
+                  className={`rounded-md px-2.5 py-1 font-bold whitespace-nowrap transition ${
+                    activeUiMode === "C"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-300 hover:text-white"
+                  }`}
+                >
+                  상세 검수
+                </button>
+              </div>
+
+              {canSelectEngine && onChangeEngineVersion ? (
+                <label
+                  className="flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-800/90 px-2.5 py-1 text-[11px] font-medium text-slate-200"
+                  data-testid="modal-select-engine-version"
+                >
+                  <span className="text-slate-400">엔진:</span>
+                  <select
+                    value={engineVersion}
+                    disabled={isRecomputing}
+                    onChange={(e) =>
+                      onChangeEngineVersion(
+                        e.target.value === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1"
+                      )
+                    }
+                    className="bg-transparent font-semibold text-white outline-none cursor-pointer"
+                  >
+                    <option value="v0.2.1" className="bg-slate-900 text-slate-200">
+                      기존 v0.2.1 (기본)
+                    </option>
+                    <option value="v0.2.2-beta" className="bg-slate-900 text-emerald-300">
+                      개선 v0.2.2 Beta (interim-v1)
+                    </option>
+                  </select>
+                </label>
+              ) : (
+                <span
+                  className="rounded-md border border-emerald-700/60 bg-slate-800/90 px-2.5 py-1 text-[11px] font-semibold text-emerald-300"
+                  data-testid="modal-fixed-engine-badge"
+                >
+                  엔진: v0.2.2 Beta (고정)
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={onClose}
+                data-testid="btn-close-smart-label-modal"
+                className="rounded-md px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white whitespace-nowrap"
+              >
+                ✕ 닫기
+              </button>
+            </div>
+          </div>
+
+          {/* Mode C 전용 헤더 체크박스 바 */}
+          {activeUiMode === "C" && (
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
             {activeEngineVersion === "v0.2.2-beta" && onToggleEnableUnit3BOption && (
               <label
                 className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium ${
@@ -428,19 +644,694 @@ export function SmartLabelBetaModal({
                 <span>x축·y축 길이도 자동 조정하기</span>
               </label>
             )}
-            <button
-              type="button"
-              onClick={onClose}
-              data-testid="btn-close-smart-label-modal"
-              className="rounded-md px-2.5 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-800 hover:text-white"
-            >
-              ✕ 닫기
-            </button>
-          </div>
+            </div>
+          )}
         </div>
 
-        {/* 본문 */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        {/* 본문: 일반 모드 (A) 및 고급 옵션 모드 (B) */}
+        {(activeUiMode === "A" || activeUiMode === "B") && (
+          <div
+            className="flex-1 overflow-y-auto p-3.5 sm:p-4 space-y-3"
+            data-testid="smart-label-simple-body"
+          >
+            {/* ① 원클릭 스마트 정리 컨트롤 + 핵심 한 줄 요약 바 */}
+            <div
+              className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-indigo-200 bg-indigo-50/50 px-3.5 py-2.5"
+              data-testid="mode-a-preset-bar"
+            >
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  type="button"
+                  disabled={isRecomputing}
+                  onClick={() => {
+                    if (onRunModeASafePreset) {
+                      onRunModeASafePreset(applyAxisOption);
+                    }
+                  }}
+                  data-testid="btn-mode-a-run-preset"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-300 whitespace-nowrap transition"
+                >
+                  <span>✨ 스마트 정리하기</span>
+                  {isRecomputing && <span className="text-[10px] font-normal">(계산 중...)</span>}
+                </button>
+
+                <label
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 hover:border-indigo-400 whitespace-nowrap"
+                  data-testid="label-mode-a-axis-fit"
+                >
+                  <input
+                    type="checkbox"
+                    checked={Boolean(applyAxisOption)}
+                    disabled={isRecomputing}
+                    onChange={(e) => {
+                      const nextVal = e.target.checked;
+                      if (onRunModeASafePreset) {
+                        onRunModeASafePreset(nextVal);
+                      } else if (onToggleApplyAxisOption) {
+                        onToggleApplyAxisOption(nextVal);
+                      }
+                    }}
+                    data-testid="chk-mode-a-axis-fit"
+                    className="h-3.5 w-3.5 rounded accent-indigo-600"
+                  />
+                  <span>축 길이도 함께 맞춤</span>
+                </label>
+              </div>
+
+              {/* 한 줄 요약 + 정돈된 요소 칩 */}
+              <div
+                className="flex flex-wrap items-center gap-1.5 text-xs"
+                data-testid="mode-a-concise-summary"
+              >
+                <span
+                  className={`rounded-md border px-2 py-0.5 text-[11px] font-bold ${
+                    totalMovedCount > 0
+                      ? "border-emerald-300 bg-emerald-100 text-emerald-900"
+                      : "border-slate-300 bg-white text-slate-700"
+                  }`}
+                >
+                  {totalMovedCount > 0
+                    ? `정돈됨 ${totalMovedCount}건`
+                    : showSimpleCorrespondenceSection
+                    ? "원본 배치 유지 중 (아래에서 후보 배치 선택 가능)"
+                    : "추가 이동 없이 원본 배치 유지"}
+                </span>
+                {movedFunctionCount > 0 && (
+                  <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    함수식 {movedFunctionCount}
+                  </span>
+                )}
+                {movedTickCount > 0 && (
+                  <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    눈금 {movedTickCount}
+                  </span>
+                )}
+                {movedOriginCount > 0 && (
+                  <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    원점 O
+                  </span>
+                )}
+                {movedPointCount > 0 && (
+                  <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    점 이름 {movedPointCount}
+                  </span>
+                )}
+                {movedAxisLetterCount > 0 && (
+                  <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    축 문자 {movedAxisLetterCount}
+                  </span>
+                )}
+                {movedLineNameCount > 0 && (
+                  <span className="rounded bg-white border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                    직선 이름 {movedLineNameCount}
+                  </span>
+                )}
+                {axisChanged && (
+                  <span className="rounded bg-indigo-100 border border-indigo-200 px-2 py-0.5 text-[11px] font-semibold text-indigo-900">
+                    축 길이 맞춤
+                  </span>
+                )}
+                {unresolvedCount > 0 && (
+                  <span className="rounded bg-amber-100 border border-amber-300 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                    조이스틱 미세 조정 권장 {unresolvedCount}건
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Mode B 전용: 고급 옵션 일괄 선택 바 (1회 요청으로 일괄 적용) */}
+            {activeUiMode === "B" && (
+              <div
+                className="rounded-xl border border-slate-300 bg-slate-50 p-3 space-y-2"
+                data-testid="mode-b-options-panel"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-slate-800">
+                    ⚙️ 고급 옵션 선택 (원하는 항목을 체크한 뒤 [옵션 변경 일괄 적용]을 누르면 1회 계산으로 반영됩니다)
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isRecomputing}
+                    onClick={() => {
+                      if (onApplyModeBOptions) {
+                        onApplyModeBOptions(draftModeB);
+                      }
+                    }}
+                    data-testid="btn-mode-b-apply-options"
+                    className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-800 disabled:bg-slate-300 whitespace-nowrap"
+                  >
+                    ⚡ 옵션 변경 일괄 적용
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={draftModeB.enableUnit3B && effectiveUnit3BServerEnabled}
+                      disabled={!effectiveUnit3BServerEnabled || isRecomputing}
+                      onChange={(e) =>
+                        setDraftModeB((prev) => ({ ...prev, enableUnit3B: e.target.checked }))
+                      }
+                      data-testid="chk-mode-b-unit3b"
+                      className="h-3.5 w-3.5 rounded accent-emerald-600"
+                    />
+                    <span>숫자 눈금 정렬</span>
+                  </label>
+
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={draftModeB.enablePointLabelOverlapFix}
+                      disabled={isRecomputing}
+                      onChange={(e) =>
+                        setDraftModeB((prev) => ({
+                          ...prev,
+                          enablePointLabelOverlapFix: e.target.checked,
+                        }))
+                      }
+                      data-testid="chk-mode-b-point-label"
+                      className="h-3.5 w-3.5 rounded accent-teal-600"
+                    />
+                    <span>점 이름(A,B,P) 정렬</span>
+                  </label>
+
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={draftModeB.enableAxisLetterOverlapFix}
+                      disabled={isRecomputing}
+                      onChange={(e) =>
+                        setDraftModeB((prev) => ({
+                          ...prev,
+                          enableAxisLetterOverlapFix: e.target.checked,
+                        }))
+                      }
+                      data-testid="chk-mode-b-axis-letter"
+                      className="h-3.5 w-3.5 rounded accent-purple-600"
+                    />
+                    <span>축 문자(a,b,α) 정렬</span>
+                  </label>
+
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={draftModeB.enableLineNameOverlapFix}
+                      disabled={isRecomputing}
+                      onChange={(e) =>
+                        setDraftModeB((prev) => ({
+                          ...prev,
+                          enableLineNameOverlapFix: e.target.checked,
+                        }))
+                      }
+                      data-testid="chk-mode-b-line-name"
+                      className="h-3.5 w-3.5 rounded accent-sky-600"
+                    />
+                    <span>직선 이름(l,m,n) 정렬</span>
+                  </label>
+
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={draftModeB.applyAxis}
+                      disabled={isRecomputing}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setDraftModeB((prev) => ({
+                          ...prev,
+                          applyAxis: checked,
+                          applySafeShrink: checked ? prev.applySafeShrink : false,
+                        }));
+                      }}
+                      data-testid="chk-mode-b-axis"
+                      className="h-3.5 w-3.5 rounded accent-indigo-600"
+                    />
+                    <span>4방향 축 연장</span>
+                  </label>
+
+                  <label
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-medium ${
+                      draftModeB.applyAxis
+                        ? "cursor-pointer border-slate-300 bg-white text-slate-800"
+                        : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={draftModeB.applyAxis && draftModeB.applySafeShrink}
+                      disabled={!draftModeB.applyAxis || isRecomputing}
+                      onChange={(e) =>
+                        setDraftModeB((prev) => ({
+                          ...prev,
+                          applySafeShrink: e.target.checked,
+                        }))
+                      }
+                      data-testid="chk-mode-b-safe-shrink"
+                      className="h-3.5 w-3.5 rounded accent-violet-600"
+                    />
+                    <span>여유 축 줄이기 (Safe Shrink)</span>
+                  </label>
+
+                  <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 font-medium text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={draftModeB.applyDomainExtension}
+                      disabled={isRecomputing}
+                      onChange={(e) =>
+                        setDraftModeB((prev) => ({
+                          ...prev,
+                          applyDomainExtension: e.target.checked,
+                        }))
+                      }
+                      data-testid="chk-mode-b-domain-ext"
+                      className="h-3.5 w-3.5 rounded accent-cyan-600"
+                    />
+                    <span>그래프 끝점 미세 연장</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* ② 원본 그림 vs 추천 결과 반응형 비교 영역 */}
+            <div
+              className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5"
+              data-testid="simple-graph-compare-section"
+              data-effective-layout={effectiveCompareLayout}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-800">
+                    🖼️ 그림 비교 (적용 전 원본 vs 정돈된 결과)
+                  </span>
+                  {isRecomputing && (
+                    <span className="rounded bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-800">
+                      미리보기 업데이트 중...
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* 비교 보기 방식 전환 (자동 / 좌우 / 탭) */}
+                  <div
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
+                    data-testid="compare-layout-controls"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setCompareLayoutPref("auto")}
+                      data-testid="btn-compare-layout-auto"
+                      className={`rounded px-2 py-0.5 font-semibold whitespace-nowrap ${
+                        compareLayoutPref === "auto"
+                          ? "bg-white text-slate-900 shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      자동 ({isNarrowViewport ? "탭" : "좌우"})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompareLayoutPref("two-col")}
+                      data-testid="btn-compare-layout-twocol"
+                      className={`rounded px-2 py-0.5 font-semibold whitespace-nowrap ${
+                        compareLayoutPref === "two-col"
+                          ? "bg-white text-slate-900 shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      좌우 나란히
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompareLayoutPref("single-tab")}
+                      data-testid="btn-compare-layout-tab"
+                      className={`rounded px-2 py-0.5 font-semibold whitespace-nowrap ${
+                        compareLayoutPref === "single-tab"
+                          ? "bg-white text-slate-900 shadow-xs"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      탭 전환 크게 보기
+                    </button>
+                  </div>
+
+                  {/* 확대 배율 (100% / 115% / 130%) */}
+                  <div
+                    className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-[11px]"
+                    data-testid="compare-zoom-controls"
+                  >
+                    {([100, 115, 130] as const).map((pct) => (
+                      <button
+                        key={pct}
+                        type="button"
+                        onClick={() => setCompareZoomPct(pct)}
+                        data-testid={`btn-compare-zoom-${pct}`}
+                        className={`rounded px-2 py-0.5 font-semibold whitespace-nowrap ${
+                          compareZoomPct === pct
+                            ? "bg-white text-indigo-700 shadow-xs"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {effectiveCompareLayout === "two-col" ? (
+                <div
+                  className="grid grid-cols-1 gap-3 md:grid-cols-2"
+                  data-testid="compare-two-column-grid"
+                >
+                  <div
+                    className="rounded-lg border border-slate-200 bg-slate-50 p-2.5"
+                    data-testid="compare-original-panel"
+                  >
+                    <div className="mb-1.5 flex items-center justify-between text-xs font-bold text-slate-700">
+                      <span>원본 그림</span>
+                      <span className="text-[11px] font-normal text-slate-500">현재 편집기 상태</span>
+                    </div>
+                    <div className="flex min-h-[200px] items-center justify-center overflow-auto rounded border border-slate-200 bg-white p-2">
+                      {activeProposal.preview?.originalSvgDataUri ? (
+                        <img
+                          src={activeProposal.preview.originalSvgDataUri}
+                          alt="Original TikZ Preview"
+                          className={`${imgMaxHeightClass} w-auto object-contain transition-all`}
+                        />
+                      ) : (
+                        <span className="text-xs text-slate-400">원본 미리보기 없음</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div
+                    className="rounded-lg border border-indigo-200 bg-indigo-50/35 p-2.5"
+                    data-testid="compare-recommended-panel"
+                  >
+                    <div className="mb-1.5 flex items-center justify-between text-xs font-bold text-indigo-950">
+                      <span>추천 결과 미리보기</span>
+                      <span className="text-[11px] font-normal text-indigo-700">
+                        {activeProposal.canApply ? "정돈된 미리보기" : "원본 배치 유지 중"}
+                      </span>
+                    </div>
+                    <div className="flex min-h-[200px] items-center justify-center overflow-auto rounded border border-indigo-200 bg-white p-2">
+                      {activeProposal.preview?.recommendedSvgDataUri ? (
+                        <img
+                          src={activeProposal.preview.recommendedSvgDataUri}
+                          alt="Recommended TikZ Preview"
+                          className={`${imgMaxHeightClass} w-auto object-contain transition-all`}
+                        />
+                      ) : (
+                        <span className="text-xs text-slate-400">추천 미리보기 없음</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2" data-testid="compare-single-tab-box">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCompareActiveTab("recommended")}
+                      data-testid="btn-compare-tab-recommended"
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-bold whitespace-nowrap ${
+                        compareActiveTab === "recommended"
+                          ? "border-indigo-600 bg-indigo-600 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      ✨ 추천 결과 보기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCompareActiveTab("original")}
+                      data-testid="btn-compare-tab-original"
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-bold whitespace-nowrap ${
+                        compareActiveTab === "original"
+                          ? "border-slate-800 bg-slate-800 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    >
+                      원본 그림 보기
+                    </button>
+                  </div>
+
+                  <div className="flex min-h-[220px] items-center justify-center overflow-auto rounded-lg border border-indigo-200 bg-white p-3">
+                    {compareActiveTab === "recommended" ? (
+                      activeProposal.preview?.recommendedSvgDataUri ? (
+                        <img
+                          src={activeProposal.preview.recommendedSvgDataUri}
+                          alt="Recommended TikZ Preview"
+                          className={`${imgMaxHeightClass} w-auto object-contain`}
+                        />
+                      ) : (
+                        <span className="text-xs text-slate-400">추천 미리보기 없음</span>
+                      )
+                    ) : activeProposal.preview?.originalSvgDataUri ? (
+                      <img
+                        src={activeProposal.preview.originalSvgDataUri}
+                        alt="Original TikZ Preview"
+                        className={`${imgMaxHeightClass} w-auto object-contain`}
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-400">원본 미리보기 없음</span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ③ 필요한 대응 관계만 선택 (해당 그림에서 감지된 경우에만 노출) */}
+            {showSimpleCorrespondenceSection && (
+              <div
+                className="rounded-xl border border-amber-300 bg-amber-50/45 p-3.5 space-y-3"
+                data-testid="simple-correspondence-section"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs font-bold text-slate-900">
+                    🔀 확인이 필요한 라벨 배치 선택 (기본값: 원본 배치 유지)
+                  </div>
+                  <span
+                    className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-900"
+                    data-testid="correspondence-candidate-disclaimer"
+                  >
+                    후보 배치는 기하·근접성 기반 추정 후보이며, 최종 판단은 그림을 보고 선택합니다.
+                  </span>
+                </div>
+
+                {/* Type 2: 추상 함수 라벨이 여러 개인 경우 */}
+                {showMaConfirmCard && maOpt && (
+                  <div
+                    className="rounded-lg border border-slate-200 bg-white p-3 space-y-2.5"
+                    data-testid="simple-multi-abstract-cards"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <span className="text-xs font-bold text-slate-900">
+                        📐 함수 이름 배치 선택 ({(maOpt.correspondenceRows || []).map((r) => r.label).join(", ") || "다중 추상 함수"})
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        카드를 눌러 위 미리보기에서 배치를 바로 비교하세요
+                      </span>
+                    </div>
+
+                    {maOpt.classificationCode === "type3-hold-only" && (
+                      <div
+                        className="rounded border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-900"
+                        data-testid="multi-abstract-type3-lock-banner"
+                      >
+                        🔒 곡선 간 거리가 너무 가까워 자동 배치가 잠겼습니다. 원본 배치를 유지합니다.
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                      {(
+                        [
+                          {
+                            mode: "hold" as const,
+                            testId: "btn-multi-abstract-hold",
+                            title: "원본 배치",
+                            badge: "기본 선택",
+                            desc: "원래 있던 함수 이름 위치를 그대로 유지합니다.",
+                            enabled: true,
+                            thumbUri: maOpt.variants?.hold?.preview?.recommendedSvgDataUri,
+                          },
+                          {
+                            mode: "recommend" as const,
+                            testId: "btn-multi-abstract-recommend",
+                            title: "추천 배치",
+                            badge: "후보 1",
+                            desc: "가까운 곡선에 맞춘 첫 번째 후보 배치입니다.",
+                            enabled: Boolean(maOpt.canRecommend),
+                            thumbUri: maOpt.variants?.recommend?.preview?.recommendedSvgDataUri,
+                          },
+                          {
+                            mode: "swap" as const,
+                            testId: "btn-multi-abstract-swap",
+                            title: "반대 배치",
+                            badge: "후보 2",
+                            desc: "두 함수 이름의 대응 곡선을 서로 바꾼 후보 배치입니다.",
+                            enabled: Boolean(maOpt.canSwap),
+                            thumbUri: maOpt.variants?.swap?.preview?.recommendedSvgDataUri,
+                          },
+                        ] as const
+                      ).map((card) => {
+                        const isSelected = effectiveMaAction === card.mode;
+                        return (
+                          <button
+                            key={card.mode}
+                            type="button"
+                            disabled={!card.enabled || isRecomputing}
+                            onClick={() => handleSelectMaAction(card.mode)}
+                            data-testid={card.testId}
+                            className={`flex flex-col justify-between rounded-xl border p-2.5 text-left transition ${
+                              !card.enabled
+                                ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                                : isSelected
+                                ? "border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-600/20 text-slate-900"
+                                : "border-slate-200 bg-white hover:border-indigo-300 text-slate-800"
+                            }`}
+                          >
+                            <div className="w-full space-y-1.5">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-bold">{card.title}</span>
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                    isSelected
+                                      ? "bg-indigo-600 text-white"
+                                      : "bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {card.badge}
+                                </span>
+                              </div>
+                              {card.thumbUri && (
+                                <div className="flex h-24 items-center justify-center overflow-hidden rounded border border-slate-200 bg-white p-1">
+                                  <img
+                                    src={card.thumbUri}
+                                    alt={card.title}
+                                    className="max-h-full w-auto object-contain"
+                                  />
+                                </div>
+                              )}
+                              <p className="text-[11px] leading-snug text-slate-600">{card.desc}</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* D-3: 직선 이름(l, m)이 여러 개인 경우 */}
+                {showLnConfirmCard && lnOpt && (
+                  <div
+                    className="rounded-lg border border-slate-200 bg-white p-3 space-y-2.5"
+                    data-testid="simple-line-name-cards"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <span className="text-xs font-bold text-slate-900">
+                        📏 직선 이름(l, m) 배치 선택
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        함수 이름 선택과 독립적으로 조합할 수 있습니다
+                      </span>
+                    </div>
+
+                    {lnOpt.d3SubType === "D3-3" && (
+                      <div
+                        className="rounded border border-rose-300 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-900"
+                        data-testid="line-name-d3-3-lock-banner"
+                      >
+                        🔒 직선이 3개 이상이거나 모호하여 원본 배치를 안전하게 유지합니다.
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                      {(
+                        [
+                          {
+                            mode: "hold" as const,
+                            testId: "btn-line-name-hold",
+                            title: "원본 배치",
+                            badge: "기본 선택",
+                            desc: "원래 있던 직선 이름(l, m) 위치를 그대로 유지합니다.",
+                            enabled: true,
+                            thumbUri: lnOpt.variants?.hold?.preview?.recommendedSvgDataUri,
+                          },
+                          {
+                            mode: "recommend" as const,
+                            testId: "btn-line-name-recommend",
+                            title: "추천 배치",
+                            badge: "후보 1",
+                            desc: "각 직선의 끝점 옆 열린 공간에 맞춘 첫 번째 후보입니다.",
+                            enabled: Boolean(lnOpt.canRecommend),
+                            thumbUri: lnOpt.variants?.recommend?.preview?.recommendedSvgDataUri,
+                          },
+                          {
+                            mode: "swap" as const,
+                            testId: "btn-line-name-swap",
+                            title: "반대 배치",
+                            badge: "후보 2",
+                            desc: "l과 m의 대응 직선을 서로 바꾼 두 번째 후보입니다.",
+                            enabled: Boolean(lnOpt.canSwap),
+                            thumbUri: lnOpt.variants?.swap?.preview?.recommendedSvgDataUri,
+                          },
+                        ] as const
+                      ).map((card) => {
+                        const isSelected = effectiveLnAction === card.mode;
+                        return (
+                          <button
+                            key={card.mode}
+                            type="button"
+                            disabled={!card.enabled || isRecomputing}
+                            onClick={() => handleSelectLnAction(card.mode)}
+                            data-testid={card.testId}
+                            className={`flex flex-col justify-between rounded-xl border p-2.5 text-left transition ${
+                              !card.enabled
+                                ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                                : isSelected
+                                ? "border-sky-600 bg-sky-50/70 ring-2 ring-sky-600/20 text-slate-900"
+                                : "border-slate-200 bg-white hover:border-sky-300 text-slate-800"
+                            }`}
+                          >
+                            <div className="w-full space-y-1.5">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-bold">{card.title}</span>
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                                    isSelected
+                                      ? "bg-sky-600 text-white"
+                                      : "bg-slate-100 text-slate-600"
+                                  }`}
+                                >
+                                  {card.badge}
+                                </span>
+                              </div>
+                              {card.thumbUri && (
+                                <div className="flex h-24 items-center justify-center overflow-hidden rounded border border-slate-200 bg-white p-1">
+                                  <img
+                                    src={card.thumbUri}
+                                    alt={card.title}
+                                    className="max-h-full w-auto object-contain"
+                                  />
+                                </div>
+                              )}
+                              <p className="text-[11px] leading-snug text-slate-600">{card.desc}</p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 본문: 상세 검수 모드 (C) — 기존 개발자용 진단·수치·코드 비교 100% 보존 */}
+        {activeUiMode === "C" && (
+          <div className="flex-1 overflow-y-auto p-5 space-y-4" data-testid="smart-label-mode-c-body">
           {/* 상태 배너 */}
           <div
             className={`rounded-lg border p-3.5 text-xs ${statusTone}`}
@@ -1831,42 +2722,50 @@ export function SmartLabelBetaModal({
               </div>
             </div>
           )}
-        </div>
+          </div>
+        )}
 
-        {/* 푸터 액션 버튼 */}
-        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-5 py-3">
+        {/* 하단 고정(Sticky) 푸터 액션 버튼 */}
+        <div
+          className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3"
+          data-testid="smart-label-modal-footer"
+        >
           <span className="text-[11px] text-slate-500">
-            승인 시 직전 원본 코드가 별도 백업되며, 1클릭으로 언제든 복원하고 조이스틱으로 미세 조정할 수 있습니다.
+            적용 시 직전 원본 코드가 자동 백업되며, 언제든 [원본 복원]으로 되돌리고 조이스틱으로 미세 조정할 수 있습니다.
           </span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={onClose}
               data-testid="btn-cancel-smart-label"
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 whitespace-nowrap"
             >
-              취소 (원본 유지)
+              {activeUiMode === "C" ? "취소 (원본 유지)" : "그대로 두기"}
             </button>
             <button
               type="button"
               disabled={!applicability.allowed || isRecomputing}
               onClick={onApproveApply}
               data-testid="btn-approve-smart-label"
-              className={`rounded-lg px-4 py-2 text-xs font-bold text-white transition ${
+              className={`rounded-lg px-4 py-2 text-xs font-bold text-white whitespace-nowrap transition ${
                 applicability.allowed && !isRecomputing
                   ? "bg-indigo-600 hover:bg-indigo-700 shadow-sm"
                   : "cursor-not-allowed bg-slate-300 text-slate-500"
               }`}
             >
-              {maOpt?.detected
-                ? effectiveMaAction === "recommend"
-                  ? "✅ ① 추천 매칭(Recommend) 위치 승인 및 적용"
-                  : effectiveMaAction === "swap"
-                  ? "✅ ② 대응 교환(Swap) 위치 승인 및 적용"
-                  : applicability.allowed
-                  ? "✅ 추상 함수 원본 유지(Hold) + 일반 정렬 승인 및 적용"
-                  : "🔒 원본 유지(Hold) 기본 선택됨 (적용할 변경 없음)"
-                : "✅ 추천 위치 승인 및 적용"}
+              {activeUiMode === "C"
+                ? maOpt?.detected
+                  ? effectiveMaAction === "recommend"
+                    ? "✅ ① 추천 매칭(Recommend) 위치 승인 및 적용"
+                    : effectiveMaAction === "swap"
+                    ? "✅ ② 대응 교환(Swap) 위치 승인 및 적용"
+                    : applicability.allowed
+                    ? "✅ 추상 함수 원본 유지(Hold) + 일반 정렬 승인 및 적용"
+                    : "🔒 원본 유지(Hold) 기본 선택됨 (적용할 변경 없음)"
+                  : "✅ 추천 위치 승인 및 적용"
+                : applicability.allowed
+                ? "✨ 선택한 결과 적용"
+                : "적용할 변경 없음 (원본 유지)"}
             </button>
           </div>
         </div>

@@ -22,7 +22,7 @@ import { logUserAction } from "@/actions/logger";
 import guide1 from "@/assets/guide1.png";
 import guide2 from "@/assets/guide2.png";
 import guide3 from "@/assets/guide3.png";
-import { SmartLabelBetaModal } from "@/components/SmartLabelBetaModal";
+import { SmartLabelBetaModal, type ModeBBatchedOptions } from "@/components/SmartLabelBetaModal";
 import {
   DEVELOPER_BETA_EMAIL,
   SMART_LABEL_BACKUP_STORAGE_KEY,
@@ -30,9 +30,14 @@ import {
   shouldShowSmartLabelBetaUI,
   loadRememberedEngineVersion,
   saveRememberedEngineVersion,
+  loadRememberedSmartLabelUiMode,
+  saveRememberedSmartLabelUiMode,
+  buildModeASafePresetOptions,
+  isStaleSmartLabelResponse,
   applyApprovedProposal,
   restoreOriginalFromBackup,
   type SmartLabelBackupSnapshot,
+  type SmartLabelUiMode,
 } from "@/lib/smart-label-beta/client-workflow";
 import type {
   MultiAbstractActionMode,
@@ -390,6 +395,32 @@ export default function Home() {
   const [smartLabelProposal, setSmartLabelProposal] = useState<SmartLabelBetaResponse | null>(null);
   const [smartLabelBackup, setSmartLabelBackup] = useState<SmartLabelBackupSnapshot | null>(null);
   const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false);
+  const [uiModeBeta, setUiModeBeta] = useState<SmartLabelUiMode>("A");
+  const smartLabelRequestSeqRef = useRef(0);
+  const rawInputLatestRef = useRef(rawInput);
+
+  useEffect(() => {
+    rawInputLatestRef.current = rawInput;
+  }, [rawInput]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const rememberedMode = loadRememberedSmartLabelUiMode(
+      window.localStorage,
+      session?.user?.email
+    );
+    setUiModeBeta(rememberedMode);
+  }, [status, session?.user?.email]);
+
+  const handleChangeUiModeBeta = useCallback(
+    (nextMode: SmartLabelUiMode) => {
+      setUiModeBeta(nextMode);
+      if (typeof window !== "undefined") {
+        saveRememberedSmartLabelUiMode(window.localStorage, nextMode, session?.user?.email);
+      }
+    },
+    [session?.user?.email]
+  );
 
   // 마운트 시 독립 백업 복원
   useEffect(() => {
@@ -554,6 +585,7 @@ export default function Home() {
         : enableLineNameOverlapFixBeta;
     const useEnableLineNameOverlapFix = useEngineVersion === "v0.2.2-beta" ? rawEnableLineNameFix : false;
     const snapshotCode = rawInput;
+    const reqSeq = ++smartLabelRequestSeqRef.current;
     setIsSmartLabelLoading(true);
     try {
       const res = await fetch("/api/smart-label/recommend", {
@@ -573,6 +605,16 @@ export default function Home() {
         cache: "no-store",
       });
       const data = await res.json().catch(() => null);
+      if (
+        isStaleSmartLabelResponse({
+          requestSeq: reqSeq,
+          latestRequestSeq: smartLabelRequestSeqRef.current,
+          requestRawInput: snapshotCode,
+          currentRawInput: rawInputLatestRef.current,
+        })
+      ) {
+        return;
+      }
       if (!data) {
         toast.error("스마트 라벨 응답을 해석할 수 없습니다. 원본 코드는 안전하게 유지됩니다.");
         return;
@@ -582,13 +624,75 @@ export default function Home() {
         return;
       }
       setMultiAbstractActionBeta("hold");
-      setMultiAbstractActionBeta("hold");
       setLineNameActionBeta("hold");
       setSmartLabelProposal(data as SmartLabelBetaResponse);
     } catch {
       toast.error("스마트 라벨 서버 통신 중 오류가 발생했습니다. 기존 코드는 안전하게 유지됩니다.");
     } finally {
-      setIsSmartLabelLoading(false);
+      if (reqSeq === smartLabelRequestSeqRef.current) {
+        setIsSmartLabelLoading(false);
+      }
+    }
+  };
+
+  const handleRunModeASafePreset = (overrideApplyAxis?: boolean) => {
+    const nextApplyAxis =
+      typeof overrideApplyAxis === "boolean" ? overrideApplyAxis : applyAxisBeta;
+    const preset = buildModeASafePresetOptions({
+      applyAxis: nextApplyAxis,
+      unit3BServerEnabled,
+    });
+    setEngineVersionBeta(preset.engineVersion);
+    setApplyAxisBeta(preset.applyAxis);
+    setApplySafeShrinkBeta(preset.applySafeShrink);
+    setApplyDomainExtensionBeta(preset.applyDomainExtension);
+    setEnableUnit3BBeta(preset.enableUnit3B);
+    setEnablePointLabelOverlapFixBeta(preset.enablePointLabelOverlapFix);
+    setEnableAxisLetterOverlapFixBeta(preset.enableAxisLetterOverlapFix);
+    setEnableLineNameOverlapFixBeta(preset.enableLineNameOverlapFix);
+    handleRunSmartLabelBeta(
+      preset.applyAxis,
+      preset.engineVersion,
+      preset.enableUnit3B,
+      preset.applyDomainExtension,
+      preset.enablePointLabelOverlapFix,
+      preset.applySafeShrink,
+      preset.enableAxisLetterOverlapFix,
+      preset.enableLineNameOverlapFix
+    );
+  };
+
+  const handleApplyModeBOptions = (opts: ModeBBatchedOptions) => {
+    const activeEngine: SmartLabelEngineVersion = smartLabelAccess.canSelectEngine
+      ? engineVersionBeta === "v0.2.1"
+        ? "v0.2.2-beta"
+        : engineVersionBeta
+      : "v0.2.2-beta";
+    setEngineVersionBeta(activeEngine);
+    setApplyAxisBeta(opts.applyAxis);
+    setApplySafeShrinkBeta(opts.applySafeShrink);
+    setApplyDomainExtensionBeta(opts.applyDomainExtension);
+    setEnableUnit3BBeta(opts.enableUnit3B);
+    setEnablePointLabelOverlapFixBeta(opts.enablePointLabelOverlapFix);
+    setEnableAxisLetterOverlapFixBeta(opts.enableAxisLetterOverlapFix);
+    setEnableLineNameOverlapFixBeta(opts.enableLineNameOverlapFix);
+    handleRunSmartLabelBeta(
+      opts.applyAxis,
+      activeEngine,
+      opts.enableUnit3B,
+      opts.applyDomainExtension,
+      opts.enablePointLabelOverlapFix,
+      opts.applySafeShrink,
+      opts.enableAxisLetterOverlapFix,
+      opts.enableLineNameOverlapFix
+    );
+  };
+
+  const handleClickMainSmartLabelButton = () => {
+    if (uiModeBeta === "A") {
+      handleRunModeASafePreset(applyAxisBeta);
+    } else {
+      handleRunSmartLabelBeta();
     }
   };
 
@@ -1968,124 +2072,34 @@ const getProcessedInput = (code: string) => {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {/* 개발자 전용 스마트 라벨 자동 정렬 (Beta) & 1클릭 원본 복원 버튼 */}
+              {/* 스마트 그림 정리 & 1클릭 원본 복원 버튼 (개별 옵션 체크박스는 모달 내부 A/B/C 모드로 통합) */}
               {showSmartLabelBeta && (
                 <>
                   {smartLabelBackup && (
                     <button
                       id="btn-smart-label-restore"
+                      data-testid="btn-smart-label-restore"
                       onClick={() => handleRestoreSmartLabel(false)}
-                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150
+                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold tracking-tight whitespace-nowrap transition-all duration-150
                         bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/50 hover:border-amber-500/70
                         text-amber-300 hover:text-amber-200 shadow-sm shadow-amber-900/20"
-                      title="스마트 라벨 적용 이전의 원본 TikZ 코드로 복원합니다"
+                      title="스마트 그림 정리 적용 이전의 원본 TikZ 코드로 복원합니다"
                     >
                       ↩ 원본 복원
                     </button>
                   )}
-                  {smartLabelAccess.canSelectEngine ? (
-                    <select
-                      id="sel-smart-label-engine"
-                      value={engineVersionBeta}
-                      onChange={(e) =>
-                        handleChangeEngineVersionBeta(
-                          e.target.value === "v0.2.2-beta" ? "v0.2.2-beta" : "v0.2.1"
-                        )
-                      }
-                      disabled={isSmartLabelLoading}
-                      className="px-2 py-1 rounded-md text-[10px] font-bold tracking-tight cursor-pointer bg-zinc-900/90 hover:bg-zinc-800/90 border border-violet-800/60 text-violet-200 outline-none"
-                      title="스마트 라벨 자동 정렬 엔진 버전 선택 (기본: 기존 v0.2.1 / 개선: v0.2.2 Beta interim-v1)"
-                    >
-                      <option value="v0.2.1" className="bg-zinc-900 text-zinc-200">
-                        기존 v0.2.1 (기본)
-                      </option>
-                      <option value="v0.2.2-beta" className="bg-zinc-900 text-emerald-300">
-                        개선 v0.2.2 Beta (interim-v1)
-                      </option>
-                    </select>
-                  ) : (
-                    <span
-                      id="badge-smart-label-engine-pilot"
-                      className="px-2 py-1 rounded-md text-[10px] font-bold tracking-tight bg-zinc-900/90 border border-emerald-800/60 text-emerald-300"
-                      title="파일럿 베타에서는 검증된 v0.2.2 Beta 엔진이 기본 적용됩니다"
-                    >
-                      v0.2.2 Beta
-                    </span>
-                  )}
-                  {(engineVersionBeta === "v0.2.2-beta" || !smartLabelAccess.canSelectEngine) && (
-                    <label
-                      id="label-smart-label-unit3b"
-                      className={`flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight select-none border ${
-                        unit3BServerEnabled
-                          ? "cursor-pointer bg-zinc-900/80 hover:bg-zinc-800/80 border-emerald-800/60 text-emerald-200"
-                          : "cursor-not-allowed bg-zinc-900/50 border-zinc-700/60 text-zinc-500"
-                      }`}
-                      title={
-                        unit3BServerEnabled
-                          ? "체크 시 축 눈금 숫자(2, π, 6 등)와 선의 실제 글자 침범도 함께 자동 조정합니다 (파일럿 기본 OFF)"
-                          : unit3BDisabledReason || "서버 설정에 의해 Unit 3-B 눈금 자동 조정이 비활성화되어 있습니다"
-                      }
-                    >
-                      <input
-                        id="chk-smart-label-unit3b"
-                        type="checkbox"
-                        checked={unit3BServerEnabled ? enableUnit3BBeta : false}
-                        disabled={!unit3BServerEnabled || isSmartLabelLoading}
-                        onChange={(e) => {
-                          if (!unit3BServerEnabled) return;
-                          setEnableUnit3BBeta(e.target.checked);
-                        }}
-                        className="h-3 w-3 rounded accent-emerald-500 cursor-pointer disabled:cursor-not-allowed"
-                      />
-                      <span>
-                        {unit3BServerEnabled ? "Unit 3-B 눈금 조정" : "Unit 3-B 눈금 조정 (비활성)"}
-                      </span>
-                    </label>
-                  )}
-                  {(engineVersionBeta === "v0.2.2-beta" || !smartLabelAccess.canSelectEngine) && (
-                    <label
-                      id="label-smart-label-safe-shrink"
-                      className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight cursor-pointer select-none
-                        bg-zinc-900/80 hover:bg-zinc-800/80 border border-violet-700/60 text-violet-200"
-                      title="체크 시 8단계 안전 게이트와 양의 줄기 비례 하한을 통과한 방향의 불필요한 축 여백만 4방향 독립으로 안전하게 줄입니다 (기본값 OFF)"
-                    >
-                      <input
-                        id="chk-smart-label-safe-shrink"
-                        type="checkbox"
-                        checked={applySafeShrinkBeta}
-                        disabled={isSmartLabelLoading}
-                        onChange={(e) => setApplySafeShrinkBeta(e.target.checked)}
-                        className="h-3 w-3 rounded accent-violet-500 cursor-pointer"
-                      />
-                      <span>축 길이 안전하게 줄이기</span>
-                    </label>
-                  )}
-                  <label
-                    id="label-smart-label-apply-axis"
-                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold tracking-tight cursor-pointer select-none
-                      bg-zinc-900/80 hover:bg-zinc-800/80 border border-violet-800/50 text-violet-200"
-                    title="체크 시 함수식 라벨 정렬과 함께 필요한 경우 x축·y축 길이를 연장합니다 (기본값 OFF)"
-                  >
-                    <input
-                      id="chk-smart-label-apply-axis"
-                      type="checkbox"
-                      checked={applyAxisBeta}
-                      onChange={(e) => setApplyAxisBeta(e.target.checked)}
-                      className="h-3 w-3 rounded accent-violet-500 cursor-pointer"
-                    />
-                    <span>x축·y축 길이도 자동 조정하기</span>
-                  </label>
                   <button
                     id="btn-smart-label-beta"
-                    onClick={() => handleRunSmartLabelBeta()}
+                    data-testid="btn-smart-label-beta"
+                    onClick={handleClickMainSmartLabelButton}
                     disabled={isSmartLabelLoading}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight transition-all duration-150
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-bold tracking-tight whitespace-nowrap transition-all duration-150
                       bg-violet-950/70 hover:bg-violet-900/80 border border-violet-700/60 hover:border-violet-500/80
                       text-violet-200 hover:text-white shadow-sm shadow-violet-900/30 disabled:opacity-50 disabled:cursor-wait"
-                    title="함수식 라벨 추천 위치를 계산하고 비교 미리보기를 엽니다 (개발자 전용 Beta)"
+                    title="라벨 겹침을 자동으로 정돈하고 원본과 추천 결과를 비교합니다"
                   >
                     <Sparkles className={`w-3 h-3 text-violet-300 ${isSmartLabelLoading ? "animate-spin" : ""}`} />
-                    {isSmartLabelLoading ? "라벨 계산 중..." : "✨ 스마트 라벨 자동 정렬 (Beta)"}
+                    {isSmartLabelLoading ? "그림 정리 중..." : "✨ 스마트 그림 정리"}
                   </button>
                 </>
               )}
@@ -3620,6 +3634,10 @@ const getProcessedInput = (code: string) => {
           onChangeLineNameAction={setLineNameActionBeta}
           engineVersion={smartLabelAccess.canSelectEngine ? engineVersionBeta : "v0.2.2-beta"}
           isRecomputing={isSmartLabelLoading}
+          uiMode={uiModeBeta}
+          onChangeUiMode={handleChangeUiModeBeta}
+          onRunModeASafePreset={handleRunModeASafePreset}
+          onApplyModeBOptions={handleApplyModeBOptions}
           onToggleApplyAxisOption={(next) => {
             setApplyAxisBeta(next);
             handleRunSmartLabelBeta(

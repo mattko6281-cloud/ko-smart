@@ -1,8 +1,13 @@
 export const DEVELOPER_BETA_EMAIL: "mattko6281@gmail.com";
 export const SMART_LABEL_BACKUP_STORAGE_KEY: string;
 export const SMART_LABEL_ENGINE_STORAGE_KEY: string;
+export const SMART_LABEL_UI_MODE_STORAGE_PREFIX: string;
 export const DEFAULT_CLIENT_ENGINE_VERSION: "v0.2.1";
 export const SUPPORTED_CLIENT_ENGINE_VERSIONS: Array<"v0.2.1" | "v0.2.2-beta">;
+export const DEFAULT_SMART_LABEL_UI_MODE: "A";
+export const SUPPORTED_SMART_LABEL_UI_MODES: Array<"A" | "B" | "C">;
+
+export type SmartLabelUiMode = "A" | "B" | "C";
 
 export interface SmartLabelBackupSnapshot {
   originalCode: string;
@@ -99,3 +104,46 @@ export function saveRememberedEngineVersion(
   saved: boolean;
   engineVersion: "v0.2.1" | "v0.2.2-beta";
 };
+
+export function normalizeSmartLabelUiMode(val: any): SmartLabelUiMode;
+
+export function getSmartLabelUiModeStorageKey(sessionEmail?: string | null): string;
+
+export function loadRememberedSmartLabelUiMode(
+  storage: { getItem?: (key: string) => string | null } | null | undefined,
+  sessionEmail?: string | null
+): SmartLabelUiMode;
+
+export function saveRememberedSmartLabelUiMode(
+  storage: { setItem?: (key: string, value: string) => void } | null | undefined,
+  uiMode: any,
+  sessionEmail?: string | null
+): {
+  saved: boolean;
+  uiMode: SmartLabelUiMode;
+};
+
+export function buildModeASafePresetOptions(params?: {
+  applyAxis?: boolean;
+  unit3BServerEnabled?: boolean;
+}): {
+  engineVersion: "v0.2.2-beta";
+  applyAxis: boolean;
+  applySafeShrink: boolean;
+  applyDomainExtension: boolean;
+  enableUnit3B: boolean;
+  enablePointLabelOverlapFix: boolean;
+  enableAxisLetterOverlapFix: boolean;
+  enableLineNameOverlapFix: boolean;
+  multiAbstractAction: "hold";
+  lineNameAction: "hold";
+};
+
+export function collectProposalCandidateImageUris(proposal: any): string[];
+
+export function isStaleSmartLabelResponse(params: {
+  requestSeq: number;
+  latestRequestSeq: string | number;
+  requestRawInput: string;
+  currentRawInput: string;
+}): boolean;
